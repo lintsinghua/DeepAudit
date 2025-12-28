@@ -1290,7 +1290,7 @@ class CodeIndexer:
         # 批量嵌入（带进度回调和取消检查）
         embeddings = await self.embedding_service.embed_batch(
             texts,
-            batch_size=50,
+            batch_size=getattr(self.embedding_service, 'batch_size', 50), 
             progress_callback=embedding_progress_callback,
             cancel_check=cancel_check,
         )
