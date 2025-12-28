@@ -767,7 +767,8 @@ class EmbeddingService:
                         logger.warning(f"Progress callback error: {e}")
 
                 # 添加小延迟避免限流
-                await asyncio.sleep(0.1)
+                if self.provider not in ["ollama"]:    
+                    await asyncio.sleep(0.1)  # 本地不延时
 
         # 确保没有 None
         return [e if e is not None else [0.0] * self.dimension for e in embeddings]
