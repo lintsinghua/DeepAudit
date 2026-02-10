@@ -215,8 +215,11 @@ class LiteLLMAdapter(BaseLLMAdapter):
             "messages": messages,
             "temperature": request.temperature if request.temperature is not None else self.config.temperature,
             "max_tokens": request.max_tokens if request.max_tokens is not None else self.config.max_tokens,
-            "top_p": request.top_p if request.top_p is not None else self.config.top_p,
         }
+
+        # Claude 不允许同时传 temperature 和 top_p
+        if self.config.provider != LLMProvider.CLAUDE:
+            kwargs["top_p"] = request.top_p if request.top_p is not None else self.config.top_p
 
         # 设置 API Key
         if self.config.api_key and self.config.api_key != "ollama":
@@ -323,9 +326,12 @@ class LiteLLMAdapter(BaseLLMAdapter):
             "messages": messages,
             "temperature": request.temperature if request.temperature is not None else self.config.temperature,
             "max_tokens": request.max_tokens if request.max_tokens is not None else self.config.max_tokens,
-            "top_p": request.top_p if request.top_p is not None else self.config.top_p,
             "stream": True,  # 启用流式输出
         }
+
+        # Claude 不允许同时传 temperature 和 top_p
+        if self.config.provider != LLMProvider.CLAUDE:
+            kwargs["top_p"] = request.top_p if request.top_p is not None else self.config.top_p
 
         # 🔥 对于支持的模型，请求在流式输出中包含 usage 信息
         # OpenAI API 支持 stream_options

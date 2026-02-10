@@ -81,6 +81,7 @@ class StatsResponse(BaseModel):
     completed_tasks: int
     total_issues: int
     resolved_issues: int
+    avg_quality_score: float = 0.0
 
 @router.post("/", response_model=ProjectResponse)
 async def create_project(
@@ -198,8 +199,15 @@ async def get_stats(
     total_issues = len(issues) + len(agent_findings)
     resolved_issues = (
         len([i for i in issues if i.status == "resolved"]) +
-        len([f for f in agent_findings if f.status == "resolved"])
+        len([f for f in agent_findings if f.status in ("fixed", "wont_fix", "false_positive")])
     )
+
+    # 计算平均质量分（只统计已完成且有质量分的任务）
+    quality_scores = (
+        [t.quality_score for t in tasks if t.status == "completed" and t.quality_score and t.quality_score > 0] +
+        [t.quality_score for t in agent_tasks if t.status == AgentTaskStatus.COMPLETED and t.quality_score and t.quality_score > 0]
+    )
+    avg_quality_score = sum(quality_scores) / len(quality_scores) if quality_scores else 0.0
 
     return {
         "total_projects": len(projects),
@@ -208,6 +216,7 @@ async def get_stats(
         "completed_tasks": completed_tasks,
         "total_issues": total_issues,
         "resolved_issues": resolved_issues,
+        "avg_quality_score": avg_quality_score,
     }
 
 @router.get("/{id}", response_model=ProjectResponse)

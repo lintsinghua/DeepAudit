@@ -95,55 +95,56 @@
 </div>
 
 | CVE 编号 | 项目 | 项目热度 | 漏洞类型 | CVSS |
-|:---|:---|:---:|:---|:---:|
-| [CVE-2025-13789](https://nvd.nist.gov/vuln/detail/CVE-2025-13789) | Zentao PMS | [![Stars](https://img.shields.io/github/stars/easysoft/zentaopms?style=social)](https://github.com/easysoft/zentaopms/stargazers) | SSRF | 5.3 |
-| [CVE-2025-13787](https://nvd.nist.gov/vuln/detail/CVE-2025-13787) | Zentao PMS | [![Stars](https://img.shields.io/github/stars/easysoft/zentaopms?style=social)](https://github.com/easysoft/zentaopms/stargazers) | Privilege Escalation | 9.1 |
-| [CVE-2025-64428](https://nvd.nist.gov/vuln/detail/CVE-2025-64428) | Dataease | [![Stars](https://img.shields.io/github/stars/dataease/dataease?style=social)](https://github.com/dataease/dataease/stargazers) | JNDI Injection | 9.8 |
-| [CVE-2025-13246](https://nvd.nist.gov/vuln/detail/CVE-2025-13246) | Modulithshop | [![Stars](https://img.shields.io/github/stars/shsuishang/modulithshop?style=social)](https://github.com/shsuishang/modulithshop/stargazers) | SQL Injection | 6.3 |
-| [CVE-2025-64163](https://nvd.nist.gov/vuln/detail/CVE-2025-64163) | Dataease | [![Stars](https://img.shields.io/github/stars/dataease/dataease?style=social)](https://github.com/dataease/dataease/stargazers) | SSRF | 9.8 |
-| [CVE-2025-64164](https://nvd.nist.gov/vuln/detail/CVE-2025-64164) | Dataease | [![Stars](https://img.shields.io/github/stars/dataease/dataease?style=social)](https://github.com/dataease/dataease/stargazers) | JNDI Injection | 9.8 |
-| [CVE-2025-11581](https://nvd.nist.gov/vuln/detail/CVE-2025-11581) | PowerJob | [![Stars](https://img.shields.io/github/stars/PowerJob/PowerJob?style=social)](https://github.com/PowerJob/PowerJob/stargazers) | Privilege Escalation | 7.5 |
-| [CVE-2025-11580](https://nvd.nist.gov/vuln/detail/CVE-2025-11580) | PowerJob | [![Stars](https://img.shields.io/github/stars/PowerJob/PowerJob?style=social)](https://github.com/PowerJob/PowerJob/stargazers) | Privilege Escalation | 5.3 |
-| [CVE-2025-10771](https://nvd.nist.gov/vuln/detail/CVE-2025-10771) | Jimureport | [![Stars](https://img.shields.io/github/stars/jeecgboot/JimuReport?style=social)](https://github.com/jeecgboot/JimuReport/stargazers) | Deserialization | 9.8 |
-| [CVE-2025-10770](https://nvd.nist.gov/vuln/detail/CVE-2025-10770) | Jimureport | [![Stars](https://img.shields.io/github/stars/jeecgboot/JimuReport?style=social)](https://github.com/jeecgboot/JimuReport/stargazers) | Deserialization | 6.5 |
-| [CVE-2025-10769](https://nvd.nist.gov/vuln/detail/CVE-2025-10769) | H2o-3 | [![Stars](https://img.shields.io/github/stars/h2oai/h2o-3?style=social)](https://github.com/h2oai/h2o-3/stargazers) | Deserialization | 9.8 |
-| [CVE-2025-10768](https://nvd.nist.gov/vuln/detail/CVE-2025-10768) | H2o-3 | [![Stars](https://img.shields.io/github/stars/h2oai/h2o-3?style=social)](https://github.com/h2oai/h2o-3/stargazers) | Deserialization | 9.8 |
-| [CVE-2025-58045](https://nvd.nist.gov/vuln/detail/CVE-2025-58045) | Dataease | [![Stars](https://img.shields.io/github/stars/dataease/dataease?style=social)](https://github.com/dataease/dataease/stargazers) | JNDI Injection | 9.8 |
-| [CVE-2025-10423](https://nvd.nist.gov/vuln/detail/CVE-2025-10423) | Newbee-mall | [![Stars](https://img.shields.io/github/stars/newbee-ltd/newbee-mall?style=social)](https://github.com/newbee-ltd/newbee-mall/stargazers) | Guessable Captcha | 3.7 |
-| [CVE-2025-10422](https://nvd.nist.gov/vuln/detail/CVE-2025-10422) | Newbee-mall | [![Stars](https://img.shields.io/github/stars/newbee-ltd/newbee-mall?style=social)](https://github.com/newbee-ltd/newbee-mall/stargazers) | Privilege Escalation | 4.3 |
-| [CVE-2025-9835](https://nvd.nist.gov/vuln/detail/CVE-2025-9835) | Mall | [![Stars](https://img.shields.io/github/stars/macrozheng/mall?style=social)](https://github.com/macrozheng/mall/stargazers) | Privilege Escalation | 4.3 |
-| [CVE-2025-9737](https://nvd.nist.gov/vuln/detail/CVE-2025-9737) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4 |
-| [CVE-2025-9736](https://nvd.nist.gov/vuln/detail/CVE-2025-9736) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4 |
-| [CVE-2025-9735](https://nvd.nist.gov/vuln/detail/CVE-2025-9735) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4 |
-| [CVE-2025-9734](https://nvd.nist.gov/vuln/detail/CVE-2025-9734) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4 |
-| [CVE-2025-9719](https://nvd.nist.gov/vuln/detail/CVE-2025-9719) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4 |
-| [CVE-2025-9718](https://nvd.nist.gov/vuln/detail/CVE-2025-9718) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4 |
-| [CVE-2025-9717](https://nvd.nist.gov/vuln/detail/CVE-2025-9717) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4 |
-| [CVE-2025-9716](https://nvd.nist.gov/vuln/detail/CVE-2025-9716) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4 |
-| [CVE-2025-9715](https://nvd.nist.gov/vuln/detail/CVE-2025-9715) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4 |
-| [CVE-2025-9683](https://nvd.nist.gov/vuln/detail/CVE-2025-9683) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4 |
-| [CVE-2025-9682](https://nvd.nist.gov/vuln/detail/CVE-2025-9682) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4 |
-| [CVE-2025-9681](https://nvd.nist.gov/vuln/detail/CVE-2025-9681) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4 |
-| [CVE-2025-9680](https://nvd.nist.gov/vuln/detail/CVE-2025-9680) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4 |
-| [CVE-2025-9659](https://nvd.nist.gov/vuln/detail/CVE-2025-9659) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4 |
-| [CVE-2025-9658](https://nvd.nist.gov/vuln/detail/CVE-2025-9658) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4 |
-| [CVE-2025-9657](https://nvd.nist.gov/vuln/detail/CVE-2025-9657) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4 |
-| [CVE-2025-9655](https://nvd.nist.gov/vuln/detail/CVE-2025-9655) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4 |
-| [CVE-2025-9646](https://nvd.nist.gov/vuln/detail/CVE-2025-9646) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4 |
-| [CVE-2025-9602](https://nvd.nist.gov/vuln/detail/CVE-2025-9602) | RockOA | [![Stars](https://img.shields.io/github/stars/rainrocka/xinhu?style=social)](https://github.com/rainrocka/xinhu/stargazers) | Database Backdoor | 6.5 |
-| [CVE-2025-9514](https://nvd.nist.gov/vuln/detail/CVE-2025-9514) | Mall | [![Stars](https://img.shields.io/github/stars/macrozheng/mall?style=social)](https://github.com/macrozheng/mall/stargazers) | Privilege Escalation | 3.7 |
-| [CVE-2025-9264](https://nvd.nist.gov/vuln/detail/CVE-2025-9264) | Xxl-job | [![Stars](https://img.shields.io/github/stars/xuxueli/xxl-job?style=social)](https://github.com/xuxueli/xxl-job/stargazers) | Privilege Escalation | 5.4 |
-| [CVE-2025-9263](https://nvd.nist.gov/vuln/detail/CVE-2025-9263) | Xxl-job | [![Stars](https://img.shields.io/github/stars/xuxueli/xxl-job?style=social)](https://github.com/xuxueli/xxl-job/stargazers) | Privilege Escalation | 4.3 |
-| [CVE-2025-9241](https://nvd.nist.gov/vuln/detail/CVE-2025-9241) | Eladmin | [![Stars](https://img.shields.io/github/stars/elunez/eladmin?style=social)](https://github.com/elunez/eladmin/stargazers) | CSV/XLSX Injection | 7.5 |
-| [CVE-2025-9240](https://nvd.nist.gov/vuln/detail/CVE-2025-9240) | Eladmin | [![Stars](https://img.shields.io/github/stars/elunez/eladmin?style=social)](https://github.com/elunez/eladmin/stargazers) | Sensitive Information Disclosure | 4.3 |
-| [CVE-2025-9239](https://nvd.nist.gov/vuln/detail/CVE-2025-9239) | Eladmin | [![Stars](https://img.shields.io/github/stars/elunez/eladmin?style=social)](https://github.com/elunez/eladmin/stargazers) | Hardcoded Credentials | 3.7 |
-| [CVE-2025-8974](https://nvd.nist.gov/vuln/detail/CVE-2025-8974) | Litemall | [![Stars](https://img.shields.io/github/stars/linlinjava/litemall?style=social)](https://github.com/linlinjava/litemall/stargazers) | Hardcoded Credentials | 9.8 |
-| [CVE-2025-8852](https://nvd.nist.gov/vuln/detail/CVE-2025-8852) | Wukong CRM | [![Stars](https://img.shields.io/github/stars/WuKongOpenSource/WukongCRM-11.0-JAVA?style=social)](https://github.com/WuKongOpenSource/WukongCRM-11.0-JAVA/stargazers) | Sensitive Information Disclosure | 4.3 |
-| [CVE-2025-8840](https://nvd.nist.gov/vuln/detail/CVE-2025-8840) | Jsherp | [![Stars](https://img.shields.io/github/stars/jishenghua/jshERP?style=social)](https://github.com/jishenghua/jshERP/stargazers) | Privilege Escalation | 5.4 |
-| [CVE-2025-8839](https://nvd.nist.gov/vuln/detail/CVE-2025-8839) | Jsherp | [![Stars](https://img.shields.io/github/stars/jishenghua/jshERP?style=social)](https://github.com/jishenghua/jshERP/stargazers) | Privilege Escalation | 8.8 |
-| [CVE-2025-8764](https://nvd.nist.gov/vuln/detail/CVE-2025-8764) | Litemall | [![Stars](https://img.shields.io/github/stars/linlinjava/litemall?style=social)](https://github.com/linlinjava/litemall/stargazers) | XSS | 5.4 |
-| [CVE-2025-8753](https://nvd.nist.gov/vuln/detail/CVE-2025-8753) | Litemall | [![Stars](https://img.shields.io/github/stars/linlinjava/litemall?style=social)](https://github.com/linlinjava/litemall/stargazers) | Arbitrary File Deletion | 5.4 |
-| [CVE-2025-8708](https://nvd.nist.gov/vuln/detail/CVE-2025-8708) | White-Jotter | [![Stars](https://img.shields.io/github/stars/Antabot/White-Jotter?style=social)](https://github.com/Antabot/White-Jotter/stargazers) | Deserialization | 7.5 |
+|:---|:---|:---:|:---|:----:|
+| [CVE-2026-1884](https://nvd.nist.gov/vuln/detail/cve-2026-1884) | Zentao PMS | [![Stars](https://img.shields.io/github/stars/easysoft/zentaopms?style=social)](https://github.com/easysoft/zentaopms/stargazers) | SSRF | 5.1  |
+| [CVE-2025-13789](https://nvd.nist.gov/vuln/detail/CVE-2025-13789) | Zentao PMS | [![Stars](https://img.shields.io/github/stars/easysoft/zentaopms?style=social)](https://github.com/easysoft/zentaopms/stargazers) | SSRF | 5.3  |
+| [CVE-2025-13787](https://nvd.nist.gov/vuln/detail/CVE-2025-13787) | Zentao PMS | [![Stars](https://img.shields.io/github/stars/easysoft/zentaopms?style=social)](https://github.com/easysoft/zentaopms/stargazers) | Privilege Escalation | 9.1  |
+| [CVE-2025-64428](https://nvd.nist.gov/vuln/detail/CVE-2025-64428) | Dataease | [![Stars](https://img.shields.io/github/stars/dataease/dataease?style=social)](https://github.com/dataease/dataease/stargazers) | JNDI Injection | 9.8  |
+| [CVE-2025-13246](https://nvd.nist.gov/vuln/detail/CVE-2025-13246) | Modulithshop | [![Stars](https://img.shields.io/github/stars/shsuishang/modulithshop?style=social)](https://github.com/shsuishang/modulithshop/stargazers) | SQL Injection | 6.3  |
+| [CVE-2025-64163](https://nvd.nist.gov/vuln/detail/CVE-2025-64163) | Dataease | [![Stars](https://img.shields.io/github/stars/dataease/dataease?style=social)](https://github.com/dataease/dataease/stargazers) | SSRF | 9.8  |
+| [CVE-2025-64164](https://nvd.nist.gov/vuln/detail/CVE-2025-64164) | Dataease | [![Stars](https://img.shields.io/github/stars/dataease/dataease?style=social)](https://github.com/dataease/dataease/stargazers) | JNDI Injection | 9.8  |
+| [CVE-2025-11581](https://nvd.nist.gov/vuln/detail/CVE-2025-11581) | PowerJob | [![Stars](https://img.shields.io/github/stars/PowerJob/PowerJob?style=social)](https://github.com/PowerJob/PowerJob/stargazers) | Privilege Escalation | 7.5  |
+| [CVE-2025-11580](https://nvd.nist.gov/vuln/detail/CVE-2025-11580) | PowerJob | [![Stars](https://img.shields.io/github/stars/PowerJob/PowerJob?style=social)](https://github.com/PowerJob/PowerJob/stargazers) | Privilege Escalation | 5.3  |
+| [CVE-2025-10771](https://nvd.nist.gov/vuln/detail/CVE-2025-10771) | Jimureport | [![Stars](https://img.shields.io/github/stars/jeecgboot/JimuReport?style=social)](https://github.com/jeecgboot/JimuReport/stargazers) | Deserialization | 9.8  |
+| [CVE-2025-10770](https://nvd.nist.gov/vuln/detail/CVE-2025-10770) | Jimureport | [![Stars](https://img.shields.io/github/stars/jeecgboot/JimuReport?style=social)](https://github.com/jeecgboot/JimuReport/stargazers) | Deserialization | 6.5  |
+| [CVE-2025-10769](https://nvd.nist.gov/vuln/detail/CVE-2025-10769) | H2o-3 | [![Stars](https://img.shields.io/github/stars/h2oai/h2o-3?style=social)](https://github.com/h2oai/h2o-3/stargazers) | Deserialization | 9.8  |
+| [CVE-2025-10768](https://nvd.nist.gov/vuln/detail/CVE-2025-10768) | H2o-3 | [![Stars](https://img.shields.io/github/stars/h2oai/h2o-3?style=social)](https://github.com/h2oai/h2o-3/stargazers) | Deserialization | 9.8  |
+| [CVE-2025-58045](https://nvd.nist.gov/vuln/detail/CVE-2025-58045) | Dataease | [![Stars](https://img.shields.io/github/stars/dataease/dataease?style=social)](https://github.com/dataease/dataease/stargazers) | JNDI Injection | 9.8  |
+| [CVE-2025-10423](https://nvd.nist.gov/vuln/detail/CVE-2025-10423) | Newbee-mall | [![Stars](https://img.shields.io/github/stars/newbee-ltd/newbee-mall?style=social)](https://github.com/newbee-ltd/newbee-mall/stargazers) | Guessable Captcha | 3.7  |
+| [CVE-2025-10422](https://nvd.nist.gov/vuln/detail/CVE-2025-10422) | Newbee-mall | [![Stars](https://img.shields.io/github/stars/newbee-ltd/newbee-mall?style=social)](https://github.com/newbee-ltd/newbee-mall/stargazers) | Privilege Escalation | 4.3  |
+| [CVE-2025-9835](https://nvd.nist.gov/vuln/detail/CVE-2025-9835) | Mall | [![Stars](https://img.shields.io/github/stars/macrozheng/mall?style=social)](https://github.com/macrozheng/mall/stargazers) | Privilege Escalation | 4.3  |
+| [CVE-2025-9737](https://nvd.nist.gov/vuln/detail/CVE-2025-9737) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4  |
+| [CVE-2025-9736](https://nvd.nist.gov/vuln/detail/CVE-2025-9736) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4  |
+| [CVE-2025-9735](https://nvd.nist.gov/vuln/detail/CVE-2025-9735) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4  |
+| [CVE-2025-9734](https://nvd.nist.gov/vuln/detail/CVE-2025-9734) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4  |
+| [CVE-2025-9719](https://nvd.nist.gov/vuln/detail/CVE-2025-9719) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4  |
+| [CVE-2025-9718](https://nvd.nist.gov/vuln/detail/CVE-2025-9718) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4  |
+| [CVE-2025-9717](https://nvd.nist.gov/vuln/detail/CVE-2025-9717) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4  |
+| [CVE-2025-9716](https://nvd.nist.gov/vuln/detail/CVE-2025-9716) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4  |
+| [CVE-2025-9715](https://nvd.nist.gov/vuln/detail/CVE-2025-9715) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4  |
+| [CVE-2025-9683](https://nvd.nist.gov/vuln/detail/CVE-2025-9683) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4  |
+| [CVE-2025-9682](https://nvd.nist.gov/vuln/detail/CVE-2025-9682) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4  |
+| [CVE-2025-9681](https://nvd.nist.gov/vuln/detail/CVE-2025-9681) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4  |
+| [CVE-2025-9680](https://nvd.nist.gov/vuln/detail/CVE-2025-9680) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4  |
+| [CVE-2025-9659](https://nvd.nist.gov/vuln/detail/CVE-2025-9659) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4  |
+| [CVE-2025-9658](https://nvd.nist.gov/vuln/detail/CVE-2025-9658) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4  |
+| [CVE-2025-9657](https://nvd.nist.gov/vuln/detail/CVE-2025-9657) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4  |
+| [CVE-2025-9655](https://nvd.nist.gov/vuln/detail/CVE-2025-9655) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4  |
+| [CVE-2025-9646](https://nvd.nist.gov/vuln/detail/CVE-2025-9646) | O2oa | [![Stars](https://img.shields.io/github/stars/o2oa/o2oa?style=social)](https://github.com/o2oa/o2oa/stargazers) | XSS | 5.4  |
+| [CVE-2025-9602](https://nvd.nist.gov/vuln/detail/CVE-2025-9602) | RockOA | [![Stars](https://img.shields.io/github/stars/rainrocka/xinhu?style=social)](https://github.com/rainrocka/xinhu/stargazers) | Database Backdoor | 6.5  |
+| [CVE-2025-9514](https://nvd.nist.gov/vuln/detail/CVE-2025-9514) | Mall | [![Stars](https://img.shields.io/github/stars/macrozheng/mall?style=social)](https://github.com/macrozheng/mall/stargazers) | Privilege Escalation | 3.7  |
+| [CVE-2025-9264](https://nvd.nist.gov/vuln/detail/CVE-2025-9264) | Xxl-job | [![Stars](https://img.shields.io/github/stars/xuxueli/xxl-job?style=social)](https://github.com/xuxueli/xxl-job/stargazers) | Privilege Escalation | 5.4  |
+| [CVE-2025-9263](https://nvd.nist.gov/vuln/detail/CVE-2025-9263) | Xxl-job | [![Stars](https://img.shields.io/github/stars/xuxueli/xxl-job?style=social)](https://github.com/xuxueli/xxl-job/stargazers) | Privilege Escalation | 4.3  |
+| [CVE-2025-9241](https://nvd.nist.gov/vuln/detail/CVE-2025-9241) | Eladmin | [![Stars](https://img.shields.io/github/stars/elunez/eladmin?style=social)](https://github.com/elunez/eladmin/stargazers) | CSV/XLSX Injection | 7.5  |
+| [CVE-2025-9240](https://nvd.nist.gov/vuln/detail/CVE-2025-9240) | Eladmin | [![Stars](https://img.shields.io/github/stars/elunez/eladmin?style=social)](https://github.com/elunez/eladmin/stargazers) | Sensitive Information Disclosure | 4.3  |
+| [CVE-2025-9239](https://nvd.nist.gov/vuln/detail/CVE-2025-9239) | Eladmin | [![Stars](https://img.shields.io/github/stars/elunez/eladmin?style=social)](https://github.com/elunez/eladmin/stargazers) | Hardcoded Credentials | 3.7  |
+| [CVE-2025-8974](https://nvd.nist.gov/vuln/detail/CVE-2025-8974) | Litemall | [![Stars](https://img.shields.io/github/stars/linlinjava/litemall?style=social)](https://github.com/linlinjava/litemall/stargazers) | Hardcoded Credentials | 9.8  |
+| [CVE-2025-8852](https://nvd.nist.gov/vuln/detail/CVE-2025-8852) | Wukong CRM | [![Stars](https://img.shields.io/github/stars/WuKongOpenSource/WukongCRM-11.0-JAVA?style=social)](https://github.com/WuKongOpenSource/WukongCRM-11.0-JAVA/stargazers) | Sensitive Information Disclosure | 4.3  |
+| [CVE-2025-8840](https://nvd.nist.gov/vuln/detail/CVE-2025-8840) | Jsherp | [![Stars](https://img.shields.io/github/stars/jishenghua/jshERP?style=social)](https://github.com/jishenghua/jshERP/stargazers) | Privilege Escalation | 5.4  |
+| [CVE-2025-8839](https://nvd.nist.gov/vuln/detail/CVE-2025-8839) | Jsherp | [![Stars](https://img.shields.io/github/stars/jishenghua/jshERP?style=social)](https://github.com/jishenghua/jshERP/stargazers) | Privilege Escalation | 8.8  |
+| [CVE-2025-8764](https://nvd.nist.gov/vuln/detail/CVE-2025-8764) | Litemall | [![Stars](https://img.shields.io/github/stars/linlinjava/litemall?style=social)](https://github.com/linlinjava/litemall/stargazers) | XSS | 5.4  |
+| [CVE-2025-8753](https://nvd.nist.gov/vuln/detail/CVE-2025-8753) | Litemall | [![Stars](https://img.shields.io/github/stars/linlinjava/litemall?style=social)](https://github.com/linlinjava/litemall/stargazers) | Arbitrary File Deletion | 5.4  |
+| [CVE-2025-8708](https://nvd.nist.gov/vuln/detail/CVE-2025-8708) | White-Jotter | [![Stars](https://img.shields.io/github/stars/Antabot/White-Jotter?style=social)](https://github.com/Antabot/White-Jotter/stargazers) | Deserialization | 7.5  |
 
 👉 [查看完整 CVE 列表详情](CVEList.md)
 
@@ -495,21 +496,11 @@ DeepSeek-Coder · Codestral<br/>
 <div align="center">
 
 **欢迎大家来和我交流探讨！无论是技术问题、功能建议还是合作意向，都期待与你沟通~**
-（项目开发、投资孵化等合作洽谈请通过邮箱联系）
+（平台定制、代码审计服务、技术咨询、合作洽谈等请通过邮箱联系）
 | 联系方式 | |
 |:---:|:---:|
 | 📧 **邮箱** | **lintsinghua@qq.com** |
 | 🐙 **GitHub** | [@lintsinghua](https://github.com/lintsinghua) |
-
-</div>
-
-### 💬 交流群
-
-<div align="center">
-
-**欢迎大家入群交流分享、学习、摸鱼~**
-
-<img src="frontend/public/images/DeepAudit群聊.png" alt="QQ交流群" width="200">
 
 </div>
 

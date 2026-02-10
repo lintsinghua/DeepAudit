@@ -84,6 +84,7 @@ RUN apt-get update && \
         libpq5 \
         curl \
         git \
+        openssh-client \
         libpango-1.0-0 \
         libpangoft2-1.0-0 \
         libpangocairo-1.0-0 \

@@ -17,16 +17,17 @@ import {
   MessageSquare, Bot, Cpu, Terminal
 } from "lucide-react";
 import { api, dbMode, isDemoMode } from "@/shared/config/database";
-import type { Project, AuditTask, ProjectStats } from "@/shared/types";
+import type { Project, AuditTask, ProjectStats, UnifiedTask } from "@/shared/types";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { getRuleSets } from "@/shared/api/rules";
 import { getPromptTemplates } from "@/shared/api/prompts";
+import { getAgentTasks, type AgentTask } from "@/shared/api/agentTasks";
 
 export default function Dashboard() {
   const [stats, setStats] = useState<ProjectStats | null>(null);
   const [recentProjects, setRecentProjects] = useState<Project[]>([]);
-  const [recentTasks, setRecentTasks] = useState<AuditTask[]>([]);
+  const [recentTasks, setRecentTasks] = useState<UnifiedTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [issueTypeData, setIssueTypeData] = useState<Array<{ name: string; value: number; color: string }>>([]);
   const [qualityTrendData, setQualityTrendData] = useState<Array<{ date: string; score: number }>>([]);
@@ -44,7 +45,8 @@ export default function Dashboard() {
       const results = await Promise.allSettled([
         api.getProjectStats(),
         api.getProjects(),
-        api.getAuditTasks()
+        api.getAuditTasks(),
+        getAgentTasks({ limit: 10 })
       ]);
 
       if (results[0].status === 'fulfilled') {
@@ -70,23 +72,37 @@ export default function Dashboard() {
       let tasks: AuditTask[] = [];
       if (results[2].status === 'fulfilled') {
         tasks = Array.isArray(results[2].value) ? results[2].value : [];
-        setRecentTasks(tasks.slice(0, 10));
-      } else {
-        setRecentTasks([]);
       }
 
-      if (tasks.length > 0) {
-        const tasksByDate = tasks
-          .filter(t => t.completed_at && t.quality_score > 0)
-          .sort((a, b) => new Date(a.completed_at!).getTime() - new Date(b.completed_at!).getTime())
-          .slice(-6);
+      let agentTasksList: AgentTask[] = [];
+      if (results[3].status === 'fulfilled') {
+        agentTasksList = Array.isArray(results[3].value) ? results[3].value : [];
+      }
 
-        const trendData = tasksByDate.map((task) => ({
-          date: new Date(task.completed_at!).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }),
-          score: task.quality_score
-        }));
+      // 合并两种任务并按创建时间排序
+      const unified: UnifiedTask[] = [
+        ...tasks.map((t) => ({ kind: "audit" as const, task: t })),
+        ...agentTasksList.map((t) => ({ kind: "agent" as const, task: t })),
+      ];
+      unified.sort((a, b) => new Date(b.task.created_at).getTime() - new Date(a.task.created_at).getTime());
+      setRecentTasks(unified.slice(0, 10));
 
-        setQualityTrendData(trendData.length > 0 ? trendData : []);
+      // 质量趋势：合并两种任务
+      const allCompletedTasks = [
+        ...tasks.filter(t => t.completed_at && t.quality_score > 0)
+          .map(t => ({ date: t.completed_at!, score: t.quality_score })),
+        ...agentTasksList.filter(t => t.completed_at && t.quality_score > 0)
+          .map(t => ({ date: t.completed_at!, score: t.quality_score })),
+      ];
+      if (allCompletedTasks.length > 0) {
+        const trendData = allCompletedTasks
+          .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+          .slice(-6)
+          .map(t => ({
+            date: new Date(t.date).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }),
+            score: t.score
+          }));
+        setQualityTrendData(trendData);
       } else {
         setQualityTrendData([]);
       }
@@ -153,9 +169,19 @@ export default function Dashboard() {
       case 'completed':
         return <Badge className="cyber-badge-success">完成</Badge>;
       case 'running':
+      case 'initializing':
+      case 'planning':
+      case 'indexing':
+      case 'analyzing':
+      case 'verifying':
+      case 'reporting':
         return <Badge className="cyber-badge-info">运行中</Badge>;
       case 'failed':
         return <Badge className="cyber-badge-danger">失败</Badge>;
+      case 'cancelled':
+        return <Badge className="cyber-badge-muted">已取消</Badge>;
+      case 'paused':
+        return <Badge className="cyber-badge-muted">已暂停</Badge>;
       default:
         return <Badge className="cyber-badge-muted">待处理</Badge>;
     }
@@ -426,43 +452,59 @@ export default function Dashboard() {
             </div>
             <div className="space-y-2">
               {recentTasks.length > 0 ? (
-                recentTasks.slice(0, 6).map((task) => (
-                  <Link
-                    key={task.id}
-                    to={`/tasks/${task.id}`}
-                    className="flex items-center justify-between p-3 rounded-lg transition-all group"
-                    style={{
-                      background: 'var(--cyber-bg-elevated)',
-                    }}
-                    onMouseOver={(e) => {
-                      e.currentTarget.style.background = 'var(--cyber-hover-bg)';
-                    }}
-                    onMouseOut={(e) => {
-                      e.currentTarget.style.background = 'var(--cyber-bg-elevated)';
-                    }}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                        task.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' :
-                        task.status === 'running' ? 'bg-sky-500/20 text-sky-400' :
-                        'bg-rose-500/20 text-rose-400'
-                      }`}>
-                        {task.status === 'completed' ? <Activity className="w-4 h-4" /> :
-                         task.status === 'running' ? <Clock className="w-4 h-4" /> :
-                         <AlertTriangle className="w-4 h-4" />}
+                recentTasks.slice(0, 6).map((unified) => {
+                  const isAgent = unified.kind === 'agent';
+                  const task = unified.task;
+                  const taskLink = isAgent ? `/agent-audit/${task.id}` : `/tasks/${task.id}`;
+                  const taskName = isAgent
+                    ? ((task as AgentTask).name || '未知项目')
+                    : ((task as AuditTask).project?.name || '未知项目');
+                  const score = task.quality_score?.toFixed(1) || '0.0';
+                  const isRunning = isAgent
+                    ? ['running', 'initializing', 'planning', 'indexing', 'analyzing', 'verifying', 'reporting'].includes(task.status)
+                    : task.status === 'running';
+                  const isCompleted = task.status === 'completed';
+
+                  return (
+                    <Link
+                      key={`${unified.kind}-${task.id}`}
+                      to={taskLink}
+                      className="flex items-center justify-between p-3 rounded-lg transition-all group"
+                      style={{
+                        background: 'var(--cyber-bg-elevated)',
+                      }}
+                      onMouseOver={(e) => {
+                        e.currentTarget.style.background = 'var(--cyber-hover-bg)';
+                      }}
+                      onMouseOut={(e) => {
+                        e.currentTarget.style.background = 'var(--cyber-bg-elevated)';
+                      }}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                          isCompleted ? 'bg-emerald-500/20 text-emerald-400' :
+                          isRunning ? 'bg-sky-500/20 text-sky-400' :
+                          'bg-rose-500/20 text-rose-400'
+                        }`}>
+                          {isAgent ? <Bot className="w-4 h-4" /> :
+                           isCompleted ? <Activity className="w-4 h-4" /> :
+                           isRunning ? <Clock className="w-4 h-4" /> :
+                           <AlertTriangle className="w-4 h-4" />}
+                        </div>
+                        <div>
+                          <p className="text-base font-medium text-foreground group-hover:text-primary transition-colors">
+                            {taskName}
+                            {isAgent && <span className="ml-2 text-xs text-violet-400 font-mono">Agent</span>}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            质量分: <span className="text-foreground">{score}</span>
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-base font-medium text-foreground group-hover:text-primary transition-colors">
-                          {task.project?.name || '未知项目'}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          质量分: <span className="text-foreground">{task.quality_score?.toFixed(1) || '0.0'}</span>
-                        </p>
-                      </div>
-                    </div>
-                    {getStatusBadge(task.status)}
-                  </Link>
-                ))
+                      {getStatusBadge(task.status)}
+                    </Link>
+                  );
+                })
               ) : (
                 <div className="empty-state">
                   <Activity className="empty-state-icon" />
@@ -534,7 +576,10 @@ export default function Dashboard() {
               <div className="flex items-center justify-between">
                 <span className="text-base text-muted-foreground">运行中任务</span>
                 <span className="text-base font-bold text-sky-400">
-                  {recentTasks.filter(t => t.status === 'running').length}
+                  {recentTasks.filter(u => {
+                    const s = u.task.status;
+                    return s === 'running' || s === 'initializing' || s === 'planning' || s === 'indexing' || s === 'analyzing' || s === 'verifying' || s === 'reporting';
+                  }).length}
                 </span>
               </div>
               <div className="flex items-center justify-between">
@@ -572,7 +617,16 @@ export default function Dashboard() {
             </div>
             <div className="space-y-2">
               {recentTasks.length > 0 ? (
-                recentTasks.slice(0, 3).map((task) => {
+                recentTasks.slice(0, 3).map((unified) => {
+                  const isAgent = unified.kind === 'agent';
+                  const task = unified.task;
+                  const taskLink = isAgent ? `/agent-audit/${task.id}` : `/tasks/${task.id}`;
+                  const isRunning = isAgent
+                    ? ['running', 'initializing', 'planning', 'indexing', 'analyzing', 'verifying', 'reporting'].includes(task.status)
+                    : task.status === 'running';
+                  const isCompleted = task.status === 'completed';
+                  const isFailed = task.status === 'failed';
+
                   const timeAgo = (() => {
                     const now = new Date();
                     const taskDate = new Date(task.created_at);
@@ -586,27 +640,37 @@ export default function Dashboard() {
                     return `${diffDays}天前`;
                   })();
 
-                  const statusText =
-                    task.status === 'completed' ? '任务完成' :
-                    task.status === 'running' ? '任务运行中' :
-                    task.status === 'failed' ? '任务失败' : '任务待处理';
+                  const statusText = isAgent
+                    ? (isCompleted ? 'Agent任务完成' :
+                       isRunning ? 'Agent任务运行中' :
+                       isFailed ? 'Agent任务失败' : 'Agent任务待处理')
+                    : (isCompleted ? '任务完成' :
+                       isRunning ? '任务运行中' :
+                       isFailed ? '任务失败' : '任务待处理');
+
+                  const taskName = isAgent
+                    ? ((task as AgentTask).name || '未知项目')
+                    : ((task as AuditTask).project?.name || '未知项目');
+                  const issuesCount = isAgent
+                    ? (task as AgentTask).findings_count
+                    : (task as AuditTask).issues_count;
 
                   return (
                     <Link
-                      key={task.id}
-                      to={`/tasks/${task.id}`}
+                      key={`${unified.kind}-${task.id}`}
+                      to={taskLink}
                       className={`block p-3 rounded-lg border transition-all ${
-                        task.status === 'completed' ? 'bg-emerald-500/5 border-emerald-500/20 hover:border-emerald-500/40' :
-                        task.status === 'running' ? 'bg-sky-500/5 border-sky-500/20 hover:border-sky-500/40' :
-                        task.status === 'failed' ? 'bg-rose-500/5 border-rose-500/20 hover:border-rose-500/40' :
+                        isCompleted ? 'bg-emerald-500/5 border-emerald-500/20 hover:border-emerald-500/40' :
+                        isRunning ? 'bg-sky-500/5 border-sky-500/20 hover:border-sky-500/40' :
+                        isFailed ? 'bg-rose-500/5 border-rose-500/20 hover:border-rose-500/40' :
                         'bg-muted/30 border-border hover:border-border'
                       }`}
                     >
                       <p className="text-base font-medium text-foreground">{statusText}</p>
                       <p className="text-sm text-muted-foreground mt-1 line-clamp-1">
-                        项目 "{task.project?.name || '未知项目'}"
-                        {task.status === 'completed' && task.issues_count > 0 &&
-                          ` - 发现 ${task.issues_count} 个问题`
+                        项目 "{taskName}"
+                        {isCompleted && issuesCount > 0 &&
+                          ` - 发现 ${issuesCount} 个问题`
                         }
                       </p>
                       <p className="text-sm text-muted-foreground/70 mt-1">{timeAgo}</p>

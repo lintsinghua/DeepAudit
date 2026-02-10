@@ -118,6 +118,8 @@ class Settings(BaseSettings):
     SANDBOX_CPU_LIMIT: float = 1.0  # 沙箱 CPU 限制
     SANDBOX_TIMEOUT: int = 60  # 沙箱命令超时（秒）
     SANDBOX_NETWORK_MODE: str = "none"  # 沙箱网络模式 (none, bridge)
+    SANDBOX_CAP_DROP: str = "SYS_ADMIN,NET_ADMIN,SYS_PTRACE,SYS_RAWIO,SYS_MODULE,SYS_BOOT,MKNOD,AUDIT_WRITE,AUDIT_CONTROL,SETFCAP,MAC_OVERRIDE,MAC_ADMIN"  # 丢弃的 Linux 能力，逗号分隔，设置 ALL 丢弃全部
+    SANDBOX_NO_NEW_PRIVILEGES: bool = True  # 禁止提权，某些环境可能需要关闭
     
     # RAG 配置
     RAG_CHUNK_SIZE: int = 1500  # 代码块大小（Token）

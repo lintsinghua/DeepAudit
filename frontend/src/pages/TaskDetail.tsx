@@ -31,6 +31,12 @@ import {
   ChevronDown,
   ChevronRight
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { api } from "@/shared/config/database";
 import type { AuditTask, AuditIssue } from "@/shared/types";
 import { toast } from "sonner";
@@ -55,7 +61,7 @@ function parseAIExplanation(aiExplanation: string) {
 }
 
 // Issues List Component
-function IssuesList({ issues }: { issues: AuditIssue[] }) {
+function IssuesList({ issues, onStatusChange }: { issues: AuditIssue[]; onStatusChange?: (issue: AuditIssue, newStatus: string) => void }) {
   const getSeverityClasses = (severity: string) => {
     switch (severity) {
       case 'critical': return 'severity-critical';
@@ -108,11 +114,28 @@ function IssuesList({ issues }: { issues: AuditIssue[] }) {
             )}
           </div>
         </div>
-        <Badge className={`${getSeverityClasses(issue.severity)} font-bold uppercase px-2 py-1 rounded text-xs`}>
-          {issue.severity === 'critical' ? '严重' :
-            issue.severity === 'high' ? '高' :
-              issue.severity === 'medium' ? '中等' : '低'}
-        </Badge>
+        <div className="flex items-center gap-2">
+          {onStatusChange && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="text-xs font-mono">
+                  {issue.status === 'resolved' ? '已解决' : issue.status === 'false_positive' ? '误报' : '待处理'}
+                  <ChevronDown className="w-3 h-3 ml-1" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => onStatusChange(issue, "resolved")}>已解决</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onStatusChange(issue, "false_positive")}>误报</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onStatusChange(issue, "open")}>恢复</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          <Badge className={`${getSeverityClasses(issue.severity)} font-bold uppercase px-2 py-1 rounded text-xs`}>
+            {issue.severity === 'critical' ? '严重' :
+              issue.severity === 'high' ? '高' :
+                issue.severity === 'medium' ? '中等' : '低'}
+          </Badge>
+        </div>
       </div>
 
       {issue.description && (
@@ -432,6 +455,19 @@ export default function TaskDetail() {
     }
   };
 
+  const handleIssueStatusChange = async (issue: AuditIssue, newStatus: string) => {
+    if (!id) return;
+    try {
+      await api.updateAuditIssue(id, issue.id, { status: newStatus } as any);
+      toast.success("状态已更新");
+      const issuesData = await api.getAuditIssues(id);
+      setIssues(issuesData);
+    } catch (error) {
+      console.error("Failed to update issue status:", error);
+      toast.error("状态更新失败");
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'completed':
@@ -733,7 +769,7 @@ export default function TaskDetail() {
             <h3 className="text-lg font-bold uppercase tracking-wider text-foreground">发现的问题 ({issues.length})</h3>
           </div>
           <div className="p-6">
-            <IssuesList issues={issues} />
+            <IssuesList issues={issues} onStatusChange={handleIssueStatusChange} />
           </div>
         </div>
       )}

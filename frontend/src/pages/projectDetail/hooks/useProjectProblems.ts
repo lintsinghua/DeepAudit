@@ -219,6 +219,7 @@ export function useProjectProblems(params: {
       line_number: issue.line_number ?? null,
       line_end: null,
       category: issue.issue_type ?? null,
+      status: issue.status ?? null,
     }));
 
     const agentProblems: LatestProblem[] = latestFindings.map((finding: any) => {
@@ -238,6 +239,7 @@ export function useProjectProblems(params: {
         line_number: finding.line_start ?? parsed?.line_start ?? null,
         line_end: finding.line_end ?? parsed?.line_end ?? null,
         category: finding.vulnerability_type ?? null,
+        status: finding.status ?? null,
       };
     });
 

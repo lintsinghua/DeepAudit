@@ -21,7 +21,7 @@ async def read_users(
     search: Optional[str] = Query(None, description="搜索关键词"),
     role: Optional[str] = Query(None, description="角色筛选"),
     is_active: Optional[bool] = Query(None, description="状态筛选"),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.get_current_active_superuser),
 ) -> Any:
     """
     获取用户列表（支持分页、搜索、筛选）

@@ -144,6 +144,7 @@ export type LatestProblem = {
   line_number?: number | null;
   line_end?: number | null;
   category?: string | null;
+  status?: string;
 };
 
 export type UnifiedTask =

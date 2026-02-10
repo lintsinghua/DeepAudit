@@ -321,6 +321,7 @@ function AgentAuditPageContent() {
             if (event.message) {
               const progressPatterns: { pattern: RegExp; key: string }[] = [
                 { pattern: /索引进度[:：]?\s*\d+\/\d+/, key: 'index_progress' },
+                { pattern: /嵌入进度[:：]?\s*\d+\/\d+/, key: 'embed_progress' },
                 { pattern: /克隆进度[:：]?\s*\d+%/, key: 'clone_progress' },
                 { pattern: /下载进度[:：]?\s*\d+%/, key: 'download_progress' },
                 { pattern: /上传进度[:：]?\s*\d+%/, key: 'upload_progress' },
@@ -360,6 +361,7 @@ function AgentAuditPageContent() {
             // 检测进度类型消息
             const progressPatterns: { pattern: RegExp; key: string }[] = [
               { pattern: /索引进度[:：]?\s*\d+\/\d+/, key: 'index_progress' },
+              { pattern: /嵌入进度[:：]?\s*\d+\/\d+/, key: 'embed_progress' },
               { pattern: /克隆进度[:：]?\s*\d+%/, key: 'clone_progress' },
               { pattern: /下载进度[:：]?\s*\d+%/, key: 'download_progress' },
               { pattern: /上传进度[:：]?\s*\d+%/, key: 'upload_progress' },
@@ -458,6 +460,7 @@ function AgentAuditPageContent() {
         // 🔥 检测进度类型消息，使用更新而不是添加
         const progressPatterns: { pattern: RegExp; key: string }[] = [
           { pattern: /索引进度[:：]?\s*\d+\/\d+/, key: 'index_progress' },
+          { pattern: /嵌入进度[:：]?\s*\d+\/\d+/, key: 'embed_progress' },
           { pattern: /克隆进度[:：]?\s*\d+%/, key: 'clone_progress' },
           { pattern: /下载进度[:：]?\s*\d+%/, key: 'download_progress' },
           { pattern: /上传进度[:：]?\s*\d+%/, key: 'upload_progress' },

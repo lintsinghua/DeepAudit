@@ -31,7 +31,7 @@ import {
 import { api } from "@/shared/config/database";
 import type { Project, AuditTask, CreateProjectForm, AuditIssue } from "@/shared/types";
 import type { AgentFinding, AgentTask } from "@/shared/api/agentTasks";
-import { getAgentTasks } from "@/shared/api/agentTasks";
+import { getAgentTasks, updateAgentFinding } from "@/shared/api/agentTasks";
 import { apiClient } from "@/shared/api/serverClient";
 import { isRepositoryProject, getSourceTypeLabel, getRepositoryPlatformLabel } from "@/shared/utils/projectUtils";
 import { toast } from "sonner";
@@ -269,7 +269,7 @@ export default function ProjectDetail() {
 
     const audit: LatestProblem[] = latestIssues.map((i) => ({
       // AuditIssue 在后端 schema 里可能叫 message（frontend type 没显式定义），这里做兼容兜底
-      // 同时优先展示更“可读”的说明字段，避免 UI 出现大量 '-'
+      // 同时优先展示更"可读"的说明字段，避免 UI 出现大量 '-'
       kind: 'audit',
       id: i.id,
       task_id: i.task_id,
@@ -287,6 +287,7 @@ export default function ProjectDetail() {
       file_path: i.file_path,
       line_number: i.line_number ?? null,
       category: (i as any).issue_type ?? null,
+      status: i.status ?? null,
     }));
 
     const agent: LatestProblem[] = latestFindings.map((f) => {
@@ -303,11 +304,12 @@ export default function ProjectDetail() {
         // 如果 title 里带了 "path:line - xxx"，则剥离掉路径前缀，仅保留 xxx，避免标题重复且过长
         title: parsed?.rest_title || rawTitle,
         description: f.description,
-        // 如果后端没给 file_path，尽量从 title 解析出来填到“文件”列
+        // 如果后端没给 file_path，尽量从 title 解析出来填到"文件"列
         file_path: f.file_path ?? parsed?.file_path ?? null,
         line_number: ((f.line_start ?? parsed?.line_start ?? null) as any),
         line_end: ((f.line_end ?? parsed?.line_end ?? null) as any),
         category: (f as any).vulnerability_type ?? null,
+        status: f.status ?? null,
       };
     });
 
@@ -329,6 +331,21 @@ export default function ProjectDetail() {
     });
     return merged;
   }, [latestIssues, latestFindings]);
+
+  const handleStatusChange = async (problem: LatestProblem, newStatus: string) => {
+    try {
+      if (problem.kind === "agent") {
+        await updateAgentFinding(problem.task_id, problem.id, { status: newStatus });
+      } else {
+        await api.updateAuditIssue(problem.task_id, problem.id, { status: newStatus } as any);
+      }
+      toast.success("状态已更新");
+      await loadLatestIssues();
+    } catch (error) {
+      console.error("Failed to update status:", error);
+      toast.error("状态更新失败");
+    }
+  };
 
   const handleOpenSettings = () => {
     if (!project) return;
@@ -741,6 +758,7 @@ export default function ProjectDetail() {
             loading={loadingIssues}
             latestProblems={latestProblems}
             formatDate={formatDate}
+            onStatusChange={handleStatusChange}
           />
         </TabsContent>
 

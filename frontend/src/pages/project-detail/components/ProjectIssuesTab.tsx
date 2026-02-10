@@ -1,9 +1,47 @@
 import { Link } from "react-router-dom";
-import { AlertTriangle, CheckCircle, FileText } from "lucide-react";
+import { AlertTriangle, CheckCircle, ChevronDown, FileText } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { IssuesSummary, LatestProblem } from "@/shared/types";
+
+const STATUS_LABELS: Record<string, string> = {
+  open: "待处理",
+  new: "待处理",
+  resolved: "已解决",
+  false_positive: "误报",
+  fixed: "已修复",
+  wont_fix: "不修复",
+  verified: "已验证",
+  analyzing: "分析中",
+  needs_review: "待审核",
+  duplicate: "重复",
+};
+
+function getStatusLabel(status?: string): string {
+  if (!status) return "待处理";
+  return STATUS_LABELS[status] || status;
+}
+
+function getStatusBadgeClass(status?: string): string {
+  switch (status) {
+    case "resolved":
+    case "fixed":
+      return "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/30";
+    case "false_positive":
+    case "wont_fix":
+    case "duplicate":
+      return "bg-gray-500/20 text-gray-600 dark:text-gray-400 border-gray-500/30";
+    default:
+      return "bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/30";
+  }
+}
 
 export function ProjectIssuesTab(props: {
   hasAnyTasks: boolean;
@@ -11,8 +49,9 @@ export function ProjectIssuesTab(props: {
   loading: boolean;
   latestProblems: LatestProblem[];
   formatDate: (dateString: string) => string;
+  onStatusChange?: (problem: LatestProblem, newStatus: string) => void;
 }) {
-  const { hasAnyTasks, issuesSummary, loading, latestProblems, formatDate } = props;
+  const { hasAnyTasks, issuesSummary, loading, latestProblems, formatDate, onStatusChange } = props;
 
   return (
     <>
@@ -81,6 +120,32 @@ export function ProjectIssuesTab(props: {
                       查看任务
                     </Button>
                   </Link>
+                  {onStatusChange && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" className={`text-xs font-mono border ${getStatusBadgeClass(issue.status)}`}>
+                          {getStatusLabel(issue.status)}
+                          <ChevronDown className="w-3 h-3 ml-1" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        {issue.kind === "audit" ? (
+                          <>
+                            <DropdownMenuItem onClick={() => onStatusChange(issue, "resolved")}>已解决</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => onStatusChange(issue, "false_positive")}>误报</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => onStatusChange(issue, "open")}>恢复</DropdownMenuItem>
+                          </>
+                        ) : (
+                          <>
+                            <DropdownMenuItem onClick={() => onStatusChange(issue, "fixed")}>已修复</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => onStatusChange(issue, "wont_fix")}>不修复</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => onStatusChange(issue, "false_positive")}>误报</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => onStatusChange(issue, "new")}>恢复</DropdownMenuItem>
+                          </>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
                   <Badge
                     className={`
                       ${issue.severity === "critical"
@@ -111,5 +176,3 @@ export function ProjectIssuesTab(props: {
     </>
   );
 }
-
-

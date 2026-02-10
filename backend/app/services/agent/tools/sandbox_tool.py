@@ -29,10 +29,19 @@ class SandboxConfig:
     network_mode: str = "none"  # none, bridge, host
     read_only: bool = True
     user: str = "1000:1000"
+    cap_drop: list = None  # 丢弃的 Linux 能力列表
+    no_new_privileges: bool = True  # 禁止提权
 
     def __post_init__(self):
         if self.image is None:
             self.image = settings.SANDBOX_IMAGE
+        if self.cap_drop is None:
+            cap_drop_str = getattr(settings, 'SANDBOX_CAP_DROP', 'ALL')
+            if cap_drop_str.upper() == 'NONE':
+                self.cap_drop = []
+            else:
+                self.cap_drop = [c.strip() for c in cap_drop_str.split(',') if c.strip()]
+        self.no_new_privileges = getattr(settings, 'SANDBOX_NO_NEW_PRIVILEGES', True)
 
 
 class SandboxManager:
@@ -149,10 +158,13 @@ class SandboxManager:
                         },
                     "working_dir": working_dir or "/workspace",
                     "environment": container_env,
-                    # 安全配置
-                    "cap_drop": ["ALL"],
-                    "security_opt": ["no-new-privileges:true"],
                 }
+
+                # 安全配置：可通过环境变量调整
+                if self.config.cap_drop:
+                    container_config["cap_drop"] = self.config.cap_drop
+                if self.config.no_new_privileges:
+                    container_config["security_opt"] = ["no-new-privileges:true"]
                 
                 # 创建并启动容器
                 container = await asyncio.to_thread(
@@ -276,9 +288,13 @@ class SandboxManager:
                 },
                 "working_dir": "/workspace",
                 "environment": container_env,
-                "cap_drop": ["ALL"],
-                "security_opt": ["no-new-privileges:true"],
             }
+
+            # 安全配置：可通过环境变量调整
+            if self.config.cap_drop:
+                container_config["cap_drop"] = self.config.cap_drop
+            if self.config.no_new_privileges:
+                container_config["security_opt"] = ["no-new-privileges:true"]
             
             # 创建并启动容器
             container = await asyncio.to_thread(

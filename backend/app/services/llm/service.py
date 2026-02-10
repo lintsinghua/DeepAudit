@@ -882,21 +882,61 @@ Please analyze the following code:
             f"{i+1}| {line}" for i, line in enumerate(code.split('\n'))
         )
         
-        # 构建规则提示词
+        # 构建规则提示词，并提取启用的规则类别
         rules_prompt = ""
+        all_categories = ["security", "bug", "performance", "style", "maintainability"]
+        enabled_categories = None  # None 表示不限制（无规则时使用全部类别）
+
         if rules:
-            rules_prompt = "\n\n【审计规则】请特别关注以下规则：\n"
+            # 提取启用规则的类别
+            enabled_categories = sorted(set(
+                rule.get('category', '') for rule in rules if rule.get('enabled', True) and rule.get('category')
+            ))
+
+            if is_chinese:
+                rules_prompt = "\n\n【审计规则】请特别关注以下规则：\n"
+            else:
+                rules_prompt = "\n\n[Audit Rules] Please focus on the following rules:\n"
             for rule in rules:
                 if rule.get('enabled', True):
                     rules_prompt += f"- [{rule.get('rule_code', '')}] {rule.get('name', '')}: {rule.get('description', '')}\n"
                     if rule.get('custom_prompt'):
-                        rules_prompt += f"  检测要点: {rule.get('custom_prompt')}\n"
-        
+                        if is_chinese:
+                            rules_prompt += f"  检测要点: {rule.get('custom_prompt')}\n"
+                        else:
+                            rules_prompt += f"  Detection points: {rule.get('custom_prompt')}\n"
+
+            # 添加类别约束指令
+            if enabled_categories:
+                category_type_map_zh = {
+                    "security": "安全漏洞",
+                    "bug": "Bug和逻辑错误",
+                    "performance": "性能问题",
+                    "style": "编码规范和代码风格",
+                    "maintainability": "可维护性和可读性",
+                }
+                category_type_map_en = {
+                    "security": "Security vulnerabilities",
+                    "bug": "Bugs and logical errors",
+                    "performance": "Performance issues",
+                    "style": "Coding standards and code style",
+                    "maintainability": "Maintainability and readability",
+                }
+                if is_chinese:
+                    enabled_names = "、".join(category_type_map_zh.get(c, c) for c in enabled_categories)
+                    rules_prompt += f"\n【重要】只审计以下类别的问题：{enabled_names}。不要报告其他类别的问题。\n"
+                else:
+                    enabled_names = ", ".join(category_type_map_en.get(c, c) for c in enabled_categories)
+                    rules_prompt += f"\n[IMPORTANT] Only audit issues in the following categories: {enabled_names}. Do not report issues in other categories.\n"
+
+        # 动态构建 type 枚举
+        type_enum = "|".join(enabled_categories if enabled_categories else all_categories)
+
         # JSON Schema
         schema = """{
     "issues": [
         {
-            "type": "security|bug|performance|style|maintainability",
+            "type": \"""" + type_enum + """",
             "severity": "critical|high|medium|low",
             "title": "string",
             "description": "string",
