@@ -399,7 +399,7 @@ Please analyze the following code:
             )
             
             response = await adapter.complete(request)
-            ## TODO 如果走lazyllmadapter:以下的解析过程可能需要调整 。if adapter == LazyLLMAdapter
+
             content = response.content
             
             # 记录 LLM 原始响应（用于调试）
