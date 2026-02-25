@@ -859,7 +859,7 @@ class SafetyTool(AgentTool):
                 else:
                      return ToolResult(success=True, data=f"Safety 输出:\n{stdout[:1000]}")
 
-            except:
+            except Exception:
                 return ToolResult(success=True, data=f"Safety 输出解析失败:\n{stdout[:1000]}")
             
             vulnerabilities = results if isinstance(results, list) else results.get("vulnerabilities", [])
@@ -986,7 +986,7 @@ class TruffleHogTool(AgentTool):
                 if line.strip():
                     try:
                         findings.append(json.loads(line))
-                    except:
+                    except Exception:
                         pass
             
             if not findings:
@@ -1097,7 +1097,7 @@ Google 开源的漏洞扫描工具。
             
             try:
                 results = json.loads(stdout)
-            except:
+            except Exception:
                 if "no package sources found" in stdout.lower():
                     return ToolResult(success=True, data="OSV-Scanner: 未找到可扫描的包文件")
                 return ToolResult(success=True, data=f"OSV-Scanner 输出:\n{stdout[:1000]}")

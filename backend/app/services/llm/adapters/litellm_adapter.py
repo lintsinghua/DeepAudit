@@ -130,7 +130,7 @@ class LiteLLMAdapter(BaseLLMAdapter):
                     code = err.get('code', '')
                     message = err.get('message', '')
                     return f"[{code}] {message}" if code else message
-            except:
+            except Exception:
                 pass
 
         # 尝试提取 message 字段

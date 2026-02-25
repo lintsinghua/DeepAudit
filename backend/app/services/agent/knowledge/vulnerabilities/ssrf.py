@@ -107,7 +107,7 @@ def is_safe_url(url):
             return False
             
         return True
-    except:
+    except Exception:
         return False
 
 # 使用

@@ -329,7 +329,7 @@ Kunlun-M 是一款专注于代码安全审计的工具，特别擅长 PHP 和 Ja
             # 清理临时文件
             try:
                 os.unlink(output_file)
-            except:
+            except Exception:
                 pass
 
             if not findings:
@@ -399,7 +399,7 @@ Kunlun-M 是一款专注于代码安全审计的工具，特别擅长 PHP 和 Ja
                 if json_start >= 0 and json_end > json_start:
                     json_str = stdout[json_start:json_end]
                     findings = json.loads(json_str)
-            except:
+            except Exception:
                 pass
 
             # 尝试解析表格格式输出
@@ -429,7 +429,7 @@ Kunlun-M 是一款专注于代码安全审计的工具，特别擅长 PHP 和 Ja
                             "analysis": parts[7] if len(parts) > 7 else "",
                         }
                         findings.append(finding)
-                    except:
+                    except Exception:
                         pass
 
         return findings

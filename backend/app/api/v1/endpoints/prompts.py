@@ -72,7 +72,7 @@ async def list_prompt_templates(
         if t.variables:
             try:
                 variables = json.loads(t.variables)
-            except:
+            except Exception:
                 pass
         
         items.append(PromptTemplateResponse(
@@ -118,7 +118,7 @@ async def get_prompt_template(
     if template.variables:
         try:
             variables = json.loads(template.variables)
-        except:
+        except Exception:
             pass
     
     return PromptTemplateResponse(
@@ -224,7 +224,7 @@ async def update_prompt_template(
     if template.variables:
         try:
             variables = json.loads(template.variables)
-        except:
+        except Exception:
             pass
     
     return PromptTemplateResponse(

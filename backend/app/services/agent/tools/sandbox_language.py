@@ -308,7 +308,7 @@ class MockMultiDict(dict):
         if type and value is not None:
             try:
                 return type(value)
-            except:
+            except Exception:
                 return default
         return value
     def getlist(self, key):

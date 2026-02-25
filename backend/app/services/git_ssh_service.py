@@ -155,7 +155,7 @@ def set_secure_file_permissions(file_path: str):
             # 尝试使用os.chmod作为后备方案
             try:
                 os.chmod(file_path, 0o600)
-            except:
+            except Exception:
                 pass
     else:
         # Unix/Linux/Mac系统

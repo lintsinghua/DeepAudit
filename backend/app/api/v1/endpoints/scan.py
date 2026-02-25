@@ -90,7 +90,7 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
                                     "path": rel_path,
                                     "content": content
                                 })
-                        except:
+                        except Exception:
                             pass
 
             # 获取分析配置（优先使用用户配置）

@@ -86,7 +86,7 @@ async def list_rule_sets(
         if rs.severity_weights:
             try:
                 severity_weights = json.loads(rs.severity_weights)
-            except:
+            except Exception:
                 pass
         
         rules = [
@@ -155,7 +155,7 @@ async def get_rule_set(
     if rule_set.severity_weights:
         try:
             severity_weights = json.loads(rule_set.severity_weights)
-        except:
+        except Exception:
             pass
     
     rules = [
@@ -323,7 +323,7 @@ async def update_rule_set(
     if rule_set.severity_weights:
         try:
             severity_weights = json.loads(rule_set.severity_weights)
-        except:
+        except Exception:
             pass
     
     rules = [
@@ -417,7 +417,7 @@ async def export_rule_set(
     if rule_set.severity_weights:
         try:
             severity_weights = json.loads(rule_set.severity_weights)
-        except:
+        except Exception:
             pass
     
     export_data = {

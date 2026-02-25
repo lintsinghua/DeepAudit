@@ -340,7 +340,7 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
             if task.exclude_patterns:
                 try:
                     task_exclude_patterns = json_module.loads(task.exclude_patterns)
-                except:
+                except Exception:
                     pass
 
             print(f"🚀 开始扫描仓库: {repo_url}, 分支: {branch}, 类型: {repo_type}, 来源: {source_type}")
