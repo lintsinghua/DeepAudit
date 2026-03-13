@@ -118,6 +118,7 @@ class Settings(BaseSettings):
     SANDBOX_NO_NEW_PRIVILEGES: bool = True  # 禁止提权，某些环境可能需要关闭
     
     # RAG 配置
+    RAG_ENABLED: bool = True        # 是否启用代码 RAG（向量索引+语义检索），设为 False 可完全跳过 Embedding
     RAG_CHUNK_SIZE: int = 1500  # 代码块大小（Token）
     RAG_CHUNK_OVERLAP: int = 50  # 代码块重叠（Token）
     RAG_TOP_K: int = 10  # 检索返回数量

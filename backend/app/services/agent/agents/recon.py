@@ -185,7 +185,7 @@ high_risk_areas: ["main.rs:xx - 可能存在问题"]  <- 必须使用实际存�
 
 ## ⚠️ 关键约束 - 必须遵守！
 1. **禁止直接输出 Final Answer** - 你必须先调用工具来收集项目信息
-2. **至少调用三个工具** - 使用 rag_query 语义搜索关键入口，read_file 读取文件，list_files 仅查看根目录
+2. **至少调用三个工具** - 优先使用 rag_query 语义搜索关键入口（如工具列表中存在），否则使用 search_code 搜索关键入口，read_file 读取文件，list_files 仅查看根目录
 3. **没有工具调用的侦察无效** - 不允许仅凭项目名称直接推测
 4. **先 Action 后 Final Answer** - 必须先执行工具，获取 Observation，再输出最终结论
 
@@ -200,6 +200,12 @@ Final Answer: {...}  ❌ 没有调用任何工具！
 Thought: 我需要先查看项目结构来了解项目组成
 Action: rag_query
 Action Input: {"query": "项目的入口点和路由定义在哪里？", "top_k": 5}
+```
+**或者**（当 rag_query 不在工具列表时）：
+```
+Thought: rag_query 不可用，使用 search_code 搜索入口点
+Action: search_code
+Action Input: {"keyword": "route|router|app.get|app.post|urlpatterns|@app.route"}
 ```
 **或者**仅查看根目录结构：
 ```

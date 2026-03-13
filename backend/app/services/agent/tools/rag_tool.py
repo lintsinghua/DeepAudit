@@ -136,14 +136,23 @@ class SecurityCodeSearchTool(AgentTool):
 专门针对特定漏洞类型进行搜索。
 
 支持的漏洞类型:
-- sql_injection: SQL 注入
-- xss: 跨站脚本
-- command_injection: 命令注入
-- path_traversal: 路径遍历
-- ssrf: 服务端请求伪造
-- deserialization: 不安全的反序列化
-- auth_bypass: 认证绕过
-- hardcoded_secret: 硬编码密钥"""
+- integer_overflow_underflow: 整数上溢出和下溢
+- insecure_randomness: 不安全的随机性
+- arithmetic_errors: 计算错误
+- access_control: 访问控制漏洞
+- logic_errors: 逻辑错误
+- flash_loan: 闪贷攻击
+- gas_limit: Gas限制漏洞
+- denial_of_service: 拒绝服务攻击
+- unchecked_external_calls: 未检查的外部调用
+- price_oracle_manipulation: 操纵价格
+- lack_of_input_validation: 缺少输入验证
+- reentrancy: 可重入攻击
+- short_address: 短地址攻击
+- assert_failure: 断言失败
+- proxy_upgradeability: 代理和可升级性漏洞
+- front_running: 抢跑攻击
+- timestamp_dependence: 时间戳依赖"""
     
     @property
     def args_schema(self):
