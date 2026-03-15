@@ -408,7 +408,12 @@ class SubAgentExecutor:
         agent_class_map = {
             "analysis": AnalysisAgent,
             "verification": VerificationAgent,
+            "poc_writer": None,  # will be filled lazily to avoid circular import
         }
+        # 避免循环导入，在需要时动态导入 PoCWriterAgent
+        if agent_type == "poc_writer":
+            from ..agents.smart_contract_poc_writer import PoCWriterAgent
+            agent_class_map["poc_writer"] = PoCWriterAgent
         
         agent_class = agent_class_map.get(agent_type)
         if not agent_class:

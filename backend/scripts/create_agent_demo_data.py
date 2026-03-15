@@ -142,7 +142,7 @@ async def create_agent_demo_task(db: AsyncSession, project: Project, user_id: st
                 {"name": "漏洞模式匹配", "description": "基于已知漏洞模式进行检测"},
                 {"name": "数据流分析", "description": "追踪污点数据流，验证漏洞可达性"},
                 {"name": "沙箱验证", "description": "在隔离环境中验证漏洞可利用性"},
-                {"name": "PoC 生成", "description": "为已验证漏洞生成概念验证代码"},
+                {"name": "PoC 编写 Agent", "description": "独立子 Agent，与验证者协作生成并优化漏洞 PoC"},
             ],
             "focus_areas": ["用户认证模块", "数据库查询接口", "文件上传功能", "API 端点"],
         },

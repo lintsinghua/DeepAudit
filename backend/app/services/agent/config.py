@@ -462,7 +462,10 @@ def get_agent_type_config(agent_type: str) -> AgentTypeConfig:
             agent_type="verification",
             max_iterations=config.verification_max_iterations,
             timeout_seconds=config.sub_agent_timeout_seconds,
-            tools=["validate_vulnerability", "dataflow_analysis", "sandbox_execute"],
+            tools=[
+                "validate_vulnerability",
+                "dataflow_analysis",
+            ],
             knowledge_modules=["vulnerability_verification"],
         ),
     }

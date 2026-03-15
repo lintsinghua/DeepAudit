@@ -21,5 +21,10 @@ echo "Verifying image..."
 docker run --rm "${IMAGE_NAME}:${IMAGE_TAG}" python3 --version
 docker run --rm "${IMAGE_NAME}:${IMAGE_TAG}" node --version
 
+# 👇 添加这两行来验证 Foundry 是否安装成功
+echo "Verifying Foundry installation..."
+docker run --rm "${IMAGE_NAME}:${IMAGE_TAG}" forge --version
+docker run --rm "${IMAGE_NAME}:${IMAGE_TAG}" cast --version
+
 echo "Sandbox image ready!"
 

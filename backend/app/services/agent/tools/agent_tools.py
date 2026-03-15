@@ -644,7 +644,11 @@ class RunSubAgentsTool(AgentTool):
                 "analysis": AnalysisAgent,
                 "verification": VerificationAgent,
                 "specialist": AnalysisAgent,  # 默认使用分析Agent
+                "poc_writer": None,  # 动态导入
             }
+            if task.agent_type == "poc_writer":
+                from ..agents.smart_contract_poc_writer import PoCWriterAgent
+                agent_class_map["poc_writer"] = PoCWriterAgent
             
             agent_class = agent_class_map.get(task.agent_type, AnalysisAgent)
             

@@ -96,6 +96,10 @@ class AgentState(BaseModel):
     # ============ 标志位 ============
     stop_requested: bool = False
     max_iterations_warning_sent: bool = False
+    # ============ PoC / 沙箱交互状态 ============
+    poc_code: Optional[str] = None
+    sandbox_logs: Dict[str, Any] = Field(default_factory=dict)
+    poc_attempts: int = 0
     
     class Config:
         use_enum_values = True

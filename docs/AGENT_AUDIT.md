@@ -38,7 +38,7 @@ Agent 审计模块是 DeepAudit v3.0.0 的核心功能，基于 **Multi-Agent �
 │  │  (信息收集)      │ │  (漏洞分析)      │ │  (漏洞验证)      │    │
 │  │                  │ │                  │ │                  │    │
 │  │ • 项目结构分析   │ │ • Semgrep 扫描   │ │ • 沙箱测试      │    │
-│  │ • 技术栈识别     │ │ • RAG 语义搜索   │ │ • PoC 生成      │    │
+│  │ • 技术栈识别     │ │ • RAG 语义搜索   │ │ • PoC 编写与迭代 │    │
 │  │ • 入口点发现     │ │ • LLM 深度分析   │ │ • 误报过滤      │    │
 │  │ • 依赖扫描       │ │ • 数据流追踪     │ │ • 置信度评估    │    │
 │  └────────┬─────────┘ └────────┬─────────┘ └────────┬─────────┘    │
@@ -65,7 +65,7 @@ Agent 审计模块是 DeepAudit v3.0.0 的核心功能，基于 **Multi-Agent �
 | **Orchestrator** | 统筹编排，自主决策审计策略 | 任务分配、结果汇总 |
 | **Recon** | 信息收集，识别技术栈和入口点 | list_files, npm_audit, safety_scan, gitleaks |
 | **Analysis** | 深度分析，挖掘潜在安全漏洞 | semgrep, bandit, rag_query, code_analysis |
-| **Verification** | 沙箱验证，确认漏洞真实有效 | sandbox_exec, vulnerability_validation |
+| **Verification** | 沙箱验证，确认漏洞真实有效，调用 PoC 编写子 Agent 生成攻击脚本 | sandbox_exec, vulnerability_validation, sandbox_attack |
 
 ---
 

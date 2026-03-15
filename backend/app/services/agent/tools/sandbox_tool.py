@@ -31,6 +31,8 @@ class SandboxConfig:
     user: str = "1000:1000"
     cap_drop: list = None  # 丢弃的 Linux 能力列表
     no_new_privileges: bool = True  # 禁止提权
+    # 👇 新增：用于持久化挂载的本地主机目录
+    workspace_dir: Optional[str] = None
 
     def __post_init__(self):
         if self.image is None:
@@ -136,8 +138,20 @@ class SandboxManager:
         container_env = {**no_proxy_env, **(env or {})}
 
         try:
-            # 创建临时目录
-            with tempfile.TemporaryDirectory() as temp_dir:
+            import contextlib
+            
+            # 🔥 新增一个上下文管理器来决定使用哪个目录
+            @contextlib.contextmanager
+            def get_host_workspace():
+                if self.config.workspace_dir:
+                    os.makedirs(self.config.workspace_dir, exist_ok=True)
+                    yield self.config.workspace_dir
+                else:
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        yield temp_dir
+
+            # 使用选定的主机目录进行挂载
+            with get_host_workspace() as host_dir:
                 # 准备容器配置
                 container_config = {
                     "image": self.config.image,
@@ -147,15 +161,16 @@ class SandboxManager:
                     "cpu_period": 100000,
                     "cpu_quota": int(100000 * self.config.cpu_limit),
                     "network_mode": self.config.network_mode,
-                    "user": self.config.user,
-                    "read_only": self.config.read_only,
+                    # "user": self.config.user,
+                    "read_only": False,
                     "volumes": {
-                        temp_dir: {"bind": "/workspace", "mode": "rw"},
+                        # 👇 这里改用 host_dir 挂载到容器内的 /workspace
+                        host_dir: {"bind": "/workspace", "mode": "rw"},
                     },
-                    "tmpfs": {
-                            "/home/sandbox": "rw,size=100m,mode=1777",
-                            "/tmp": "rw,size=100m,mode=1777"
-                        },
+                    # "tmpfs": {
+                    #         "/home/sandbox": "rw,size=100m,mode=1777",
+                    #         "/tmp": "rw,size=100m,mode=1777"
+                    #     },
                     "working_dir": working_dir or "/workspace",
                     "environment": container_env,
                 }

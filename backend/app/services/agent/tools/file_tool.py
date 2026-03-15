@@ -1,15 +1,16 @@
 """
 文件操作工具
-读取和搜索代码文件
+读取，搜索和写入代码文件
 """
 
 import os
 import re
 import fnmatch
 import asyncio
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Type
 from pydantic import BaseModel, Field
-
+import logging
+logger = logging.getLogger(__name__)
 from .base import AgentTool, ToolResult
 
 
@@ -689,3 +690,98 @@ class ListFilesTool(AgentTool):
                 error=f"列出文件失败: {str(e)}",
             )
 
+
+class FileWriteInput(BaseModel):
+    """文件写入工具输入参数"""
+    file_path: str = Field(..., description="要写入的文件相对路径，如 'test/RealExploit.t.sol'")
+    content: str = Field(..., description="要写入的文件完整内容（代码或文本）")
+
+
+class FileWriteTool(AgentTool):
+    """
+    文件写入工具
+    
+    用于将 Agent 生成的 PoC 代码、利用脚本或配置文件安全地写入到工作区。
+    如果文件已存在，它将被覆盖；如果上级目录不存在，将自动创建。
+    """
+    
+    def __init__(self, project_root: str):
+        super().__init__()
+        # 记录并规范化项目的根目录，用于后续的安全沙箱校验
+        self.project_root = os.path.abspath(project_root)
+    
+    @property
+    def name(self) -> str:
+        return "write_file"
+    
+    @property
+    def description(self) -> str:
+        return """将完整的文本或代码内容写入到指定文件中。
+
+使用场景：
+- 编写并保存 Foundry/Hardhat 测试用例 (PoC)
+- 创建或修改合约配置文件
+- 写入恶意的输入载荷 (Payload) 文件
+
+输入：
+- file_path: 要写入的文件相对路径，如 'test/RealExploit.t.sol'
+- content: 要写入的文件完整内容（代码或文本）
+
+注意：
+1. 文件路径必须是相对路径。
+2. 如果文件已存在，原内容将被完全覆盖。
+3. 不需要手动创建目录，工具会自动处理。"""
+    
+    @property
+    def args_schema(self) -> Type[BaseModel]:
+        return FileWriteInput
+    
+    async def _execute(
+        self,
+        file_path: str,
+        content: str,
+        **kwargs
+    ) -> ToolResult:
+        """执行文件写入"""
+        try:
+            # 1. 路径清洗与安全检查 (防止大模型尝试写入 /etc/passwd 等系统文件)
+            # 移除前导的斜杠，强制变为相对路径
+            clean_path = file_path.lstrip('/')
+            full_path = os.path.abspath(os.path.join(self.project_root, clean_path))
+            
+            # 防路径遍历 (Path Traversal) 检查
+            if not full_path.startswith(self.project_root):
+                logger.warning(f"[FileWriteTool] 检测到越权写入尝试: {file_path}")
+                return ToolResult(
+                    success=False,
+                    error=f"安全限制：禁止向项目根目录之外的路径写入文件 ({file_path})"
+                )
+            
+            # 2. 自动创建所需的父级目录
+            target_dir = os.path.dirname(full_path)
+            if target_dir:
+                os.makedirs(target_dir, exist_ok=True)
+            
+            # 3. 执行写入操作
+            with open(full_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+                
+            logger.info(f"[FileWriteTool] 成功写入文件: {clean_path} ({len(content)} bytes)")
+            
+            # 4. 封装标准化返回结果
+            return ToolResult(
+                success=True,
+                data=f"✅ 成功将 {len(content)} 个字符的内容写入到文件: {clean_path}",
+                metadata={
+                    "file_path": clean_path,
+                    "content_length": len(content),
+                    "action": "write"
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"[FileWriteTool] 文件写入异常: {e}", exc_info=True)
+            return ToolResult(
+                success=False,
+                error=f"文件写入失败: {str(e)}",
+            )

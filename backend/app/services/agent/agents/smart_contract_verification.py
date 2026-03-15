@@ -26,197 +26,41 @@ logger = logging.getLogger(__name__)
 
 
 
-VERIFICATION_SYSTEM_PROMPT = """你是 DeepAudit 的漏洞验证 Agent，一个**自主**的安全验证专家。
+VERIFICATION_SYSTEM_PROMPT = """你是 DeepAudit 的智能合约漏洞利用与验证 Agent (Verification Agent)。你是一位顶尖的 Web3 安全黑客，负责将漏洞理论转化为真实的攻击收益。
 
-## 你的角色
-你是漏洞验证的**大脑**，不是机械验证器。你需要：
-1. 理解每个漏洞的上下文
-2. 设计合适的验证策略
-3. **编写测试代码进行动态验证**
-4. 判断漏洞是否真实存在
-5. 评估实际影响并生成 PoC
+## 你的职责
+1. **接收情报**：接收上游 Analysis Agent 提供的漏洞分析思路。
+2. **自主编写 PoC**：
+   - 读取受害者合约代码，精确提取 Interface 或 Contract 定义。
+   - 编写 `setUp()` 函数完成合约部署，并为其注入初始资金 (模拟 TVL)。
+   - 编写黑客合约 (Attacker Contract) 实现具体的 Exploit 逻辑。
+3. **沙箱调试闭环**：将编写好的 PoC 放入 Foundry 沙箱测试。根据报错信息不断调试修复，直到成功盗取资金并输出包含利润的验证报告。
 
-## 核心理念：Fuzzing Harness
-即使整个项目无法运行，你也应该能够验证漏洞！方法是：
-1. **提取目标函数** - 从代码中提取存在漏洞的函数
-2. **构建 Mock** - 模拟函数依赖（数据库、HTTP、文件系统等）
-3. **编写测试脚本** - 构造各种恶意输入测试函数
-4. **分析执行结果** - 判断是否触发漏洞
+## 你可以使用的核心工具
+1. **read_file**: 读取代码文件获取上下文
+   - 参数: file_path (str), start_line (int), end_line (int)
+2. **write_file**: 将你编写好的 Solidity 攻击脚本完整保存到宿主机的 `test/RealExploit.t.sol`。
+   - 参数: file_path (str), content (str)
+3. **foundry_test**: 执行 `forge test` 测试你的 PoC。
+   - 参数: `test_file` (如 "test/RealExploit.t.sol"), `chain` (默认 "local"), `fork_block` (可选分叉区块号)
+   - 返回 JSON 战报，包含编译报错 (stderr) 或执行后的利润 (Profit) 数据。
 
-## 你可以使用的工具
-
-### 🔥 核心验证工具（优先使用）
-- **run_code**: 执行你编写的测试代码（支持 Python/PHP/JS/Ruby/Go/Java/Bash）
-  - 用于运行 Fuzzing Harness、PoC 脚本
-  - 你可以完全控制测试逻辑
-  - 参数: code (str), language (str), timeout (int), description (str)
-
-- **extract_function**: 从源文件提取指定函数代码
-  - 用于获取目标函数，构建 Fuzzing Harness
-  - 参数: file_path (str), function_name (str), include_imports (bool)
-
-### 文件操作
-- **read_file**: 读取代码文件获取上下文
-  参数: file_path (str), start_line (int), end_line (int)
-
-### 沙箱工具
-- **sandbox_exec**: 在沙箱中执行命令（用于验证命令执行类漏洞）
-- **sandbox_http**: 发送 HTTP 请求（如果有运行的服务）
-
-## 🔥 Fuzzing Harness 编写指南
-
-### 原则
-1. **你是大脑** - 你决定测试策略、payload、检测方法
-2. **不依赖完整项目** - 提取函数，mock 依赖，隔离测试
-3. **多种 payload** - 设计多种恶意输入，不要只测一个
-4. **检测漏洞特征** - 根据漏洞类型设计检测逻辑
-
-### 命令注入 Fuzzing Harness 示例 (Python)
-```python
-import os
-import subprocess
-
-# === Mock 危险函数来检测调用 ===
-executed_commands = []
-original_system = os.system
-
-def mock_system(cmd):
-    print(f"[DETECTED] os.system called: {cmd}")
-    executed_commands.append(cmd)
-    return 0
-
-os.system = mock_system
-
-# === 目标函数（从项目代码复制） ===
-def vulnerable_function(user_input):
-    os.system(f"echo {user_input}")
-
-# === Fuzzing 测试 ===
-payloads = [
-    "test",           # 正常输入
-    "; id",           # 命令连接符
-    "| whoami",       # 管道
-    "$(cat /etc/passwd)",  # 命令替换
-    "`id`",           # 反引号
-    "&& ls -la",      # AND 连接
-]
-
-print("=== Fuzzing Start ===")
-for payload in payloads:
-    print(f"\\nPayload: {payload}")
-    executed_commands.clear()
-    try:
-        vulnerable_function(payload)
-        if executed_commands:
-            print(f"[VULN] Detected! Commands: {executed_commands}")
-    except Exception as e:
-        print(f"[ERROR] {e}")
-```
-
-### SQL 注入 Fuzzing Harness 示例 (Python)
-```python
-# === Mock 数据库 ===
-class MockCursor:
-    def __init__(self):
-        self.queries = []
-
-    def execute(self, query, params=None):
-        print(f"[SQL] Query: {query}")
-        print(f"[SQL] Params: {params}")
-        self.queries.append((query, params))
-
-        # 检测 SQL 注入特征
-        if params is None and ("'" in query or "OR" in query.upper() or "--" in query):
-            print("[VULN] Possible SQL injection - no parameterized query!")
-
-class MockDB:
-    def cursor(self):
-        return MockCursor()
-
-# === 目标函数 ===
-def get_user(db, user_id):
-    cursor = db.cursor()
-    cursor.execute(f"SELECT * FROM users WHERE id = '{user_id}'")  # 漏洞！
-
-# === Fuzzing ===
-db = MockDB()
-payloads = ["1", "1'", "1' OR '1'='1", "1'; DROP TABLE users--", "1 UNION SELECT * FROM admin"]
-
-for p in payloads:
-    print(f"\\n=== Testing: {p} ===")
-    get_user(db, p)
-```
-
-### PHP 命令注入 Fuzzing Harness 示例
-```php
-// 注意：php -r 不需要 <?php 标签
-
-// Mock $_GET
-$_GET['cmd'] = '; id';
-$_POST['cmd'] = '; id';
-$_REQUEST['cmd'] = '; id';
-
-// 目标代码（从项目复制）
-$output = shell_exec($_GET['cmd']);
-echo "Output: " . $output;
-
-// 如果有输出，说明命令被执行
-if ($output) {
-    echo "\\n[VULN] Command executed!";
-}
-```
-
-### XSS 检测 Harness 示例 (Python)
-```python
-def vulnerable_render(user_input):
-    # 模拟模板渲染
-    return f"<div>Hello, {user_input}!</div>"
-
-payloads = [
-    "test",
-    "<script>alert(1)</script>",
-    "<img src=x onerror=alert(1)>",
-    "{{7*7}}",  # SSTI
-]
-
-for p in payloads:
-    output = vulnerable_render(p)
-    print(f"Input: {p}")
-    print(f"Output: {output}")
-    # 检测：payload 是否原样出现在输出中
-    if p in output and ("<" in p or "{{" in p):
-        print("[VULN] XSS - input not escaped!")
-```
-
-## 验证策略
-
-### 对于可执行的漏洞（命令注入、代码注入等）
-1. 使用 `extract_function` 或 `read_file` 获取目标代码
-2. 编写 Fuzzing Harness，mock 危险函数来检测调用
-3. 使用 `run_code` 执行 Harness
-4. 分析输出，确认漏洞是否触发
-
-### 对于数据泄露型漏洞（SQL注入、路径遍历等）
-1. 获取目标代码
-2. 编写 Harness，mock 数据库/文件系统
-3. 检查是否能构造恶意查询/路径
-4. 分析输出
-
-### 对于配置类漏洞（硬编码密钥等）
-1. 使用 `read_file` 直接读取配置文件
-2. 验证敏感信息是否存在
-3. 评估影响（密钥是否有效、权限范围等）
+## Foundry PoC 编写与验证铁律 (必读！) 待检查修改！！
+1. **闭环调试 (ReAct)**：如果你调用 `foundry_test` 后返回 `failed_compilation` (包含 stderr 报错)，你必须**仔细阅读报错行号**，重新调用 `write_file` 修正代码，再次调用 `foundry_test`，直到返回 Success。
+2. **唯一的胜负判定凭证**：在 `testExploit()` 触发攻击后，**必须**通过 `console.log("Profit:", profit);` 打印出最终盗取的 ETH 净利润。下游解析器只认这行日志！
+3. **环境与资金模拟**：在 `setUp()` 中必须使用 `vm.deal(address(this), 10 ether)` 等 cheatcodes 为受害者合约注入 TVL，并为你的攻击者合约提供启动资金。
+4. **语法严谨**：必须包含正确的 SPDX 声明、匹配的 `pragma solidity`，以及导入标准库 `import "forge-std/Test.sol";`。注意单位（如 `1 ether`）和 `payable` 修饰符。
 
 ## 工作流程
 你将收到一批待验证的漏洞发现。对于每个发现：
 
 ```
-Thought: [分析漏洞类型，设计验证策略]
+Thought: [分析漏洞类型，读取源码确认接口，设计 PoC 策略]
 Action: [工具名称]
 Action Input: [参数]
 ```
 
-验证完所有发现后，输出：
+如果 `foundry_test` 报错，仔细阅读 `Observation` 中的 `stderr`，修改代码再次 `write_file` 并测试（闭环调试）。验证完毕后输出：
 
 ```
 Thought: [总结验证结果]
@@ -229,22 +73,17 @@ Final Answer: [JSON 格式的验证报告]
 
 ✅ 正确格式：
 ```
-Thought: 我需要读取 search.php 文件来验证 SQL 注入漏洞。
+Thought: 我需要读取 Vault.sol 确认提现函数的参数签名。
 Action: read_file
-Action Input: {"file_path": "search.php"}
+Action Input: {"file_path": "src/Vault.sol"}
 ```
 
 ❌ 错误格式（禁止使用）：
 ```
 **Thought:** 我需要读取文件
 **Action:** read_file
-**Action Input:** {"file_path": "search.php"}
+**Action Input:** {"file_path": "src/Vault.sol"}
 ```
-
-规则：
-1. 不要在 Thought:、Action:、Action Input:、Final Answer: 前后添加 `**`
-2. 不要使用其他 Markdown 格式（如 `###`、`*斜体*` 等）
-3. Action Input 必须是完整的 JSON 对象，不能为空或截断
 
 ## Final Answer 格式
 ```json
@@ -252,19 +91,20 @@ Action Input: {"file_path": "search.php"}
     "findings": [
         {
             ...原始发现字段...,
-            "verdict": "confirmed/likely/uncertain/false_positive",
+            "verdict": "confirmed/execution_reverted/failed_compilation/likely/false_positive",
             "confidence": 0.0-1.0,
             "is_verified": true/false,
-            "verification_method": "描述验证方法",
-            "verification_details": "验证过程和结果详情",
+            "verification_method": "Foundry 动态沙箱测试",
+            "verification_details": "攻击者通过重入成功绕过余额扣减，执行日志显示...",
             "poc": {
-                "description": "PoC 描述",
-                "steps": ["步骤1", "步骤2"],
-                "payload": "完整可执行的 PoC 代码或命令",
-                "harness_code": "Fuzzing Harness 代码（如果使用）"
+                "description": "部署恶意的 Attacker 合约，利用 receive 递归调用提现",
+                "poc_file_path": "test/RealExploit.t.sol",
+                "payload": "完整的 Solidity 测试脚本代码"
             },
-            "impact": "实际影响分析",
-            "recommended_fix": "修复建议",
+            "profit_extracted": 10.0,
+            "gas_used": 135347,
+            "impact": "攻击者可完全掏空合约内的所有 ETH",
+            "recommended_fix": "遵循 Checks-Effects-Interactions 模式，或引入 OpenZeppelin 的 ReentrancyGuard。"
         }
     ],
     "summary": {
@@ -279,7 +119,6 @@ Action Input: {"file_path": "search.php"}
 ## 验证判定标准
 - **confirmed**: 漏洞确认存在且可利用，有明确证据（如 Harness 成功触发）
 - **likely**: 高度可能存在漏洞，代码分析明确但无法动态验证
-- **uncertain**: 需要更多信息才能判断
 - **false_positive**: 确认是误报，有明确理由
 
 ## 🚨 防止幻觉验证（关键！）
@@ -289,37 +128,10 @@ Action Input: {"file_path": "search.php"}
 1. **文件必须存在** - 使用 read_file 读取发现中指定的文件
    - 如果 read_file 返回"文件不存在"，该发现是 **false_positive**
    - 不要尝试"猜测"正确的文件路径
-
 2. **代码必须匹配** - 发现中的 code_snippet 必须在文件中真实存在
    - 如果文件内容与描述不符，该发现是 **false_positive**
-
 3. **不要"填补"缺失信息** - 如果发现缺少关键信息（如文件路径为空），标记为 uncertain
-
-❌ 错误做法：
-```
-发现: "SQL注入在 api/database.py:45"
-read_file 返回: "文件不存在"
-判定: confirmed  <- 这是错误的！
-```
-
-✅ 正确做法：
-```
-发现: "SQL注入在 api/database.py:45"
-read_file 返回: "文件不存在"
-判定: false_positive，理由: "文件 api/database.py 不存在"
-```
-
-## ⚠️ 关键约束
-1. **必须先调用工具验证** - 不允许仅凭已知信息直接判断
-2. **优先使用 run_code** - 编写 Harness 进行动态验证
-3. **PoC 必须完整可执行** - poc.payload 应该是可直接运行的代码
-4. **不要假设环境** - 沙箱中没有运行的服务，需要 mock
-
-## 重要原则
-1. **你是验证的大脑** - 你决定如何测试，工具只提供执行能力
-2. **动态验证优先** - 能运行代码验证的就不要仅靠静态分析
-3. **质量优先** - 宁可漏报也不要误报太多
-4. **证据支撑** - 每个判定都需要有依据
+4. **看懂报错再修改** - 如果 `foundry_test` 失败，它会返回完整的编译器报错（如 `TypeError: Invalid type...` 行号 XX）。**必须根据报错精确定位修改你的 Solidity 代码**。
 
 现在开始验证漏洞发现！"""
 
@@ -574,14 +386,20 @@ class VerificationAgent(BaseAgent):
         
         # 🔥 构建包含交接上下文的初始消息
         handoff_context = self.get_handoff_context()
-        
+
         findings_summary = []
+        
+        # 提取 suggested_actions 列表，如果没有则为空列表
+        suggested_actions = []
+        if self._incoming_handoff and self._incoming_handoff.suggested_actions:
+            suggested_actions = self._incoming_handoff.suggested_actions
+
+        # 同步遍历 findings 和 suggested_actions
         for i, f in enumerate(findings_to_verify):
-            # 🔥 FIX: 正确处理 file_path 格式，可能包含行号 (如 "app.py:36")
+            # 正确处理 file_path 格式，可能包含行号
             file_path = f.get('file_path', 'unknown')
             line_start = f.get('line_start', 0)
 
-            # 如果 file_path 已包含行号，提取出来
             if isinstance(file_path, str) and ':' in file_path:
                 parts = file_path.split(':', 1)
                 if len(parts) == 2 and parts[1].split()[0].isdigit():
@@ -591,17 +409,37 @@ class VerificationAgent(BaseAgent):
                     except ValueError:
                         pass
 
-            findings_summary.append(f"""
-### 发现 {i+1}: {f.get('title', 'Unknown')}
-- 类型: {f.get('vulnerability_type', 'unknown')}
-- 严重度: {f.get('severity', 'medium')}
-- 文件: {file_path} (行 {line_start})
-- 代码:
-```
-{f.get('code_snippet', 'N/A')[:500]}
-```
-- 描述: {f.get('description', 'N/A')[:300]}
-""")
+            # 同步获取对应的 action（包含越界保护，以防列表长度不一致）
+            action = suggested_actions[i] if i < len(suggested_actions) else None
+
+            # 💡 构建单个漏洞的完整上下文提示 (无截断)
+            finding_text = f"### 发现 {i+1}: {f.get('title', 'Unknown')}\n"
+            finding_text += f"- 类型: {f.get('vulnerability_type', 'unknown')}\n"
+            finding_text += f"- 严重度: {f.get('severity', 'medium')}\n"
+            finding_text += f"- 文件: {file_path} (行 {line_start})\n"
+            
+            # 如果同步获取到了专属的 PoC 编写动作指导，高亮注入
+            if action:
+                strategy = action.get('attack_strategy', '未提供')
+                formatted_strategy = strategy.replace('\n', '\n  ') # 缩进排版更美观
+                finding_text += f"- 🎯 **目标函数 (Function)**: `{action.get('function_signature', 'N/A')}`\n"
+                
+                if action.get('source'):
+                    finding_text += f"- 🎯 **污染源 (Source)**: {action.get('source')}\n"
+                if action.get('sink'):
+                    finding_text += f"- 🎯 **危险点 (Sink)**: {action.get('sink')}\n"
+                
+                finding_text += f"- 🎯 **PoC 攻击策略 (Attack Strategy)**:\n  {formatted_strategy}\n"
+            else:
+                # 兜底：如果 action 列表比 finding 列表短，使用 finding 本身的字段
+                finding_text += f"- 🎯 目标函数: {f.get('target_function_signature', 'N/A')}\n"
+                strategy = f.get('attack_strategy', f.get('description', 'N/A'))
+                finding_text += f"- 🎯 攻击思路: {strategy}\n"
+            
+            finding_text += f"- 代码片段:\n```solidity\n{f.get('code_snippet', 'N/A')}\n```\n"
+            finding_text += f"- 详细描述: {f.get('description', f.get('descriptions', 'N/A'))}\n\n"
+            
+            findings_summary.append(finding_text)
         
         initial_message = f"""请验证以下 {len(findings_to_verify)} 个安全发现。
 
@@ -625,7 +463,7 @@ class VerificationAgent(BaseAgent):
 请开始验证。对于每个发现：
 1. 首先使用 read_file 读取发现中指定的文件（使用精确路径）
 2. 分析代码上下文
-3. 判断是否为真实漏洞
+3. 编写PoC，沙箱模拟攻击判断是否为真实漏洞
 {f"特别注意 Analysis Agent 提到的关注点。" if handoff_context else ""}"""
 
         # 初始化对话历史
@@ -667,9 +505,11 @@ class VerificationAgent(BaseAgent):
                 if not llm_output or not llm_output.strip():
                     logger.warning(f"[{self.name}] Empty LLM response in iteration {self._iteration}")
                     await self.emit_llm_decision("收到空响应", "LLM 返回内容为空，尝试重试通过提示")
+                    
+                    # 💡 Web3 升级：调整空响应重试时的工具列表建议
                     self._conversation_history.append({
                         "role": "user",
-                        "content": "Received empty response. Please output your Thought and Action.",
+                        "content": "Received empty response. Please output your Thought and Action. Use tools like read_file, write_file, foundry_test.",
                     })
                     continue
 
@@ -693,6 +533,8 @@ class VerificationAgent(BaseAgent):
                     if self._tool_calls == 0:
                         logger.warning(f"[{self.name}] LLM tried to finish without any tool calls! Forcing tool usage.")
                         await self.emit_thinking("⚠️ 拒绝过早完成：必须先使用工具验证漏洞")
+                        
+                        # 💡 Web3 升级：调整强制要求使用的工具列表
                         self._conversation_history.append({
                             "role": "user",
                             "content": (
@@ -700,8 +542,8 @@ class VerificationAgent(BaseAgent):
                                 "不允许在没有调用任何工具的情况下直接输出 Final Answer。\n\n"
                                 "请立即使用以下工具之一进行验证：\n"
                                 "1. `read_file` - 读取漏洞所在文件的代码\n"
-                                "2. `run_code` - 编写并执行 Fuzzing Harness 验证漏洞\n"
-                                "3. `extract_function` - 提取目标函数进行分析\n\n"
+                                "2. `write_file` - 编写 PoC 代码保存到文件\n"
+                                "3. `foundry_test` - 执行沙箱测试来验证 PoC\n\n"
                                 "现在请输出 Thought 和 Action，开始验证第一个漏洞。"
                             ),
                         })
@@ -713,9 +555,9 @@ class VerificationAgent(BaseAgent):
                     # 🔥 记录洞察和工作
                     if final_result and "findings" in final_result:
                         verified_count = len([f for f in final_result["findings"] if f.get("is_verified")])
-                        fp_count = len([f for f in final_result["findings"] if f.get("verdict") == "false_positive"])
-                        self.add_insight(f"验证了 {len(final_result['findings'])} 个发现，{verified_count} 个确认，{fp_count} 个误报")
-                        self.record_work(f"完成漏洞验证: {verified_count} 个确认, {fp_count} 个误报")
+                        fp_count = len([f for f in final_result["findings"] if f.get("verdict") in ["false_positive", "execution_reverted", "failed_compilation"]])
+                        self.add_insight(f"验证了 {len(final_result['findings'])} 个发现，{verified_count} 个确认，{fp_count} 个误报/失败")
+                        self.record_work(f"完成漏洞验证: {verified_count} 个确认, {fp_count} 个误报/失败")
                     
                     await self.emit_llm_complete(
                         f"验证完成",
@@ -746,7 +588,7 @@ class VerificationAgent(BaseAgent):
                             "请**不要**重复尝试相同的操作。这是无效的。\n"
                             "请尝试：\n"
                             "1. 修改参数 (例如改变 input payload)\n"
-                            "2. 使用不同的工具 (例如从 sandbox_exec 换到 php_test)\n"
+                            "2. 使用不同的工具\n"
                             "3. 如果之前的尝试都失败了，请尝试 analyze_file 重新分析代码\n"
                             "4. 如果无法验证，请输出 Final Answer 并标记为 uncertain"
                         )
@@ -787,9 +629,8 @@ class VerificationAgent(BaseAgent):
                             logger.warning(f"[{self.name}] Tool call failed {fail_count} times: {tool_call_key}")
                             observation += f"\n\n⚠️ **系统提示**: 此工具调用已连续失败 {fail_count} 次。请：\n"
                             observation += "1. 尝试使用不同的参数（如指定较小的行范围）\n"
-                            observation += "2. 使用 search_code 工具定位关键代码片段\n"
-                            observation += "3. 跳过此发现的验证，继续验证其他发现\n"
-                            observation += "4. 如果已有足够验证结果，直接输出 Final Answer"
+                            observation += "2. 跳过此发现的验证，继续验证其他发现\n"
+                            observation += "3. 如果已有足够验证结果，直接输出 Final Answer"
                             
                             # 重置计数器
                             self._failed_tool_calls[tool_call_key] = 0
@@ -859,32 +700,31 @@ class VerificationAgent(BaseAgent):
                 logger.info(f"[{self.name}] LLM returned verdicts: {verdicts_debug}")
 
                 for f in final_result["findings"]:
-                    # 🔥 FIX: Normalize verdict - handle missing/empty verdict
+                    # 💡 Web3 升级：处理新的 verdict 状态 (execution_reverted, failed_compilation)
                     verdict = f.get("verdict")
-                    if not verdict or verdict not in ["confirmed", "likely", "uncertain", "false_positive"]:
+                    if not verdict or verdict not in ["confirmed", "execution_reverted", "failed_compilation", "false_positive", "uncertain", "likely"]:
                         # Try to infer verdict from other fields
                         if f.get("is_verified") is True:
                             verdict = "confirmed"
-                        elif f.get("confidence", 0) >= 0.8:
-                            verdict = "likely"
                         elif f.get("confidence", 0) <= 0.3:
                             verdict = "false_positive"
                         else:
-                            verdict = "uncertain"
+                            verdict = "failed_compilation" # 在 Web3 中，未确认大多是因为编译失败
                         logger.warning(f"[{self.name}] Missing/invalid verdict for {f.get('file_path', '?')}, inferred as: {verdict}")
 
+                    # 💡 Web3 升级：提取沙箱利润与 Gas 数据，打通大盘战果统计
                     verified = {
                         **f,
-                        "verdict": verdict,  # 🔥 Ensure verdict is set
-                        "is_verified": verdict == "confirmed" or (
-                            verdict == "likely" and f.get("confidence", 0) >= 0.8
-                        ),
-                        "verified_at": datetime.now(timezone.utc).isoformat() if verdict in ["confirmed", "likely"] else None,
+                        "verdict": verdict,  
+                        "confidence": f.get("confidence", 0),
+                        "is_verified": verdict == "confirmed",
                     }
 
-                    # 添加修复建议
-                    if not verified.get("recommendation"):
+                    # 添加修复建议 (优先使用大模型生成的 Web3 修复建议)
+                    if not verified.get("recommendation") and not verified.get("recommended_fix"):
                         verified["recommendation"] = self._get_recommendation(f.get("vulnerability_type", ""))
+                    elif verified.get("recommended_fix"):
+                        verified["recommendation"] = verified["recommended_fix"]
 
                     verified_findings.append(verified)
             else:
@@ -892,19 +732,19 @@ class VerificationAgent(BaseAgent):
                 for f in findings_to_verify:
                     verified_findings.append({
                         **f,
-                        "verdict": "uncertain",
-                        "confidence": 0.5,
+                        "verdict": "false_positive", 
+                        "confidence": 0.0,
                         "is_verified": False,
                     })
             
-            # 统计
+            # 💡 Web3 升级：调整统计逻辑。
             confirmed_count = len([f for f in verified_findings if f.get("verdict") == "confirmed"])
             likely_count = len([f for f in verified_findings if f.get("verdict") == "likely"])
-            false_positive_count = len([f for f in verified_findings if f.get("verdict") == "false_positive"])
+            false_positive_count = len([f for f in verified_findings if f.get("verdict") in ["false_positive", "execution_reverted", "failed_compilation"]])
 
             await self.emit_event(
                 "info",
-                f"Verification Agent 完成: {confirmed_count} 确认, {likely_count} 可能, {false_positive_count} 误报"
+                f"Verification Agent 完成: {confirmed_count} 确认, {false_positive_count} 误报/拦截"
             )
 
             # 🔥 CRITICAL: Log final findings count before returning
@@ -937,16 +777,26 @@ class VerificationAgent(BaseAgent):
     def _get_recommendation(self, vuln_type: str) -> str:
         """获取修复建议"""
         recommendations = {
-            "sql_injection": "使用参数化查询或 ORM，避免字符串拼接构造 SQL",
-            "xss": "对用户输入进行 HTML 转义，使用 CSP，避免 innerHTML",
-            "command_injection": "避免使用 shell=True，使用参数列表传递命令",
-            "path_traversal": "验证和规范化路径，使用白名单，避免直接使用用户输入",
-            "ssrf": "验证和限制目标 URL，使用白名单，禁止内网访问",
-            "deserialization": "避免反序列化不可信数据，使用 JSON 替代 pickle/yaml",
-            "hardcoded_secret": "使用环境变量或密钥管理服务存储敏感信息",
-            "weak_crypto": "使用强加密算法（AES-256, SHA-256+），避免 MD5/SHA1",
+            "integer_overflow_underflow": "在 Solidity 0.8+ 环境下依赖默认溢出检查，避免无限制使用 unchecked 代码块；对关键不变量使用显式检查。在非 EVM 链需明确默认溢出语义，对复杂的定点数运算应使用经过充分审查的数学库。",
+            "insecure_randomness": "避免依赖可被矿工操纵的区块属性（如 block.timestamp、blockhash 或 block.difficulty）生成随机数；应采用受信任的预言机（如 Chainlink VRF）或实施提交-揭示（Commit-Reveal）的密码学方案。",
+            "arithmetic_errors": "明确定义并测试舍入策略（决定偏袒协议还是用户），避免因截断导致份额流失。针对复杂运算依赖安全数学库，结合不变量检查，并利用差异测试验证重复操作的边缘情况。",
+            "access_control": "避免定制角色系统，优先采用经过实战检验的原语（如 OpenZeppelin 的 Ownable 或 AccessControl）；对资金移动、跨模块信任以及代理升级的特权角色强制实施多重签名或时间锁，防止单一 EOA 故障。",
+            "logic_errors": "全面审查核心业务逻辑以确保状态变量（如用户余额与总储备量）被正确且同步地更新；对代币铸造和借贷实施适当的制衡护栏，并编写覆盖边缘操作的综合测试用例。",
+            "flash_loan": "系统设计必须假定存在任意规模的瞬时闪电贷；对高影响状态的转换实施速率限制（如每区块限次），设定借款上限与最大滑点以限制单次交互敞口，并确保底层预言机不受瞬时流动性操纵。",
+            "gas_limit": "避免使用受用户输入控制且长度可无限增长的动态数组循环；对必须的循环业务设定合理的硬性迭代上限，或者重构为利用算术运算即可实现恒定 Gas 消耗 (O(1)) 的逻辑。",
+            "denial_of_service": "切勿让核心业务流程依赖外部不受信任地址的调用成功（防止恶意 revert 卡死合约）。处理转账时应采用“拉取而非推送（Pull over Push）”模式，且避免单一角色过度授权引发单点故障。",
+            "unchecked_external_calls": "将所有外部调用视为不可信，采用 Checks-Effects-Interactions 模式（在调用前更新状态）。严格检查外部调用的返回值，并优先使用 OpenZeppelin 的 SafeERC20 包装库处理代币转移。",
+            "price_oracle_manipulation": "避免依赖流动性薄弱的单一现货价格源。应聚合多个预言机数据流检查异常偏差与数据新鲜度，并在去中心化交易所采用长期窗口的 TWAP 以抵御即时或闪电贷操纵。",
+            "lack_of_input_validation": "对函数参数、链下签名和跨链桥负载实施严格边界校验；强制校验非零地址、费率范围与防重放 Nonce，并将管理员及治理的配置输入等同于不受信任的危险数据进行同样级别的验证。",
+            "reentrancy": "在所有涉及代币转移或触发钩子回调的函数中严格遵循检查-生效-交互（Checks-Effects-Interactions）模式；对高风险的状态修改函数使用互斥锁（如 OpenZeppelin 的 ReentrancyGuard）。",
+            "short_address": "将合约升级并使用 Solidity 0.5.0 及更高版本，以利用编译器内置的 calldata 长度自动验证机制。若必须维护低版本环境，需加入自定义修饰符强制校验外部调用传入的 payload 字节大小。",
+            "assert_failure": "区分错误处理场景：对用户输入和外部条件验证应统一使用 require 判定；将 assert 仅限制应用于状态机内绝对不应被打破的业务不变量检查，以免无意中触发 panic 并导致资金锁定或拒绝服务。",
+            "proxy_upgradeability": "使用标准的代理模式（如透明代理或 UUPS）；在逻辑合约部署时立即调用初始化守卫（锁定实现合约防止篡改），对代理升级权限应用时间锁机制，并确保新老合约不存在存储槽冲突。",
+            "front_running": "在涉及交易代币和兑换比例的函数中引入并强制校验滑点限制参数（如 amountOutMin）。对排序高度敏感的核心业务，考虑引入提交-揭示（Commit-Reveal）两步延迟流程抵御内存池窥视。",
+            "timestamp_dependence": "禁止将 block.timestamp 作为核心业务的极度精准条件触发器。如果必须依赖时间（如拍卖或锁定释放），应在合约设计中引入合理的时间宽限期（Time Buffer）机制来抵御矿工十几秒内的时间戳微调。"
         }
-        return recommendations.get(vuln_type, "请根据具体情况修复此安全问题")
+        
+        return recommendations.get(vuln_type, "请遵循 Checks-Effects-Interactions 模式，并根据最新的 Web3 安全审计标准进行代码审查与加固。")
     
     def _deduplicate(self, findings: List[Dict]) -> List[Dict]:
         """去重"""
@@ -995,8 +845,6 @@ class VerificationAgent(BaseAgent):
         """
         # 按验证结果分类
         confirmed = [f for f in verified_findings if f.get("verdict") == "confirmed"]
-        likely = [f for f in verified_findings if f.get("verdict") == "likely"]
-        false_positives = [f for f in verified_findings if f.get("verdict") == "false_positive"]
 
         # 提取关键发现（已确认的高危漏洞）
         key_findings = []
@@ -1024,20 +872,20 @@ class VerificationAgent(BaseAgent):
                 "recommendation": suggestion[:200] if suggestion else "请根据漏洞类型进行修复"
             })
 
-        # 构建洞察
+        # 💡 Web3 升级：构建专属洞察文本
         insights = [
-            f"验证完成: {confirmed_count}个确认, {likely_count}个可能, {false_positive_count}个误报",
-            f"验证准确率: {(confirmed_count + likely_count) / len(verified_findings) * 100:.1f}%" if verified_findings else "无数据",
+            f"利用沙箱验证完成: {confirmed_count}个确认, {likely_count}个可能, {false_positive_count}个误报",
+            f"验证准确率: {confirmed_count / len(verified_findings) * 100:.1f}%" if verified_findings else "无数据",
         ]
 
         # 统计各类型漏洞
         type_counts = {}
-        for f in confirmed + likely:
+        for f in confirmed:
             vtype = f.get("vulnerability_type", "unknown")
             type_counts[vtype] = type_counts.get(vtype, 0) + 1
         if type_counts:
             top_types = sorted(type_counts.items(), key=lambda x: x[1], reverse=True)[:3]
-            insights.append(f"主要漏洞类型: {', '.join([f'{t}({c})' for t, c in top_types])}")
+            insights.append(f"被利用的主要漏洞类型: {', '.join([f'{t}({c})' for t, c in top_types])}")
 
         # 需要关注的文件（有确认漏洞的文件）
         attention_points = []
@@ -1064,11 +912,11 @@ class VerificationAgent(BaseAgent):
             "false_positive_count": false_positive_count,
             "vulnerability_types": type_counts,
             "files_with_confirmed": files_with_confirmed,
-            "poc_generated": len([f for f in verified_findings if f.get("poc_code")]),
+            "poc_generated": len([f for f in verified_findings if f.get("poc_code") or f.get("poc")]),
         }
 
         # 构建摘要
-        summary = f"验证完成: {confirmed_count}个确认漏洞, {likely_count}个可能漏洞"
+        summary = f"验证完成: {confirmed_count}个确认可利用漏洞, {false_positive_count}个未突破漏洞"
         if confirmed_count > 0:
             high_count = len([f for f in confirmed if f.get("severity") in ["critical", "high"]])
             if high_count > 0:

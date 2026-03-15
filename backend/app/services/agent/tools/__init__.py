@@ -14,7 +14,13 @@ from .base import AgentTool, ToolResult
 from .rag_tool import RAGQueryTool, SecurityCodeSearchTool, FunctionContextTool
 from .pattern_tool import PatternMatchTool
 from .code_analysis_tool import CodeAnalysisTool, DataFlowAnalysisTool, VulnerabilityValidationTool
-from .file_tool import FileReadTool, FileSearchTool, ListFilesTool
+
+# 🔥 新增 FileWriteTool
+from .file_tool import FileReadTool, FileSearchTool, ListFilesTool, FileWriteTool
+
+# 🔥 新增foundry工具
+from .foundry_tools import FoundryTestTool, FoundryCastTool
+
 from .sandbox_tool import (
     SandboxTool,
     SandboxHttpTool,
@@ -105,7 +111,12 @@ __all__ = [
     "FileReadTool",
     "FileSearchTool",
     "ListFilesTool",
+    "FileWriteTool",  # 🔥 新增 FileWriteTool
     
+    # 🔥 Foundry 工具
+    "FoundryTestTool",
+    "FoundryCastTool",
+
     # 沙箱
     "SandboxTool",
     "SandboxHttpTool",
