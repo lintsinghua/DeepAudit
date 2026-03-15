@@ -79,3 +79,65 @@ __all__ = [
     "OPEN_REDIRECT",
 ]
 
+# 所有漏洞知识文档
+ALL_VULNERABILITY_DOCS = [
+    # 注入类
+    SQL_INJECTION,
+    NOSQL_INJECTION,
+    COMMAND_INJECTION,
+    CODE_INJECTION,
+    # XSS类
+    XSS_REFLECTED,
+    XSS_STORED,
+    XSS_DOM,
+    # 认证授权类
+    AUTH_BYPASS,
+    IDOR,
+    BROKEN_ACCESS_CONTROL,
+    # 加密类
+    WEAK_CRYPTO,
+    HARDCODED_SECRETS,
+    # 请求伪造
+    CSRF,
+    SSRF,
+    # 其他
+    INSECURE_DESERIALIZATION,
+    PATH_TRAVERSAL,
+    XXE,
+    RACE_CONDITION,
+    BUSINESS_LOGIC,
+    RATE_LIMITING,
+    OPEN_REDIRECT,
+]
+
+__all__ = [
+    "ALL_VULNERABILITY_DOCS",
+    # 注入类
+    "SQL_INJECTION",
+    "NOSQL_INJECTION",
+    "COMMAND_INJECTION",
+    "CODE_INJECTION",
+    # XSS类
+    "XSS_REFLECTED",
+    "XSS_STORED",
+    "XSS_DOM",
+    # 认证授权类
+    "AUTH_BYPASS",
+    "IDOR",
+    "BROKEN_ACCESS_CONTROL",
+    # 加密类
+    "WEAK_CRYPTO",
+    "HARDCODED_SECRETS",
+    # 请求伪造
+    "CSRF",
+    "SSRF",
+    # 其他
+    "INSECURE_DESERIALIZATION",
+    "PATH_TRAVERSAL",
+    "XXE",
+    "RACE_CONDITION",
+    "BUSINESS_LOGIC",
+    "RATE_LIMITING",
+    "OPEN_REDIRECT",
+]
+

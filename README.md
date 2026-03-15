@@ -90,9 +90,22 @@
 
 <div align="center">
 
-### **DeepAudit 已成功发现并获得 49 个 CVE 编号，涉及 16 个知名开源项目**
-
+### **DeepAudit 已成功发现并获得 49 个 CVE 编号 和 6 个 GHSA 安全公告🦞**
+### **涉及17个知名开源项目**
 </div>
+
+#### OpenClaw🦞 漏洞挖掘成果
+
+DeepAudit 内测版本对 [OpenClaw](https://github.com/openclaw/openclaw) 项目进行了深度安全审计，目前已发现 **6 个安全漏洞**，均已被官方确认并发布安全公告（GHSA）。漏洞类型覆盖命令注入、签名验证绕过、远程代码执行、凭证泄露、资源耗尽及敏感信息泄露，其中包含多个 High 级别漏洞。更多漏洞仍在持续挖掘中。
+
+| GHSA 编号 | 项目 | 项目热度 | 漏洞类型 | 严重性 |
+|:---|:---|:---:|:---|:----:|
+| [GHSA-g353-mgv3-8pcj](https://github.com/advisories/GHSA-g353-mgv3-8pcj) | OpenClaw | [![Stars](https://img.shields.io/github/stars/openclaw/openclaw?style=social)](https://github.com/openclaw/openclaw/stargazers) | Signature Verification Bypass | 8.6 |
+| [GHSA-99qw-6mr3-36qr](https://github.com/advisories/GHSA-99qw-6mr3-36qr) | OpenClaw | [![Stars](https://img.shields.io/github/stars/openclaw/openclaw?style=social)](https://github.com/openclaw/openclaw/stargazers) | Code Execution | 8.5 |
+| [GHSA-7h7g-x2px-94hj](https://github.com/advisories/GHSA-7h7g-x2px-94hj) | OpenClaw | [![Stars](https://img.shields.io/github/stars/openclaw/openclaw?style=social)](https://github.com/openclaw/openclaw/stargazers) | Credential Exposure | 6.9 |
+| [GHSA-g2f6-pwvx-r275](https://github.com/openclaw/openclaw/security/advisories/GHSA-g2f6-pwvx-r275) | OpenClaw | [![Stars](https://img.shields.io/github/stars/openclaw/openclaw?style=social)](https://github.com/openclaw/openclaw/stargazers) | Command Injection | Medium |
+| [GHSA-jq3f-vjww-8rq7](https://github.com/openclaw/openclaw/security/advisories/GHSA-jq3f-vjww-8rq7) | OpenClaw | [![Stars](https://img.shields.io/github/stars/openclaw/openclaw?style=social)](https://github.com/openclaw/openclaw/stargazers) | Resource Exhaustion | High |
+| [GHSA-xwcj-hwhf-h378](https://github.com/openclaw/openclaw/security/advisories/GHSA-xwcj-hwhf-h378) | OpenClaw | [![Stars](https://img.shields.io/github/stars/openclaw/openclaw?style=social)](https://github.com/openclaw/openclaw/stargazers) | Information Disclosure | Medium |
 
 | CVE 编号 | 项目 | 项目热度 | 漏洞类型 | CVSS |
 |:---|:---|:---:|:---|:----:|
@@ -148,7 +161,7 @@
 
 👉 [查看完整 CVE 列表详情](CVEList.md)
 
-> *以上漏洞由 DeepAudit 团队成员 [@ez-lbz](https://github.com/ez-lbz) 使用 DeepAudit 挖掘发现*
+> *以上漏洞由 DeepAudit 团队成员 [@lintsinghua](https://github.com/lintsinghua) [@ez-lbz](https://github.com/ez-lbz) 使用 DeepAudit 挖掘发现*
 
 > 如果您使用 DeepAudit 发现了漏洞，欢迎在  [Issues](https://github.com/lintsinghua/DeepAudit/issues/135)  中留言反馈。您的贡献将极大地丰富这份漏洞列表，非常感谢！
 

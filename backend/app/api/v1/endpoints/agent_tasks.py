@@ -760,156 +760,160 @@ async def _initialize_tools(
 
     # ============ 🔥 初始化 RAG 系统 ============
     retriever = None
-    try:
-        await emit(f"🔍 正在初始化 RAG 系统...")
+    if not settings.RAG_ENABLED:
+        await emit("⏭️ RAG 已禁用，跳过代码向量索引")
+        logger.info("RAG 已禁用（RAG_ENABLED=False），跳过 Embedding 和向量索引")
+    else:
+        try:
+            await emit(f"🔍 正在初始化 RAG 系统...")
 
-        # 从用户配置中获取 embedding 配置
-        user_llm_config = (user_config or {}).get('llmConfig', {})
-        user_other_config = (user_config or {}).get('otherConfig', {})
-        user_embedding_config = user_other_config.get('embedding_config', {})
+            # 从用户配置中获取 embedding 配置
+            user_llm_config = (user_config or {}).get('llmConfig', {})
+            user_other_config = (user_config or {}).get('otherConfig', {})
+            user_embedding_config = user_other_config.get('embedding_config', {})
 
-        # Embedding Provider 优先级：用户嵌入配置 > 环境变量
-        embedding_provider = (
-            user_embedding_config.get('provider') or
-            getattr(settings, 'EMBEDDING_PROVIDER', 'openai')
-        )
+            # Embedding Provider 优先级：用户嵌入配置 > 环境变量
+            embedding_provider = (
+                user_embedding_config.get('provider') or
+                getattr(settings, 'EMBEDDING_PROVIDER', 'openai')
+            )
 
-        # Embedding Model 优先级：用户嵌入配置 > 环境变量
-        embedding_model = (
-            user_embedding_config.get('model') or
-            getattr(settings, 'EMBEDDING_MODEL', 'text-embedding-3-small')
-        )
+            # Embedding Model 优先级：用户嵌入配置 > 环境变量
+            embedding_model = (
+                user_embedding_config.get('model') or
+                getattr(settings, 'EMBEDDING_MODEL', 'text-embedding-3-small')
+            )
 
-        # API Key 优先级：用户嵌入配置 > 环境变量 EMBEDDING_API_KEY > 用户 LLM 配置 > 环境变量 LLM_API_KEY
-        # 注意：API Key 可以共享，因为很多用户使用同一个 OpenAI Key 做 LLM 和 Embedding
-        embedding_api_key = (
-            user_embedding_config.get('api_key') or
-            getattr(settings, 'EMBEDDING_API_KEY', None) or
-            user_llm_config.get('llmApiKey') or
-            getattr(settings, 'LLM_API_KEY', '') or
-            ''
-        )
+            # API Key 优先级：用户嵌入配置 > 环境变量 EMBEDDING_API_KEY > 用户 LLM 配置 > 环境变量 LLM_API_KEY
+            # 注意：API Key 可以共享，因为很多用户使用同一个 OpenAI Key 做 LLM 和 Embedding
+            embedding_api_key = (
+                user_embedding_config.get('api_key') or
+                getattr(settings, 'EMBEDDING_API_KEY', None) or
+                user_llm_config.get('llmApiKey') or
+                getattr(settings, 'LLM_API_KEY', '') or
+                ''
+            )
 
-        # Base URL 优先级：用户嵌入配置 > 环境变量 EMBEDDING_BASE_URL > None（使用提供商默认地址）
-        # 🔥 重要：Base URL 不应该回退到 LLM 的 base_url，因为 Embedding 和 LLM 可能使用完全不同的服务
-        # 例如：LLM 使用 SiliconFlow，但 Embedding 使用 HuggingFace
-        embedding_base_url = (
-            user_embedding_config.get('base_url') or
-            getattr(settings, 'EMBEDDING_BASE_URL', None) or
-            None
-        )
+            # Base URL 优先级：用户嵌入配置 > 环境变量 EMBEDDING_BASE_URL > None（使用提供商默认地址）
+            # 🔥 重要：Base URL 不应该回退到 LLM 的 base_url，因为 Embedding 和 LLM 可能使用完全不同的服务
+            # 例如：LLM 使用 SiliconFlow，但 Embedding 使用 HuggingFace
+            embedding_base_url = (
+                user_embedding_config.get('base_url') or
+                getattr(settings, 'EMBEDDING_BASE_URL', None) or
+                None
+            )
 
-        logger.info(f"RAG 配置: provider={embedding_provider}, model={embedding_model}, base_url={embedding_base_url or '(使用默认)'}")
-        await emit(f"📊 Embedding 配置: {embedding_provider}/{embedding_model}")
+            logger.info(f"RAG 配置: provider={embedding_provider}, model={embedding_model}, base_url={embedding_base_url or '(使用默认)'}")
+            await emit(f"📊 Embedding 配置: {embedding_provider}/{embedding_model}")
 
-        # 创建 Embedding 服务
-        embedding_service = EmbeddingService(
-            provider=embedding_provider,
-            model=embedding_model,
-            api_key=embedding_api_key,
-            base_url=embedding_base_url,
-        )
+            # 创建 Embedding 服务
+            embedding_service = EmbeddingService(
+                provider=embedding_provider,
+                model=embedding_model,
+                api_key=embedding_api_key,
+                base_url=embedding_base_url,
+            )
         # 使用用户配置的 batch_size
         embedding_service.batch_size = user_embedding_config.get('batch_size', 100)
 
-        # 创建 collection_name（基于 project_id）
-        collection_name = f"project_{project_id}" if project_id else "default_project"
+            # 创建 collection_name（基于 project_id）
+            collection_name = f"project_{project_id}" if project_id else "default_project"
 
-        # 🔥 v2.0: 创建 CodeIndexer 并进行智能索引
-        # 智能索引会自动：
-        # - 检测 embedding 模型变更，如需要则自动重建
-        # - 对比文件 hash，只更新变化的文件（增量更新）
-        indexer = CodeIndexer(
-            collection_name=collection_name,
-            embedding_service=embedding_service,
-            persist_directory=settings.VECTOR_DB_PATH,
-        )
-
-        logger.info(f"📝 开始智能索引项目: {project_root}")
-        await emit(f"📝 正在构建代码向量索引...")
-
-        index_progress = None
-        last_progress_update = 0
-        last_embedding_progress = [0]  # 使用列表以便在闭包中修改
-        embedding_total = [0]  # 记录总数
-
-        # 🔥 嵌入进度回调函数（同步，但会调度异步任务）
-        def on_embedding_progress(processed: int, total: int):
-            embedding_total[0] = total
-            # 每处理 50 个或完成时更新
-            if processed - last_embedding_progress[0] >= 50 or processed == total:
-                last_embedding_progress[0] = processed
-                percentage = (processed / total * 100) if total > 0 else 0
-                msg = f"🔢 嵌入进度: {processed}/{total} ({percentage:.0f}%)"
-                logger.info(msg)
-                # 使用 asyncio.create_task 调度异步 emit
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(emit(msg))
-                except Exception as e:
-                    logger.warning(f"Failed to emit embedding progress: {e}")
-
-        # 🔥 创建取消检查函数，用于在嵌入批处理中检查取消状态
-        def check_cancelled() -> bool:
-            return task_id is not None and is_task_cancelled(task_id)
-
-        async for progress in indexer.smart_index_directory(
-            directory=project_root,
-            exclude_patterns=exclude_patterns or [],
-            include_patterns=target_files,  # 🔥 传递 target_files 限制索引范围
-            update_mode=IndexUpdateMode.SMART,
-            embedding_progress_callback=on_embedding_progress,
-            cancel_check=check_cancelled,  # 🔥 传递取消检查函数
-        ):
-            # 🔥 在索引过程中检查取消状态
-            if check_cancelled():
-                logger.info(f"[Cancel] RAG indexing cancelled for task {task_id}")
-                raise asyncio.CancelledError("任务已取消")
-
-            index_progress = progress
-            # 每处理 10 个文件或有重要变化时发送进度更新
-            if progress.processed_files - last_progress_update >= 10 or progress.processed_files == progress.total_files:
-                if progress.total_files > 0:
-                    await emit(
-                        f"📝 索引进度: {progress.processed_files}/{progress.total_files} 文件 "
-                        f"({progress.progress_percentage:.0f}%)"
-                    )
-                last_progress_update = progress.processed_files
-
-            # 🔥 发送状态消息（如嵌入向量生成进度）
-            if progress.status_message:
-                await emit(progress.status_message)
-                progress.status_message = ""  # 清空已发送的消息
-
-        if index_progress:
-            summary = (
-                f"✅ 索引完成: 模式={index_progress.update_mode}, "
-                f"新增={index_progress.added_files}, "
-                f"更新={index_progress.updated_files}, "
-                f"删除={index_progress.deleted_files}, "
-                f"代码块={index_progress.indexed_chunks}"
+            # 🔥 v2.0: 创建 CodeIndexer 并进行智能索引
+            # 智能索引会自动：
+            # - 检测 embedding 模型变更，如需要则自动重建
+            # - 对比文件 hash，只更新变化的文件（增量更新）
+            indexer = CodeIndexer(
+                collection_name=collection_name,
+                embedding_service=embedding_service,
+                persist_directory=settings.VECTOR_DB_PATH,
             )
-            logger.info(summary)
-            await emit(summary)
 
-        # 创建 CodeRetriever（用于搜索）
-        # 🔥 传递 api_key，用于自动适配 collection 的 embedding 配置
-        retriever = CodeRetriever(
-            collection_name=collection_name,
-            embedding_service=embedding_service,
-            persist_directory=settings.VECTOR_DB_PATH,
-            api_key=embedding_api_key,  # 🔥 传递 api_key 以支持自动切换 embedding
-        )
+            logger.info(f"📝 开始智能索引项目: {project_root}")
+            await emit(f"📝 正在构建代码向量索引...")
 
-        logger.info(f"✅ RAG 系统初始化成功: collection={collection_name}")
-        await emit(f"✅ RAG 系统初始化成功")
+            index_progress = None
+            last_progress_update = 0
+            last_embedding_progress = [0]  # 使用列表以便在闭包中修改
+            embedding_total = [0]  # 记录总数
 
-    except Exception as e:
-        logger.warning(f"⚠️ RAG 系统初始化失败: {e}")
-        await emit(f"⚠️ RAG 系统初始化失败: {e}", "warning")
-        import traceback
-        logger.debug(f"RAG 初始化异常详情:\n{traceback.format_exc()}")
-        retriever = None
+            # 🔥 嵌入进度回调函数（同步，但会调度异步任务）
+            def on_embedding_progress(processed: int, total: int):
+                embedding_total[0] = total
+                # 每处理 50 个或完成时更新
+                if processed - last_embedding_progress[0] >= 50 or processed == total:
+                    last_embedding_progress[0] = processed
+                    percentage = (processed / total * 100) if total > 0 else 0
+                    msg = f"🔢 嵌入进度: {processed}/{total} ({percentage:.0f}%)"
+                    logger.info(msg)
+                    # 使用 asyncio.create_task 调度异步 emit
+                    try:
+                        loop = asyncio.get_running_loop()
+                        loop.create_task(emit(msg))
+                    except Exception as e:
+                        logger.warning(f"Failed to emit embedding progress: {e}")
+
+            # 🔥 创建取消检查函数，用于在嵌入批处理中检查取消状态
+            def check_cancelled() -> bool:
+                return task_id is not None and is_task_cancelled(task_id)
+
+            async for progress in indexer.smart_index_directory(
+                directory=project_root,
+                exclude_patterns=exclude_patterns or [],
+                include_patterns=target_files,  # 🔥 传递 target_files 限制索引范围
+                update_mode=IndexUpdateMode.SMART,
+                embedding_progress_callback=on_embedding_progress,
+                cancel_check=check_cancelled,  # 🔥 传递取消检查函数
+            ):
+                # 🔥 在索引过程中检查取消状态
+                if check_cancelled():
+                    logger.info(f"[Cancel] RAG indexing cancelled for task {task_id}")
+                    raise asyncio.CancelledError("任务已取消")
+
+                index_progress = progress
+                # 每处理 10 个文件或有重要变化时发送进度更新
+                if progress.processed_files - last_progress_update >= 10 or progress.processed_files == progress.total_files:
+                    if progress.total_files > 0:
+                        await emit(
+                            f"📝 索引进度: {progress.processed_files}/{progress.total_files} 文件 "
+                            f"({progress.progress_percentage:.0f}%)"
+                        )
+                    last_progress_update = progress.processed_files
+
+                # 🔥 发送状态消息（如嵌入向量生成进度）
+                if progress.status_message:
+                    await emit(progress.status_message)
+                    progress.status_message = ""  # 清空已发送的消息
+
+            if index_progress:
+                summary = (
+                    f"✅ 索引完成: 模式={index_progress.update_mode}, "
+                    f"新增={index_progress.added_files}, "
+                    f"更新={index_progress.updated_files}, "
+                    f"删除={index_progress.deleted_files}, "
+                    f"代码块={index_progress.indexed_chunks}"
+                )
+                logger.info(summary)
+                await emit(summary)
+
+            # 创建 CodeRetriever（用于搜索）
+            # 🔥 传递 api_key，用于自动适配 collection 的 embedding 配置
+            retriever = CodeRetriever(
+                collection_name=collection_name,
+                embedding_service=embedding_service,
+                persist_directory=settings.VECTOR_DB_PATH,
+                api_key=embedding_api_key,  # 🔥 传递 api_key 以支持自动切换 embedding
+            )
+
+            logger.info(f"✅ RAG 系统初始化成功: collection={collection_name}")
+            await emit(f"✅ RAG 系统初始化成功")
+
+        except Exception as e:
+            logger.warning(f"⚠️ RAG 系统初始化失败: {e}")
+            await emit(f"⚠️ RAG 系统初始化失败: {e}", "warning")
+            import traceback
+            logger.debug(f"RAG 初始化异常详情:\n{traceback.format_exc()}")
+            retriever = None
 
     # 基础工具 - 传递排除模式和目标文件
     base_tools = {
@@ -972,6 +976,7 @@ async def _initialize_tools(
         logger.info("✅ RAG 工具 (rag_query, security_search, function_context) 已注册到 Analysis Agent")
     else:
         logger.warning("⚠️ RAG 未初始化，rag_query/security_search/function_context 工具不可用")
+        await emit("⚠️ RAG 不可用，将使用 read_file/search_code 替代语义检索", "warning")
     
     # Verification 工具
     # 🔥 导入沙箱工具
