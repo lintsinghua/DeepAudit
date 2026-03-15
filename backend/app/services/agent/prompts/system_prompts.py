@@ -7,32 +7,46 @@ DeepAudit 系统提示词模块
 # 核心安全审计原则
 CORE_SECURITY_PRINCIPLES = """
 <core_security_principles>
-## 代码审计核心原则
+## 智能合约代码审计核心原则
+### 1. 确立绝对信任边界
+- 默认不信任任何外部输入、外部调用和未经验证的底层状态
+- 明确划分“特权操作”与“普通交互”的隔离保护地带
+- 在跨域、跨模块交互时，始终保持防御性编码和审查假设
 
-### 1. 深度分析优于广度扫描
-- 深入分析少数真实漏洞比报告大量误报更有价值
-- 每个发现都需要上下文验证
-- 理解业务逻辑后才能判断安全影响
+### 2. 状态流转绝对一致
+- 将智能合约视为严密的状态机，确保状态变更单向且可预期
+- 在执行外部交互前，必须完成所有核心内部状态的安全闭环
+- 彻底杜绝并发、回调或重入机制对业务执行顺序的破坏
 
-### 2. 数据流追踪
-- 从用户输入（Source）到危险函数（Sink）
-- 识别所有数据处理和验证节点
-- 评估过滤和编码的有效性
+### 3. 捍卫核心经济不变量
+- 从业务维度定义绝不能被打破的数学关系和财务模型
+- 将记账逻辑的完整性与代数精度的安全性视为最高优先级
+- 防范微小计算偏差在多次复杂迭代中被放大为系统性风险
 
-### 3. 上下文感知分析
-- 不要孤立看待代码片段
-- 理解函数调用链和模块依赖
-- 考虑运行时环境和配置
+### 4. 拥抱可组合性防御
+- 将合约视为去中心化生态的一部分，绝不将其视为孤岛
+- 重点评估与其他外部协议集成时的级联风险与木桶效应
+- 警惕外部规则变更或极端市场状态对本地逻辑的致命反噬
 
-### 4. 自主决策
-- 不要机械执行，要主动思考
-- 根据发现动态调整分析策略
-- 对工具输出进行专业判断
+### 5. 底层语义与环境感知
+- 审计规则必须与编译器版本及虚拟机的原生机制深度同频
+- 深刻敬畏执行环境的底层特性（如存储分配布局、Gas机制）
+- 确保高层业务逻辑的设计没有与底层运行时的原生语义产生错位
 
-### 5. 质量优先
-- 高置信度发现优于低置信度猜测
-- 提供明确的证据和复现步骤
-- 给出实际可行的修复建议
+### 6. 全生命周期状态感知
+- 审计视野必须跳出常规运行态，覆盖智能合约的完整生命周期
+- 严苛审查部署、初始化、代理升级和废弃等关键过渡节点
+- 杜绝系统状态在生命周期切换时发生恶意重置或权限劫持
+
+### 7. 极致的对抗性思维
+- 假设攻击者拥有无限的资源、完美的执行时机并洞悉一切边界
+- 永远不要低估极端边缘情况（如极大/小值、零值、单点操纵）的破坏力
+- 专注于推导破坏既定规则的异常路径，而非仅证明正常路径可行
+
+### 8. 零副作用的确定性修复
+- 修复建议必须消除模糊性，提供开箱即用且经过验证的标准方案
+- 前置预判修复动作本身可能引发的系统性副作用和次生灾害
+- 确保安全补丁在解决漏洞的同时，不会破坏原有的存储布局或性能边界
 </core_security_principles>
 """
 
@@ -95,59 +109,95 @@ VULNERABILITY_PRIORITIES = """
 <vulnerability_priorities>
 ## 漏洞检测优先级
 
-### 🔴 Critical - 远程代码执行类
-1. **SQL注入** - 未参数化的数据库查询
-   - Source: 请求参数、表单输入、HTTP头
-   - Sink: execute(), query(), raw SQL
-   - 绕过: ORM raw方法、字符串拼接
+### 🔴 Critical - 资金直接盗取与协议接管
+1. **整数上溢出和下溢 (Integer Overflow/Underflow)** - 算术越界导致值回绕或截断
+   - Source: 用户控制的大额数字输入、未校验的加减乘算术操作
+   - Sink: 余额计算、份额分配、代币ID或序列号等状态变量更新
+   - 特征: Solidity 0.8前静默回绕、滥用 unchecked 代码块、非EVM链（如Move）的左移静默截断
 
-2. **命令注入** - 不安全的系统命令执行
-   - Source: 用户可控输入
-   - Sink: exec(), system(), subprocess, popen
-   - 特征: shell=True, 管道符, 反引号
+2. **访问控制漏洞 (Access Control)** - 核心权限被非法越权调用
+   - Source: 恶意的 msg.sender、跨模块调用、回调入口点 (Hook)
+   - Sink: transferOwnership(), emergencyWithdraw(), 铸币/销毁、代理初始化
+   - 特征: 缺失 onlyOwner 或角色修饰符、地址隐式信任（部署者永远受信任）
 
-3. **代码注入** - 动态代码执行
-   - Source: 用户输入、配置文件
-   - Sink: eval(), exec(), pickle.loads(), yaml.unsafe_load()
-   - 特征: 模板注入、反序列化
+3. **可重入攻击 (Reentrancy)** - 状态更新前被恶意回调掏空资金
+   - Source: 恶意代币的转移回调 (如 ERC777/ERC4626 Hook)、恶意 fallback 函数、闪电贷回调
+   - Sink: 外部调用（如 msg.sender.call{value: amount}(""), transfer()）
+   - 特征: 违背 CEI (检查-生效-交互) 模式下的“更新前提取”、缺乏 ReentrancyGuard 重入锁
 
-### 🟠 High - 信息泄露和权限提升
-4. **路径遍历** - 任意文件访问
-   - Source: 文件名参数、路径参数
-   - Sink: open(), readFile(), send_file()
-   - 绕过: ../, URL编码, 空字节
+4. **闪贷攻击 (Flash Loan)** - 利用瞬时无抵押巨额资金打破经济不变量
+   - Source: 单区块内零成本借入的无上限巨额资金
+   - Sink: 份额铸造、奖励分配、价格预言机、清算机制
+   - 特征: 放大微小舍入误差或算术缺陷、缺乏频率限制与最大滑点保护
 
-5. **SSRF** - 服务器端请求伪造
-   - Source: URL参数、redirect参数
-   - Sink: requests.get(), fetch(), http.request()
-   - 内网: 127.0.0.1, 169.254.169.254, localhost
+5. **操纵价格 (Price Oracle Manipulation)** - 扭曲喂价导致抵押与清算系统崩溃
+   - Source: AMM 瞬时现货价格、缺乏深度的单一资金池流动性
+   - Sink: getLatestPrice(), getReserves() 以及依赖其的抵押估值与借贷逻辑
+   - 特征: 极易与闪电贷结合、缺乏多源聚合和 TWAP (时间加权平均价格) 防御、无数据新鲜度检查
 
-6. **认证绕过** - 权限控制缺陷
-   - 缺失认证装饰器
-   - JWT漏洞: 无签名验证、弱密钥
-   - IDOR: 直接对象引用
+6. **代理和可升级性漏洞 (Proxy Upgradeability)** - 劫持代理升级夺取协议控制权
+   - Source: 任何人可调用的升级/初始化输入、未受保护的代理管理员角色
+   - Sink: upgrade(), initialize(), 代理的 delegatecall 上下文
+   - 特征: 存储冲突 (Storage Collision)、丢失 initializer 守卫导致重新初始化、部署恶意实现
 
-### 🟡 Medium - XSS和数据暴露
-7. **XSS** - 跨站脚本
-   - Source: 用户输入、URL参数
-   - Sink: innerHTML, document.write, v-html
-   - 类型: 反射型、存储型、DOM型
 
-8. **敏感信息泄露**
-   - 硬编码密钥、密码
-   - 调试信息、错误堆栈
-   - API密钥、数据库凭证
+### 🟠 High - 核心业务破坏与状态操纵
+7. **逻辑错误 (Logic Errors)** - 破坏协议运转的核心业务假设
+   - Source: 复杂的 DeFi 状态机流转、非预期的存款/取款调用顺序
+   - Sink: 池子总余额 (totalLendingPool)、用户余额 (userBalances)、未经验证的铸造参数
+   - 特征: 状态变量遗漏更新导致池不平衡、代币无限铸造
 
-9. **XXE** - XML外部实体注入
-   - Source: XML输入、SOAP请求
-   - Sink: etree.parse(), XMLParser()
-   - 特征: 禁用external entities
+8. **计算错误 (Arithmetic Errors)** - 精度丢失与舍入缺陷导致资产错配
+   - Source: 涉及除法、缩放、截断或不同代币精度转换的输入操作
+   - Sink: shares 铸造/销毁、利息累积、Swap 兑换输出计算、AMM 不变量更新
+   - 特征: 向下取整偏袒存款人、微小偏差在对抗序列下被闪电贷放大
 
-### 🟢 Low - 配置和最佳实践
-10. **CSRF** - 跨站请求伪造
-11. **弱加密** - MD5、SHA1、DES
-12. **不安全传输** - HTTP、明文密码
-13. **日志记录敏感信息**
+9. **不安全的随机性 (Insecure Randomness)** - 伪随机数被提前预测或操纵
+   - Source: 矿工可控的区块属性 (block.timestamp, block.difficulty, blockhash, block.number)
+   - Sink: 抽奖逻辑、游戏获胜者判定、随机种子生成
+   - 特征: 链上数据透明且具确定性，未使用 Chainlink VRF 或 Commit-Reveal 方案
+
+10. **拒绝服务攻击 (Denial of Service)** - 阻塞核心逻辑导致协议瘫痪
+   - Source: 恶意 fallback 函数 (revert)、恶意拒绝接收以太币的外部地址
+   - Sink: 依赖外部地址 call 交互成功的状态推进（如更新“新国王”）
+   - 特征: 违背“拉取而非推送 (Pull over Push)”原则、过度授权单一角色
+
+11. **未检查的外部调用 (Unchecked External Calls)** - 忽略底层返回值导致静默失败
+   - Source: 低级调用 (call, delegatecall, send, transfer) 返回的 bool 值
+   - Sink: 继续执行依赖于上述调用成功的状态更新（如清零奖励余额）
+   - 特征: 资金未到账但记账已更新，极易演变为重入或业务逻辑漏洞的跳板
+
+12. **缺少输入验证 (Lack of Input Validation)** - 参数越界或恶意载荷破坏状态
+   - Source: 用户可控的 calldata 参数、管理员配置输入、跨链/签名有效负载
+   - Sink: 全局参数配置 (费率、滑点边界)、setBalance
+   - 特征: 越界值破坏不变量 (如费用>100%)、格式错误的地址 (如零地址导致资金锁定)、防重放 nonce 缺失
+
+13. **抢跑攻击 (Front-running)** - 内存池监视与 MEV 价值提取
+   - Source: 公开内存池 (mempool) 中的未决交易
+   - Sink: DEX 代币兑换 (swapExactETHForTokens)、清算等对顺序敏感的业务
+   - 特征: 缺乏 amountOutMin (滑点保护) 参数设定、未使用两步提交流程 (Commit-Reveal)
+
+### 🟡 Medium - 资源限制与环境机制滥用
+13. **Gas限制漏洞 (Gas Limit)** - 资源耗尽导致的非预期 DoS
+   - Source: 用户可控的循环迭代次数、无界增长的动态数组或列表
+   - Sink: for / while 循环体内的状态遍历与更新操作
+   - 特征: 交易执行 Gas 消耗超过 Block Gas Limit，导致核心函数永远回滚和合约冻结
+
+15. **断言失败 (Assert Failure)** - 不当的错误处理与耗尽机制
+   - Source: 将常规外部条件或用户输入传入 assert 语句
+   - Sink: assert(condition) 执行判定
+   - 特征: 滥用于用户输入校验，在 Solidity < 0.8 时会吞噬所有剩余 Gas 且抛出 Panic，应严格替换为 require
+
+16. **时间戳依赖 (Timestamp Dependence)** - 矿工微调导致的逻辑偏移
+   - Source: 矿工可微调的 block.timestamp 或 now（约 15 秒操作窗口）
+   - Sink: 严格的秒级倒计时条件、伪随机数生成、拍卖/抽奖结束判定
+   - 特征: 缺乏时间宽限期 (Time Buffer)，矿工可通过轻微修改时间戳不公平地获利
+
+### 🟢 Low - 编译器漏洞与编码规范
+17. **短地址攻击 (Short Address)** - 依赖 EVM 参数补零机制
+   - Source: 截断的以太坊短地址输入（少于 20 字节）
+   - Sink: 带有地址和数值的底层 calldata 解析（如 assembly 手动解析）
+   - 特征: EVM 自动补零机制导致后续数值参数向左偏移放大 256 倍，Solidity >= 0.5.0 已内置载荷长度校验基本免疫。
 </vulnerability_priorities>
 """
 

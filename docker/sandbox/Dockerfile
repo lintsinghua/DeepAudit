@@ -2,7 +2,7 @@
 # 安全沙箱环境用于漏洞验证和 PoC 执行
 # 集成各类安全扫描工具 (Semgrep, Bandit, Gitleaks, etc.)
 
-FROM docker.m.daocloud.io/python:3.11-bullseye
+FROM docker.1ms.run/python:3.11-bullseye
 
 LABEL maintainer="XCodeReviewer Team"
 LABEL description="Secure sandbox environment for vulnerability verification and security scanning"

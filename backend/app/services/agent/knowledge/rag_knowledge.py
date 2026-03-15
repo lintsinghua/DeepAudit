@@ -225,7 +225,7 @@ class SecurityKnowledgeRAG:
         获取特定漏洞类型的知识
         
         Args:
-            vuln_type: 漏洞类型（如sql_injection, xss等）
+            vuln_type: 漏洞类型（如Flash Loan, DoS等）
             
         Returns:
             漏洞知识文档

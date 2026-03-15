@@ -46,10 +46,10 @@ class SecurityKnowledgeQueryTool(AgentTool):
 - 了解特定技术的安全考量
 
 示例查询：
-- "SQL injection detection methods"
-- "XSS prevention best practices"
-- "SSRF vulnerability patterns"
-- "hardcoded credentials"
+- "Flash Loan Attacks detection methods"
+- "Integer Overflow and Underflow prevention best practices"
+- "Unchecked External Calls vulnerability patterns"
+- "Reentrancy Attacks Limitation"
 """
     
     @property
@@ -124,11 +124,11 @@ class VulnerabilityKnowledgeInput(BaseModel):
     """漏洞知识查询输入"""
     vulnerability_type: str = Field(
         ...,
-        description="漏洞类型，如: sql_injection, xss, command_injection, path_traversal, ssrf, deserialization, hardcoded_secrets, auth_bypass"
+        description="漏洞类型，如: unchecked_external_calls, integer_overflow_underflow, flash_loan, reentrancy, DoS, timestamp_dependence, logic_errors, access_control"
     )
     project_language: Optional[str] = Field(
         None,
-        description="目标项目的主要编程语言（如 python, php, javascript, rust, go），用于过滤相关示例"
+        description="目标项目的主要编程语言（如 python, php, javascript, solidity, Move），用于过滤相关示例"
     )
 
 
@@ -148,14 +148,23 @@ class GetVulnerabilityKnowledgeTool(AgentTool):
         return """获取特定漏洞类型的完整专业知识。
 
 支持的漏洞类型：
-- sql_injection: SQL注入
-- xss: 跨站脚本攻击
-- command_injection: 命令注入
-- path_traversal: 路径遍历
-- ssrf: 服务端请求伪造
-- deserialization: 不安全的反序列化
-- hardcoded_secrets: 硬编码凭证
-- auth_bypass: 认证绕过
+- integer_overflow_underflow: 整数上溢出和下溢
+- insecure_randomness: 不安全的随机性
+- arithmetic_errors: 计算错误
+- access_control: 访问控制漏洞
+- logic_errors: 逻辑错误
+- flash_loan: 闪贷攻击
+- gas_limit: Gas限制漏洞
+- denial_of_service: 拒绝服务攻击
+- unchecked_external_calls: 未检查的外部调用
+- price_oracle_manipulation: 操纵价格
+- lack_of_input_validation: 缺少输入验证
+- reentrancy: 可重入攻击
+- short_address: 短地址攻击
+- assert_failure: 断言失败
+- proxy_upgradeability: 代理和可升级性漏洞
+- front_running: 抢跑攻击
+- timestamp_dependence: 时间戳依赖
 
 返回内容包括：
 - 漏洞概述和危害
@@ -265,7 +274,10 @@ class GetVulnerabilityKnowledgeTool(AgentTool):
             return "rust"
         if "public class" in content or "private void" in content:
             return "java"
-
+        if "pragma solidity" in content or ("contract " in content and ("msg.sender" in content or "mapping(" in content)):
+            return "solidity"
+        if "public fun " in content or "acquires " in content or ("module " in content and ("has key" in content or "has store" in content)):
+            return "move"
         return None
 
 

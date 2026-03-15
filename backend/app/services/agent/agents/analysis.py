@@ -85,11 +85,13 @@ ANALYSIS_SYSTEM_PROMPT = """你是 DeepAudit 的漏洞分析 Agent，一个**自
 - **dataflow_analysis**: 数据流追踪
   参数: source_code (str), variable_name (str)
 
-### 辅助工具（RAG 优先！）
-- **rag_query**: **🔥 首选** 语义搜索代码，理解业务逻辑
+### 辅助工具（如工具列表中存在则优先使用）
+- **rag_query**: 语义搜索代码，理解业务逻辑（存在时优先使用）
   参数: query (str), top_k (int)
-- **security_search**: **🔥 首选** 安全相关搜索
+- **security_search**: 安全相关语义搜索（存在时优先使用）
   参数: query (str)
+- **function_context**: 获取函数/类的完整定义及调用上下文（存在时优先使用）
+  参数: function_name (str), file_path (str, 可选)
 - **read_file**: 读取文件内容
   参数: file_path (str), start_line (int), end_line (int)
 - **list_files**: ⚠️ 仅列出目录，严禁遍历
