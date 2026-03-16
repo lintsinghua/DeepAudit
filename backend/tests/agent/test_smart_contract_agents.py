@@ -28,7 +28,8 @@ from app.services.agent.agents.smart_contract_verification import VerificationAg
 
 # ── 工具 ──────────────────────────────────────────────────────────────
 from app.services.agent.tools.file_tool import FileReadTool, ListFilesTool, FileSearchTool, FileWriteTool
-from app.services.agent.tools.foundry_tools import FoundryTestTool
+from app.services.agent.knowledge import SecurityKnowledgeQueryTool,GetVulnerabilityKnowledgeTool
+from app.services.agent.tools.foundry_tools import FoundryTestTool, FoundryCastTool
 from app.services.agent.tools.thinking_tool import ThinkTool, ReflectTool
 from app.services.agent.tools.sandbox_tool import SandboxManager, SandboxConfig
 
@@ -166,7 +167,7 @@ def setup_vulnerable_project(workspace_dir: str):
                 os.remove(path)
 
     # 3️⃣ 写入包含重入漏洞的真实靶机合约 (Violates CEI pattern)
-    vulnerable_contract = """// SPDX-License-Identifier: MIT
+    vulnerable_contract = """//SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 contract Vault {
@@ -183,8 +184,14 @@ contract Vault {
         (bool success, ) = msg.sender.call{value: amount}("");
         require(success, "Transfer failed");
         
-        balances[msg.sender] -= amount;
+        // 使用 unchecked 绕过 0.8+ 的下溢出检查，让重入攻击能够成功结算
+        unchecked {
+            balances[msg.sender] -= amount;
+        }
     }
+    
+    // 建议加一个 receive 函数，方便你在 setUp() 中直接给靶机塞 TVL (vm.deal)
+    receive() external payable {}
 }
 """
     with open(os.path.join(workspace_dir, "src/Vault.sol"), "w") as f:
@@ -194,31 +201,82 @@ contract Vault {
 
 
 # ==========================================
-# 3. 最终报告生成器
+# 3. 最终报告生成器 (适配新版 Orchestrator 数据结构)
 # ==========================================
 def generate_markdown_report(findings: list, output_file: str):
-    """生成最终的 Markdown 格式安全审计报告"""
+    """生成最终的 Markdown 格式安全审计战报"""
     md = "# DeepAudit 智能合约安全审计战报\n\n"
+    md += "---\n\n"
+    
     if not findings:
-        md += "🎉 恭喜，未发现任何安全漏洞！\n"
+        md += "🎉 **恭喜，本次审计未发现任何安全漏洞！**\n"
     else:
-        md += f"⚠️ 本次审计共确认 **{len(findings)}** 个漏洞。\n\n"
+        # 统计数据
+        confirmed_count = len([f for f in findings if f.get("is_verified") or f.get("verdict") == "confirmed"])
+        total_profit = sum([f.get("profit_extracted", 0) for f in findings if isinstance(f.get("profit_extracted"), (int, float))])
+        
+        md += f"## 📊 审计总览\n"
+        md += f"- **跟踪漏洞总数**: {len(findings)} 个\n"
+        md += f"- **已确认真实漏洞**: {confirmed_count} 个 (通过沙箱动态验证)\n"
+        md += f"- **累计沙箱获利**: {total_profit} ETH\n\n"
+        md += "---\n\n"
+
         for i, f in enumerate(findings, 1):
-            sev = f.get('severity', 'Unknown').upper()
+            sev = str(f.get('severity', 'Unknown')).upper()
             title = f.get('title', '未命名漏洞')
-            md += f"## {i}. [{sev}] {title}\n"
-            md += f"- **状态**: {'✅ 已成功在沙箱利用 (Confirmed)' if f.get('verdict') == 'confirmed' else '⚠️ 仅静态发现'}\n"
-            md += f"- **类型**: {f.get('vulnerability_type')}\n"
-            md += f"- **位置**: {f.get('file_path')}\n"
+            is_confirmed = f.get('is_verified') or f.get('verdict') == "confirmed"
             
-            # 如果有具体的 PoC 代码，展示出来
-            if f.get('poc') and f['poc'].get('poc_code'):
-                md += f"\n### 🗡️ PoC 利用代码\n```solidity\n{f['poc']['poc_code']}\n```\n"
+            # 标题与基本状态
+            status_icon = "🔴 [沙箱已利用]" if is_confirmed else "🟡 [静态疑似]"
+            md += f"## {i}. {status_icon} [{sev}] {title}\n\n"
             
-            md += "---\n"
+            # 基础信息表格
+            md += "| 属性 | 详情 |\n"
+            md += "|---|---|\n"
+            md += f"| **漏洞类型** | `{f.get('vulnerability_type', 'N/A')}` |\n"
+            md += f"| **漏洞位置** | `{f.get('file_path', 'N/A')}` (Line: {f.get('line_start', 'N/A')}) |\n"
+            if f.get('target_function_signature'):
+                md += f"| **目标函数** | `{f.get('target_function_signature')}` |\n"
+            if f.get('profit_extracted'):
+                md += f"| **榨取利润** | **{f.get('profit_extracted')} ETH** 💰 |\n"
+            md += "\n"
+
+            # 详细描述与理论分析 (来自 Analysis Agent)
+            if f.get('description'):
+                md += f"### 📝 漏洞描述\n{f.get('description')}\n\n"
+                
+            if f.get('source') or f.get('sink'):
+                md += f"### 🔍 污点分析\n"
+                md += f"- **Source (污染源)**: `{f.get('source', 'N/A')}`\n"
+                md += f"- **Sink (执行点)**: `{f.get('sink', 'N/A')}`\n\n"
+
+            if f.get('attack_strategy'):
+                md += f"### ⚔️ 攻击策略\n{f.get('attack_strategy')}\n\n"
+
+            # 目标合约切片
+            if f.get('code_snippet'):
+                md += f"### 🎯 脆弱代码片段\n```solidity\n{f.get('code_snippet')}\n```\n\n"
+
+            # PoC 利用代码 (来自 Verification Agent)
+            # 注意：适配新版 _normalize_finding 展平后的字段 poc_payload
+            poc_code = f.get('poc_payload') or (f.get('poc', {})).get('payload') 
+            if poc_code:
+                poc_path = f.get('poc_file_path', 'test/Exploit.t.sol')
+                md += f"### 💣 Foundry PoC 验证脚本 (`{poc_path}`)\n"
+                md += f"```solidity\n{poc_code}\n```\n\n"
+            elif is_confirmed:
+                 md += f"### 💣 验证信息\n> 该漏洞已通过动态验证，但未提取到完整的 PoC 源码。\n\n"
+            
+            # 修复建议
+            if f.get('suggestion') or f.get('recommendation'):
+                md += f"### 🛡️ 修复建议\n{f.get('suggestion') or f.get('recommendation')}\n\n"
+
+            md += "---\n\n"
             
     with open(output_file, "w", encoding="utf-8") as f: 
         f.write(md)
+    
+    logger.info(f"Markdown 审计报告已生成: {output_file}")
 
 
 # ==========================================
@@ -255,7 +313,18 @@ async def main():
     sandbox_manager = SandboxManager(config=sandbox_config)
     await sandbox_manager.initialize()
     
-    # 4. 组装 Verification Agent 的黑客工具箱
+    # 4. 组装Agent 的黑客工具箱
+    recon_tools = {
+        **base_tools,
+        # 🔥 新增: 链上信息获取工具，用于下载合约源码/ABI
+        "foundry_cast": FoundryCastTool(sandbox_manager),
+    }
+    analysis_tools = {
+        **base_tools,
+        # 安全知识查询 (防幻觉利器)
+        "query_security_knowledge": SecurityKnowledgeQueryTool(),
+        "get_vulnerability_knowledge": GetVulnerabilityKnowledgeTool(),
+    }
     verify_tools = {
         **base_tools,
         "write_file": FileWriteTool(project_root=workspace),
@@ -266,7 +335,7 @@ async def main():
     }
     
     # 5. 实例化四大天王 Agent
-    recon_agent = ReconAgent(llm_service, base_tools, emitter)
+    recon_agent = ReconAgent(llm_service, recon_tools, emitter)
     analysis_agent = AnalysisAgent(llm_service, base_tools, emitter)
     verification_agent = VerificationAgent(llm_service, verify_tools, emitter)
     orchestrator = OrchestratorAgent(llm_service, {"think": ThinkTool()}, emitter)

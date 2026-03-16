@@ -833,24 +833,28 @@ Action Input: {{"参数": "值"}}
                         continue
 
                     new_file = normalized_new.get("file_path", "").lower().strip()
-                    new_type = (normalized_new.get("vulnerability_type", "") or "").lower()
-                    new_line = normalized_new.get("line_start") or normalized_new.get("line", 0)
+                    new_type = normalized_new.get("vulnerability_type", "").lower()
 
                     found = False
                     for i, existing_f in enumerate(self._all_findings):
-                        existing_file = (existing_f.get("file_path", "") or existing_f.get("file", "")).lower().strip()
-                        existing_type = (existing_f.get("vulnerability_type", "") or existing_f.get("type", "")).lower()
+                        existing_file = existing_f.get("file_path", "").lower().strip()
+                        existing_type = existing_f.get("vulnerability_type", "").lower()
                         
+                        # 判断是否为同一个漏洞：同文件 且 同类型
                         same_file = new_file and existing_file and (new_file == existing_file or new_file.endswith(existing_file) or existing_file.endswith(new_file))
-                        same_type = new_type and existing_type and (new_type == existing_type or new_type in existing_type)
+                        same_type = new_type and existing_type and (new_type == existing_type or new_type in existing_type or existing_type in new_type)
 
                         if same_file and same_type:
-                            # 🔥 智能合并：保留已有的数据，并注入 Web3 验证战果 (Profit)
+                            # 🔥 智能无损合并 (Smart Merge)
                             merged = dict(existing_f)
                             for key, value in normalized_new.items():
-                                if value is not None and value != "" and value != 0:
+                                # 核心规则：新数据存在 且 不为空 时才覆盖
+                                # 这样 Verification Agent 不会把 Analysis Agent 写好的 attack_strategy 给洗掉
+                                if value is not None and value != "":
+                                    # 如果遇到字典或列表且旧值也存在，应该做更精细的判断，但此处主要字段已在 normalize 中展平
                                     merged[key] = value
                             
+                            # 状态优先级提升：只要有任何一次被标记为验证成功，就永久保留 True
                             if existing_f.get("is_verified") or normalized_new.get("is_verified"):
                                 merged["is_verified"] = True
                                 
@@ -904,9 +908,14 @@ Action Input: {{"参数": "值"}}
     
 
     def _normalize_finding(self, finding: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """保留原版路径防幻觉校验，注入 Web3 专属漏洞类型与利润提取"""
+        """
+        标准化各个 Agent 返回的漏洞发现，统一字段格式，防幻觉校验，并提取 Web3 专属的战果数据。
+        """
         normalized = dict(finding)
 
+        # ==========================================
+        # 1. 统一文件路径与防幻觉校验 (Foundation)
+        # ==========================================
         if "location" in normalized and "file_path" not in normalized:
             location = normalized["location"]
             if isinstance(location, str):
@@ -915,7 +924,14 @@ Action Input: {{"参数": "值"}}
         if "file" in normalized and "file_path" not in normalized:
             normalized["file_path"] = normalized["file"]
 
-        # 🔥 推断 Web3 漏洞类型
+        file_path = normalized.get("file_path", "")
+        if file_path and not self._validate_file_path(file_path):
+            logger.warning(f"[Orchestrator] 🚫 过滤幻觉发现: 文件不存在 '{file_path}' (title: {normalized.get('title', 'N/A')[:50]})")
+            return None  # 文件不存在则抛弃
+
+        # ==========================================
+        # 2. 兼容 Recon Agent：推断缺失的基础字段
+        # ==========================================
         if "vulnerability_type" not in normalized:
             desc = (normalized.get("description", "") + " " + normalized.get("title", "")).lower()
             if "reentran" in desc or "call.value" in desc:
@@ -935,7 +951,10 @@ Action Input: {{"参数": "值"}}
             else:
                 normalized["vulnerability_type"] = "smart_contract_issue"
 
-        # 确保严重程度小写
+        # 确保漏洞类型是标准蛇形命名
+        normalized["vulnerability_type"] = normalized["vulnerability_type"].lower().replace(" ", "_")
+
+        # 严重程度：没有明确说明的，默认为 high，防止误报被放大
         if "severity" in normalized:
             normalized["severity"] = str(normalized["severity"]).lower()
         else:
@@ -943,34 +962,53 @@ Action Input: {{"参数": "值"}}
 
         if "title" not in normalized:
             vuln_type = normalized.get("vulnerability_type", "Unknown")
-            file_path = normalized.get("file_path", "")
-            if file_path:
-                normalized["title"] = f"{vuln_type.replace('_', ' ').title()} in {os.path.basename(file_path)}"
-            else:
-                normalized["title"] = f"{vuln_type.replace('_', ' ').title()} Vulnerability"
+            fp = os.path.basename(file_path) if file_path else "Unknown File"
+            normalized["title"] = f"{vuln_type.replace('_', ' ').title()} in {fp}"
 
-        # 🔥 极其重要：接收 VerificationAgent (PoC沙箱) 返回的真实攻击战果
-        if "profit_extracted" in finding:
+        # ==========================================
+        # 3. 兼容 Analysis Agent：确保高级字段存在
+        # ==========================================
+        # 即使上游没有提供，也初始化为空字符串，保证最终报告的 Schema 完整不报错
+        analysis_fields = ["target_function_signature", "code_snippet", "source", "sink", "attack_strategy", "suggestion"]
+        for field in analysis_fields:
+            if field not in normalized:
+                normalized[field] = ""
+
+        # ==========================================
+        # 4. 兼容 Verification Agent：提取沙箱战果与嵌套 PoC
+        # ==========================================
+        # 提取判定结论
+        if "verdict" in finding:
+            normalized["verdict"] = finding["verdict"]
+            # 只有明确 confirmed 才算 verified
+            if finding["verdict"] == "confirmed":
+                normalized["is_verified"] = True
+
+        # 提取利润和 Gas
+        if "profit_extracted" in finding and finding["profit_extracted"] is not None:
             normalized["profit_extracted"] = finding["profit_extracted"]
-            normalized["is_verified"] = True  # 只要提取到了利润/成功执行，必定是真实漏洞
+            normalized["is_verified"] = True  # 能榨取利润必定是真实漏洞
         if "gas_used" in finding:
             normalized["gas_used"] = finding["gas_used"]
-        if "poc_file_path" in finding:
-            normalized["poc_file_path"] = finding["poc_file_path"]
 
-        # 🔥 保留原版的幻觉防御
-        file_path = normalized.get("file_path", "")
-        if file_path and not self._validate_file_path(file_path):
-            logger.warning(f"[Orchestrator] 🚫 过滤幻觉发现: 文件不存在 '{file_path}' (title: {normalized.get('title', 'N/A')[:50]})")
-            return None  # 文件不存在则抛弃
+        # 🚨 重点修复：解析嵌套的 poc 字典，提取真实攻击载荷 (Payload)
+        if "poc" in finding and isinstance(finding["poc"], dict):
+            poc_data = finding["poc"]
+            normalized["poc_file_path"] = poc_data.get("poc_file_path", "")
+            normalized["poc_payload"] = poc_data.get("payload", "") # 核心的 Solidity 代码
+            normalized["poc_description"] = poc_data.get("description", "")
+        else:
+            # 兼容扁平结构防御
+            if "poc_file_path" in finding:
+                normalized["poc_file_path"] = finding["poc_file_path"]
+            if "poc_payload" not in normalized:
+                normalized["poc_payload"] = ""
 
         return normalized
 
     def _summarize_findings(self) -> str:
         """
-        标准化发现格式，突出 PoC 验证状态和资金损失
-
-        不同 Agent 可能返回不同格式的发现，这个方法将它们标准化为统一格式
+        汇总发现格式
         """
         if not self._all_findings:
             return "目前还没有发现任何智能合约漏洞。"

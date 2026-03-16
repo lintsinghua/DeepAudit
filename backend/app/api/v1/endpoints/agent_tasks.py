@@ -813,8 +813,8 @@ async def _initialize_tools(
                 api_key=embedding_api_key,
                 base_url=embedding_base_url,
             )
-        # 使用用户配置的 batch_size
-        embedding_service.batch_size = user_embedding_config.get('batch_size', 100)
+            # 使用用户配置的 batch_size
+            embedding_service.batch_size = user_embedding_config.get('batch_size', 100)
 
             # 创建 collection_name（基于 project_id）
             collection_name = f"project_{project_id}" if project_id else "default_project"

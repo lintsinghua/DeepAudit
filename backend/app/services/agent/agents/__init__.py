@@ -8,10 +8,10 @@
 """
 
 from .base import BaseAgent, AgentConfig, AgentResult, TaskHandoff
-from .orchestrator import OrchestratorAgent
-from .recon import ReconAgent
-from .analysis import AnalysisAgent
-from .verification import VerificationAgent
+from .smart_contract_orchestrator import OrchestratorAgent
+from .smart_contract_recon import ReconAgent
+from .smart_contract_analysis import AnalysisAgent
+from .smart_contract_verification import VerificationAgent
 
 __all__ = [
     "BaseAgent",
