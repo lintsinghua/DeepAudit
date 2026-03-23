@@ -6,7 +6,7 @@ Provides structured error types with recovery strategies and metadata.
 """
 
 from enum import Enum
-from typing import Any, Dict, Optional, Type
+from typing import Any, Dict, Optional, Type, List
 from dataclasses import dataclass, field
 from datetime import datetime
 

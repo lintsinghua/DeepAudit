@@ -35,19 +35,32 @@ ANALYSIS_SYSTEM_PROMPT = """你是 DeepAudit 的智能合约漏洞分析 Agent�
 5. 动态调整分析方向
 6. 输出具体的**攻击思路**供下游编写 PoC
 
-## 🔧 你可以使用的核心工具 (按优先级)
+## ✅ 你可以使用的工具
 
-### 第一优先级：知识检索 ⭐⭐⭐ 【必须结合理论分析！】
-- **query_security_knowledge**: 查询安全知识库，获取漏洞类型、检测方法、修复建议等专业知识。
-- **get_vulnerability_knowledge**: 获取特定漏洞类型的完整知识。
+### 知识检索工具
+- **query_security_knowledge**: 查询安全知识库，获取漏洞类型、检测方法、修复建议等专业知识
+  - 参数: query (str), category (str, 可选), top_k (int, 可选)
 
-### 辅助工具
+- **get_vulnerability_knowledge**: 获取特定漏洞类型的完整知识
+  - 参数: vulnerability_type (str)
+
+### 文件操作工具
 - **read_file**: 读取文件内容
-  参数: file_path (str), start_line (int), end_line (int)
-- **security_search**: **🔥 首选** 安全相关搜索
-  参数: query (str)
-- **search_code**: - 全局搜索关键语法（如搜 `payable` 或 `call` 快速定位入口和风险点）。
-- **list_files**: ⚠️ 仅列出目录，严禁遍历
+  - 参数: file_path (str), start_line (int, 可选), end_line (int, 可选)
+
+- **list_files**: 列出目录中的文件
+  - 参数: directory (str), max_depth (int, 可选)
+
+### 代码搜索工具
+- **search_code**: 在代码中搜索特定字符串
+  - 参数: query (str), file_path (str, 可选)
+
+### 思考工具
+- **think**: 进行深度思考和分析
+
+- **reflect**: 反思和总结
+
+## 🔧 你可以使用的核心工具 (按优先级)
 
 ## 🚨 知识工具使用警告（防止幻觉！）
 
@@ -158,6 +171,7 @@ Action Input: {"query": "reentrancy vulnerability", "top_k": 5}
 2. **至少调用两个工具** - 必须使用 `get_vulnerability_knowledge` 或 `query_security_knowledge` 查阅漏洞原理以及攻击方法，然后用 read_file 查看代码
 3. **没有工具调用的分析无效** - 不允许仅凭推测直接报告漏洞
 4. **先 Action 后 Final Answer** - 必须先执行工具，获取 Observation，再输出最终结论
+5. 🚨 警告：输出完 Action Input 后，**必须立刻停止输出！绝对禁止你自己生成 Observation！** 系统的执行引擎会自动执行工具，并将真实的 Observation 返回给你。如果你自己编造 Observation，任务将被直接判定失败。
 ```
 
 现在开始你的安全分析！"""
@@ -419,6 +433,17 @@ class AnalysisAgent(BaseAgent):
                     break
                 
                 self._total_tokens += tokens_this_round
+
+                # ==========================================
+                # 🔥 终极物理截断防线：斩断幻觉！
+                # 只要大模型试图自己输出 Observation，直接把后面的所有内容砍掉！
+                # ==========================================
+                if "Observation:" in llm_output:
+                    logger.warning(f"[{self.name}] 拦截到 LLM 试图幻觉 Observation，进行物理截断！")
+                    llm_output = llm_output.split("Observation:")[0].strip()
+                elif "**Observation:**" in llm_output:
+                    llm_output = llm_output.split("**Observation:**")[0].strip()
+                # ==========================================
 
                 # 🔥 Enhanced: Handle empty LLM response with better diagnostics
                 if not llm_output or not llm_output.strip():

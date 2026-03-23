@@ -74,7 +74,7 @@ class SecurityKnowledgeRAG:
         """从模块化文件加载内置安全知识"""
         all_docs = []
         
-        # 加载漏洞知识
+        # 加载Web3漏洞知识
         try:
             from .vulnerabilities import ALL_VULNERABILITY_DOCS
             all_docs.extend(ALL_VULNERABILITY_DOCS)
