@@ -127,7 +127,7 @@ class FileReadTool(AgentTool):
         **kwargs
     ) -> ToolResult:
         """执行文件读取"""
-        try:
+        try: 
             # 检查是否被排除
             if self._should_exclude(file_path):
                 return ToolResult(
@@ -328,6 +328,11 @@ class FileSearchTool(AgentTool):
     ) -> ToolResult:
         """执行文件搜索"""
         try:
+
+            # 🔥 新增兜底逻辑：如果未指定目录或指定了根目录，强制改为 'src'
+            if not directory or directory in [".", "./", "/", ""]:
+                directory = "src"
+
             # 确定搜索目录
             if directory:
                 # Security Fix: 使用 realpath 解析软链接，防止绕过项目根目录检查
@@ -530,6 +535,10 @@ class ListFilesTool(AgentTool):
             # 🔥 兼容性处理：支持 path 参数作为 directory 的别名
             if "path" in kwargs and kwargs["path"]:
                 directory = kwargs["path"]
+
+            # 🔥 强制拦截：如果 LLM 传入了根目录，强转为 src
+            if directory in [".", "./", "/", ""]:
+                directory = "src"
 
             target_dir = os.path.normpath(os.path.join(self.project_root, directory))
             if not target_dir.startswith(os.path.normpath(self.project_root)):

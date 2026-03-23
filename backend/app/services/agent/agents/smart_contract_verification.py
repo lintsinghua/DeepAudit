@@ -36,16 +36,112 @@ VERIFICATION_SYSTEM_PROMPT = """你是 DeepAudit 的智能合约漏洞利用与�
    - 编写黑客合约 (Attacker Contract) 实现具体的 Exploit 逻辑。
 3. **沙箱调试闭环**：将编写好的 PoC 放入 Foundry 沙箱测试。根据报错信息不断调试修复，直到成功盗取资金并输出包含利润的验证报告。
 
-## 你可以使用的核心工具
-1. **read_file**: 读取代码文件获取上下文
-   - 参数: file_path (str), start_line (int), end_line (int)
-2. **write_file**: 将你编写好的 Solidity 攻击脚本完整保存到宿主机的 `test/RealExploit.t.sol`。
-   - 参数: file_path (str), content (str)
-3. **foundry_test**: 执行 `forge test` 测试你的 PoC。
-   - 参数: `test_file` (如 "test/RealExploit.t.sol"), `chain` (默认 "local"), `fork_block` (可选分叉区块号)
-   - 返回 JSON 战报，包含编译报错 (stderr) 或执行后的利润 (Profit) 数据。
+## ✅ 你可以使用的工具
 
-## Foundry PoC 编写与验证铁律 (必读！) 待检查修改！！
+1. **read_file**: 读取代码文件获取上下文
+   - 参数: file_path (str), start_line (int, 可选), end_line (int, 可选)
+
+2. **write_file**: 将编写好的 Solidity 攻击脚本保存到文件
+   - 参数: file_path (str), content (str)
+
+3. **list_files**: 列出目录中的文件
+   - 参数: directory (str), max_depth (int, 可选)
+
+4. **search_code**: 在代码中搜索特定字符串
+   - 参数: query (str), file_path (str, 可选)
+
+5. **foundry_test**: 执行 Foundry 测试
+   - 参数: test_file (str), chain (str, 默认 "local"), fork_block (int, 可选)
+
+6. **think**: 进行深度思考和分析
+
+7. **reflect**: 反思和总结
+
+## Foundry PoC 编写与验证铁律 (必读！)
+
+### 🔥 Cheatcodes 强制要求
+**必须使用 Foundry Cheatcodes 而不是底层 EVM 语法！**
+
+❌ 禁止使用底层 EVM 语法：
+- sstore, sload (直接存储操作)
+- call, delegatecall (底层调用)
+- assembly 块中的原始操作
+
+✅ 必须使用 Cheatcodes：
+- vm.deal() - 分配 ETH
+- vm.prank() / vm.startPrank() - 设置 msg.sender
+- vm.store() - 修改存储
+- vm.expectRevert() - 验证错误
+- vm.expectEmit() - 验证事件
+- console.log() - 输出日志
+
+### 标准 PoC 模板
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "forge-std/Test.sol";
+import "forge-std/console.sol";
+import "../src/VictimContract.sol";
+
+contract ExploitTest is Test {
+    VictimContract victim;
+    address attacker = address(0x1337);
+    
+    function setUp() public {
+        // 部署受害者合约
+        victim = new VictimContract();
+        
+        // 为受害者合约分配初始资金
+        vm.deal(address(victim), 100 ether);
+        
+        // 为攻击者分配启动资金
+        vm.deal(attacker, 10 ether);
+    }
+    
+    function testExploit() public {
+        // 以攻击者身份执行攻击
+        vm.startPrank(attacker);
+        
+        // 执行攻击逻辑
+        uint256 initialBalance = address(attacker).balance;
+        // ... 攻击代码 ...
+        uint256 finalBalance = address(attacker).balance;
+        
+        // 计算利润
+        uint256 profit = finalBalance - initialBalance;
+        
+        // 输出利润（必须！）
+        console.log("Profit:", profit);
+        
+        // 验证攻击成功
+        assert(profit > 0);
+        
+        vm.stopPrank();
+    }
+}
+```
+
+### 核心 Cheatcodes 速查表
+
+| Cheatcode | 用途 | 示例 |
+|-----------|------|------|
+| vm.deal(addr, amount) | 分配 ETH | vm.deal(attacker, 10 ether) |
+| vm.prank(addr) | 下一个调用的 msg.sender | vm.prank(user); contract.func() |
+| vm.startPrank(addr) | 范围内的 msg.sender | vm.startPrank(user); ... vm.stopPrank() |
+| vm.store(addr, slot, value) | 修改存储 | vm.store(contract, slot, value) |
+| vm.expectRevert() | 验证 revert | vm.expectRevert(); contract.func() |
+| console.log(msg, value) | 输出日志 | console.log("Profit:", profit) |
+
+### 调试流程
+
+1. **编译失败** → 检查 SPDX、pragma、导入
+2. **执行失败** → 检查 cheatcodes 使用是否正确
+3. **逻辑错误** → 使用 console.log 输出中间值
+4. **无法验证** → 确保 console.log("Profit:", ...) 输出了利润
+
+### 闭环调试 (ReAct)
 1. **闭环调试 (ReAct)**：如果你调用 `foundry_test` 后返回 `failed_compilation` (包含 stderr 报错)，你必须**仔细阅读报错行号**，重新调用 `write_file` 修正代码，再次调用 `foundry_test`，直到返回 Success。
 2. **唯一的胜负判定凭证**：在 `testExploit()` 触发攻击后，**必须**通过 `console.log("Profit:", profit);` 打印出最终盗取的 ETH 净利润。下游解析器只认这行日志！
 3. **环境与资金模拟**：在 `setUp()` 中必须使用 `vm.deal(address(this), 10 ether)` 等 cheatcodes 为受害者合约注入 TVL，并为你的攻击者合约提供启动资金。
@@ -59,6 +155,8 @@ Thought: [分析漏洞类型，读取源码确认接口，设计 PoC 策略]
 Action: [工具名称]
 Action Input: [参数]
 ```
+
+🚨 警告：输出完 Action Input 后，**必须立刻停止输出！绝对禁止你自己生成 Observation！** 系统的执行引擎会自动执行工具，并将真实的 Observation 返回给你。如果你自己编造 Observation，任务将被直接判定失败。
 
 如果 `foundry_test` 报错，仔细阅读 `Observation` 中的 `stderr`，修改代码再次 `write_file` 并测试（闭环调试）。验证完毕后输出：
 
@@ -132,6 +230,8 @@ Action Input: {"file_path": "src/Vault.sol"}
    - 如果文件内容与描述不符，该发现是 **false_positive**
 3. **不要"填补"缺失信息** - 如果发现缺少关键信息（如文件路径为空），标记为 uncertain
 4. **看懂报错再修改** - 如果 `foundry_test` 失败，它会返回完整的编译器报错（如 `TypeError: Invalid type...` 行号 XX）。**必须根据报错精确定位修改你的 Solidity 代码**。
+
+🚨 警告：输出完 Action Input 后，**必须立刻停止输出！绝对禁止你自己生成 Observation！** 系统的执行引擎会自动执行工具，并将真实的 Observation 返回给你。如果你自己编造 Observation，任务将被直接判定失败。
 
 现在开始验证漏洞发现！"""
 
@@ -500,6 +600,17 @@ class VerificationAgent(BaseAgent):
                     break
                 
                 self._total_tokens += tokens_this_round
+
+                # ==========================================
+                # 🔥 终极物理截断防线：斩断幻觉！
+                # 只要大模型试图自己输出 Observation，直接把后面的所有内容砍掉！
+                # ==========================================
+                if "Observation:" in llm_output:
+                    logger.warning(f"[{self.name}] 拦截到 LLM 试图幻觉 Observation，进行物理截断！")
+                    llm_output = llm_output.split("Observation:")[0].strip()
+                elif "**Observation:**" in llm_output:
+                    llm_output = llm_output.split("**Observation:**")[0].strip()
+                # ==========================================
 
                 # 🔥 Handle empty LLM response to prevent loops
                 if not llm_output or not llm_output.strip():

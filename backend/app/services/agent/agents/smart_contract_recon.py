@@ -69,6 +69,7 @@ Thought: [分析当前目标，决定需要调用哪个工具]
 Action: [工具名称]
 Action Input: {"参数1": "值1"}
 ```
+🚨 警告：输出完 Action Input 后，**必须立刻停止输出！绝对禁止你自己生成 Observation！**
 
 当你通过工具确认了足够的情报后，输出最终侦察报告：
 
@@ -139,6 +140,7 @@ Action Input: {"directory": "."}
 3. **真实文件与行号规则（眼见为实）**：
    - `core_contracts` 必须是你通过工具真实看到的 `.sol` 文件，绝不能凭空捏造 `Token.sol`。
    - `high_risk_areas` 和 `initial_findings` 中的 `file_path` 和 `line_start` **必须绝对精确**！必须是你通过 `read_file` 或 `search_code` 看到的真实代码行，严禁编造行号！
+4. 🚨 警告：输出完 Action Input 后，**必须立刻停止输出！绝对禁止你自己生成 Observation！** 
 """
 
 @dataclass
@@ -275,8 +277,8 @@ class ReconAgent(BaseAgent):
         target_files = config.get("target_files", [])
         exclude_patterns = config.get("exclude_patterns", [])
         
-        target = project_info.get('name', '')
-        is_contract_address = bool(re.match(r"^0x[a-fA-F0-9]{40}$", target.strip()))
+        target = config.get('target_address', [])
+        is_contract_address = len(target) > 0
         
         initial_message = f"""请开始收集智能合约项目信息。
 
@@ -286,7 +288,11 @@ class ReconAgent(BaseAgent):
         # 智能分支：地址抓取 vs 范围审计
         if is_contract_address:
             initial_message += """
-🚨 **系统检测到目标是以太坊合约地址。** 你的第一步 **必须** 是使用 `foundry_cast` 工具，传入该 `contract_address`，将线上真实的源码下载到沙箱中！下载完成后，再使用其他工具进行分析。
+🚨 **最高级别系统指令**：检测到目标为以太坊合约地址！
+你当前的本地目录是**空的**！
+你的**第一个 Action 必须且只能是 `foundry_cast`**！
+如果你的第一步没有调用 `foundry_cast`，系统将直接判定任务失败！
+下载完成后，再使用 list_files 查看源码结构。
 """
         else:
             initial_message += f"""这是一个本地/代码库中的智能合约项目。
@@ -354,6 +360,17 @@ class ReconAgent(BaseAgent):
                     break
                 
                 self._total_tokens += tokens_this_round
+
+                # ==========================================
+                # 🔥 终极物理截断防线：斩断幻觉！
+                # 只要大模型试图自己输出 Observation，直接把后面的所有内容砍掉！
+                # ==========================================
+                if "Observation:" in llm_output:
+                    logger.warning(f"[{self.name}] 拦截到 LLM 试图幻觉 Observation，进行物理截断！")
+                    llm_output = llm_output.split("Observation:")[0].strip()
+                elif "**Observation:**" in llm_output:
+                    llm_output = llm_output.split("**Observation:**")[0].strip()
+                # ==========================================
                 
                 # 高容错增强版：处理空响应
                 if not llm_output or not llm_output.strip():
@@ -665,7 +682,6 @@ Final Answer:""",
                         })
                         
         # 3. 数据清理与去重
-        result["project_structure"]["core_contracts"] = list(set(result["project_structure"]["core_contracts"]))[:10]
         result["tech_stack"]["solidity_versions"] = list(set(result["tech_stack"]["solidity_versions"]))[:3]
         result["entry_points"] = result["entry_points"][:15]
         

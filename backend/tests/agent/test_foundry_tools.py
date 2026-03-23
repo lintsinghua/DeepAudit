@@ -34,7 +34,9 @@ import pytest
 import json
 import logging
 from unittest.mock import MagicMock
-
+from app.services.agent.tools.foundry_tools import FoundryCastTool, FoundryTestTool
+# 新增引入真实的 SandboxManager
+from app.services.agent.tools.sandbox_tool import SandboxManager, SandboxConfig
 from app.services.agent.tools.foundry_tools import FoundryCastTool, FoundryTestTool
 
 # 配置日志输出格式，方便观察内部流转
@@ -183,3 +185,50 @@ class TestFoundryTestTool:
         assert result.success is False
         assert result.data["test_passed"] is False
         logger.info("========== 结束测试: FoundryTestTool 攻击 Revert 失败 ==========\n")
+
+
+class TestFoundryCastTool:
+    
+    @pytest.mark.asyncio
+    async def test_cast_download_source_code(self):
+        logger.info("========== 开始测试: FoundryCastTool 真实下载以太坊合约源码 ==========")
+        
+        real_api_key = "9AGF78FY7JGCABG7Q9D843IZH69DBW9KAE"
+        real_contract_address = "0x4822D9172e5b76b9Db37B75f5552F9988F98a888"
+        
+        import os
+        # 1. 准备一个宿主机目录（比如当前项目目录下的 agent_workspace）
+        host_workspace = os.path.abspath("./agent_workspace")
+        
+        # 2. 🔥 修改这里：传入 workspace_dir 参数
+        manager = SandboxManager(SandboxConfig(
+            network_mode="bridge", 
+            timeout=120,
+            workspace_dir=host_workspace  # 让沙箱直接使用这个宿主机目录
+        ))
+        await manager.initialize()
+        
+        tool = FoundryCastTool(sandbox_manager=manager)
+
+        # ... 后续代码保持不变 ...
+
+        logger.info(f"🔍 开始真实下载合约源码: {real_contract_address}")
+        logger.info(f"🔑 使用API Key: {real_api_key[:5]}...{real_api_key[-5:]}")
+        
+        result = await tool.execute(
+            contract_address=real_contract_address,
+            chain="mainnet",
+            etherscan_api_key=real_api_key,
+            output_dir="src"
+        )
+
+        logger.info(f"✅ 工具返回状态: success={result.success}")
+        logger.debug(f"📦 工具返回核心数据: \n{json.dumps(result.data, indent=2, ensure_ascii=False)}")
+        
+        # 验证结果
+        assert result.success is True, f"下载失败: {result.error}"
+        assert result.data["file_count"] > 0, "没有下载到任何文件"
+        assert "src" in result.data["summary"], "输出目录不正确"
+        
+        logger.info(f"📄 下载结果: {result.data['file_count']} 个文件，总计 {result.data['total_lines']} 行代码")
+        logger.info("========== 结束测试: FoundryCastTool 真实下载成功 ==========\n")

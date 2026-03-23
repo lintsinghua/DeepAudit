@@ -48,7 +48,7 @@ class ConsoleEventEmitter:
         "llm_start":       ("🔵", ""),
         "llm_thought":     ("💭", "\033[36m"),       # 青色
         "thinking_start":  ("🤔", "\033[35m"),       # 紫色
-        "thinking_token":  ("   ", "\033[35m"),      # 紫色，无换行累积显示
+        "thinking_token":  ("   ", "\033[35m"),      # 紫色
         "thinking_end":    ("✅", "\033[35m"),       # 紫色
         "llm_decision":    ("🎯", "\033[33m"),       # 黄色
         "llm_action":      ("⚡", "\033[33m"),       # 黄色
@@ -134,20 +134,26 @@ class ConsoleEventEmitter:
 
 
 # ==========================================
-# 2. 宿主机环境预置 (State Pre-provisioning)
+# 2. 宿主机环境预置 (仅保留空骨架)
 # ==========================================
-def setup_vulnerable_project(workspace_dir: str):
+def setup_foundry_skeleton(workspace_dir: str):
     """
-    在宿主机创建一个包含 forge-std 依赖的完整 Foundry 项目。
-    如果依赖（lib/forge-std）已存在，则跳过 forge init，只更新靶机合约。
+    在宿主机创建一个干净的 Foundry 骨架项目。
+    不再预置靶机合约，只保留环境等待 foundry_cast 下载主网真实代码。
     """
     lib_dir = os.path.join(workspace_dir, "lib", "forge-std")
     deps_exist = os.path.isdir(lib_dir)
 
     if deps_exist:
-        print(f"⚡ 检测到依赖已存在，跳过 forge init，直接更新靶机合约...")
+        print(f"⚡ 检测到 Foundry 依赖已存在，清理 src/ 和 test/ 目录，准备接收主网代码...")
+        # 清空上一次的源码，防止干扰
+        for d in ["src", "test"]:
+            dir_path = os.path.join(workspace_dir, d)
+            if os.path.exists(dir_path):
+                shutil.rmtree(dir_path)
+            os.makedirs(dir_path, exist_ok=True)
     else:
-        print("⏳ 正在宿主机初始化真实 Foundry 靶场环境（首次运行，需拉取依赖）...")
+        print("⏳ 正在宿主机初始化真实 Foundry 靶场空环境（首次运行，需拉取依赖）...")
         if os.path.exists(workspace_dir):
             shutil.rmtree(workspace_dir)
 
@@ -160,48 +166,17 @@ def setup_vulnerable_project(workspace_dir: str):
             print(f"❌ 初始化 Foundry 项目失败，请检查本机是否安装了 forge: {e.stderr}")
             raise
 
-        # 2️⃣ 清理默认生成的无关合约
+        # 清理默认生成的 Counter 相关合约
         for file in ["src/Counter.sol", "test/Counter.t.sol", "script/Counter.s.sol"]:
             path = os.path.join(workspace_dir, file)
             if os.path.exists(path):
                 os.remove(path)
-
-    # 3️⃣ 写入包含重入漏洞的真实靶机合约 (Violates CEI pattern)
-    vulnerable_contract = """//SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
-contract Vault {
-    mapping(address => uint256) public balances;
-    
-    function deposit() public payable { 
-        balances[msg.sender] += msg.value; 
-    }
-    
-    function withdraw(uint256 amount) public {
-        require(balances[msg.sender] >= amount, "Insufficient balance");
-        
-        // ⚠️ Vulnerability: External call before state update
-        (bool success, ) = msg.sender.call{value: amount}("");
-        require(success, "Transfer failed");
-        
-        // 使用 unchecked 绕过 0.8+ 的下溢出检查，让重入攻击能够成功结算
-        unchecked {
-            balances[msg.sender] -= amount;
-        }
-    }
-    
-    // 建议加一个 receive 函数，方便你在 setUp() 中直接给靶机塞 TVL (vm.deal)
-    receive() external payable {}
-}
-"""
-    with open(os.path.join(workspace_dir, "src/Vault.sol"), "w") as f:
-        f.write(vulnerable_contract)
-        
-    print(f"🎯 靶机环境搭建完毕: {workspace_dir}")
+                
+    print(f"🎯 干净靶场搭建完毕: {workspace_dir} (等待 cast 工具下载源码)")
 
 
 # ==========================================
-# 3. 最终报告生成器 (适配新版 Orchestrator 数据结构)
+# 3. 最终报告生成器
 # ==========================================
 def generate_markdown_report(findings: list, output_file: str):
     """生成最终的 Markdown 格式安全审计战报"""
@@ -286,8 +261,8 @@ async def main():
     # 定义测试工作区绝对路径
     workspace = os.path.abspath("./test_workspace")
     
-    # 1. 筑基：宿主机建项目拉依赖
-    setup_vulnerable_project(workspace)
+    # 1. 筑基：宿主机建空项目拉依赖（等待 cast 下载）
+    setup_foundry_skeleton(workspace)
     
     emitter = ConsoleEventEmitter()
     llm_service = LLMService() 
@@ -301,11 +276,11 @@ async def main():
         "reflect": ReflectTool()
     }
     
-    # 3. 🔥 核心：配置 Docker Sandbox，全量挂载预置好的目录
+    # 3. 🔥 核心：配置 Docker Sandbox，全量挂载宿主机目录
     print("\n🐳 正在连接 Docker 沙箱引擎...")
     sandbox_config = SandboxConfig(
-        workspace_dir=workspace,            # 👈 Docker 内部的 /workspace 就会直接映射为本机的 ./test_workspace
-        image="deepaudit/sandbox:latest",   # 👈 你的专属 Web3 安全沙箱镜像
+        workspace_dir=workspace,            # 👈 Docker 内部的 /workspace 直接映射为本机 ./test_workspace
+        image="deepaudit/sandbox:latest",   
         network_mode="bridge",
         # Mac 环境下解决 Docker 写入挂载目录权限问题的终极杀招 (视情况解开注释)
         # user="root" 
@@ -330,13 +305,13 @@ async def main():
         "write_file": FileWriteTool(project_root=workspace),
         "foundry_test": FoundryTestTool(
             sandbox_manager=sandbox_manager, 
-            project_root="/workspace" # 在 Docker 内部的视角，工作区就是根目录的 /workspace
+            project_root="/workspace"
         ) 
     }
     
     # 5. 实例化四大天王 Agent
     recon_agent = ReconAgent(llm_service, recon_tools, emitter)
-    analysis_agent = AnalysisAgent(llm_service, base_tools, emitter)
+    analysis_agent = AnalysisAgent(llm_service, analysis_tools, emitter)
     verification_agent = VerificationAgent(llm_service, verify_tools, emitter)
     orchestrator = OrchestratorAgent(llm_service, {"think": ThinkTool()}, emitter)
     
@@ -349,14 +324,33 @@ async def main():
         agent.set_cancel_callback(lambda: False)
         agent._timeout_config = {"sub_agent_timeout": 600, "tool_timeout": 60}
     
+    # ==========================================
+    # 🔥 核心修改：将任务升级为真实主网智能合约审计
+    # ==========================================
+    real_api_key = "9AGF78FY7JGCABG7Q9D843IZH69DBW9KAE"
+    real_contract_address = "0x4822D9172e5b76b9Db37B75f5552F9988F98a888"
+
     input_data = {
         "project_root": workspace,
-        "project_info": {"name": "VulnerableVault", "root": workspace},
-        "config": {"target_vulnerabilities": ["reentrancy"], "verification_level": "sandbox"},
-        "task": "完整审查代码，发现潜在的重入漏洞后，编写独立的 PoC 并在沙箱中爆破获取 Profit。"
+        "project_info": {"name": "AlkemiEarn_OnChain", "root": workspace},
+        "config": {
+            "target_address": [real_contract_address], # 传入地址，触发链上审计模式
+            "chain": "mainnet",
+            "target_vulnerabilities": ["logic_errors", "access_control", "flash_loan_attacks"],
+            "verification_level": "sandbox"
+        },
+        "task": (
+            "⚠️ 这是一次真实的以太坊主网合约安全审计！\n\n"
+            "1. **第一步必须使用 Recon Agent 的 foundry_cast 工具下载主网源码**。\n"
+            f"   - contract_address: '{real_contract_address}'\n"
+            f"   - etherscan_api_key 请严格使用: '{real_api_key}'。\n"
+            "2. **深入代码审计**：寻找该协议是否存在严重漏洞。\n"
+            "3. **历史事件复现**：如果在 Verification Agent 中编写 PoC 验证漏洞，由于这是已发生的历史事件，"
+            "   请务必在沙箱调用的 `foundry_test` 中指定 `chain: \"mainnet\"`，并且指定分叉区块号 `fork_block: 24626978`（在攻击发生前进行分叉），尝试爆破获取 Profit。"
+        )
     }
     
-    print("\n🚀 [系统点火] 开始端到端多智能体安全审计！\n" + "="*60)
+    print("\n🚀 [系统点火] 开始端到端真实主网安全审计！\n" + "="*60)
     result = await orchestrator.run(input_data)
     
     if result.success:
@@ -391,11 +385,10 @@ async def main():
                     
         final_findings = list(unique_findings.values())
         
-        # 渲染 Markdown
-        report_path = os.path.abspath("./audit_report.md")
+        report_path = os.path.abspath("./audit_report_onchain.md")
         generate_markdown_report(final_findings, report_path)
         print(f"\n" + "="*60)
-        print(f"✅ 审计完美结束！最终确认 {len(final_findings)} 个真实漏洞。")
+        print(f"✅ 主网审计完美结束！最终确认 {len(final_findings)} 个真实漏洞。")
         print(f"📄 请查看战报: {report_path}")
     else:
         print(f"\n❌ [执行失败] 编排器运行异常: {result.error}")

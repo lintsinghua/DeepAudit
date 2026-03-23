@@ -25,7 +25,6 @@ class FoundryCastInput(BaseModel):
     contract_address: str = Field(..., description="目标合约地址 (0x...)")
     chain: str = Field("mainnet", description="区块链网络: mainnet, polygon, bsc, arbitrum 等")
     block_number: Optional[int] = Field(None, description="指定区块号（可选，默认最新块）")
-    etherscan_api_key: str = Field(..., description="Etherscan API Key（必需，用于获取源码）")
     output_dir: str = Field("src", description="输出目录（相对于 /workspace）")
     
 
@@ -78,7 +77,6 @@ class FoundryCastTool(AgentTool):
 
 输入:
 - contract_address: 目标合约地址（0x 开头，必填）
-- etherscan_api_key: Etherscan API Key（必填）
 - chain: 区块链网络，默认 "mainnet"，支持 polygon、bsc、arbitrum、optimism、base
 - output_dir: 源码保存目录，默认 "src"（相对于 /workspace）
 
@@ -93,13 +91,15 @@ class FoundryCastTool(AgentTool):
     async def _execute(
         self,
         contract_address: str,
-        etherscan_api_key: str,
         chain: str = "mainnet",
         block_number: Optional[int] = None,
         output_dir: str = "src",
         **kwargs
     ) -> ToolResult:
         try:
+
+            etherscan_api_key = os.getenv("ETHERSCAN_API_KEY", "9AGF78FY7JGCABG7Q9D843IZH69DBW9KAE")  # 待检查修改！！
+
             await self.sandbox_manager.initialize()
             if not self.sandbox_manager.is_available:
                 return ToolResult(success=False, error="Docker 沙箱不可用")

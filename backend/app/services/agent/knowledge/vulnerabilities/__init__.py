@@ -1,143 +1,39 @@
 """
 漏洞类型知识模块
 
-包含各种漏洞类型的专业知识
+包含Web3/智能合约安全漏洞的专业知识
 """
 
-from .injection import SQL_INJECTION, NOSQL_INJECTION, COMMAND_INJECTION, CODE_INJECTION
-from .xss import XSS_REFLECTED, XSS_STORED, XSS_DOM
-from .auth import AUTH_BYPASS, IDOR, BROKEN_ACCESS_CONTROL
-from .crypto import WEAK_CRYPTO, HARDCODED_SECRETS
-from .ssrf import SSRF
-from .deserialization import INSECURE_DESERIALIZATION
-from .path_traversal import PATH_TRAVERSAL
-from .xxe import XXE
-from .race_condition import RACE_CONDITION
-from .csrf import CSRF
-from .business_logic import BUSINESS_LOGIC, RATE_LIMITING
-from .open_redirect import OPEN_REDIRECT
+# ============ Web3 漏洞库 ============
+# 智能合约和区块链安全漏洞
+try:
+    from .SC_algebra import SC_INTEGER_OVERFLOW_UNDERFLOW
+    from .SC_auth import SC_ACCESS_CONTROL
+    from .SC_business_logic import SC_REENTRANCY, SC_FLASH_LOAN, SC_LOGIC_ERROR
+    from .SC_dos import SC_DOS
+    from .SC_external import SC_UNCHECKED_EXTERNAL_CALL
+    from .SC_program_logic import SC_COMPUTATION_ERROR
+    from .SC_proxy import SC_PROXY_UPGRADEABILITY
+    from .SC_time import SC_TIMESTAMP_DEPENDENCY
+    
+    ALL_VULNERABILITY_DOCS = [
+        SC_INTEGER_OVERFLOW_UNDERFLOW,
+        SC_ACCESS_CONTROL,
+        SC_REENTRANCY,
+        SC_FLASH_LOAN,
+        SC_LOGIC_ERROR,
+        SC_DOS,
+        SC_UNCHECKED_EXTERNAL_CALL,
+        SC_COMPUTATION_ERROR,
+        SC_PROXY_UPGRADEABILITY,
+        SC_TIMESTAMP_DEPENDENCY,
+    ]
+except ImportError:
+    # 如果Web3漏洞库未完全实现，使用空列表
+    ALL_VULNERABILITY_DOCS = []
 
-# 所有漏洞知识文档
-ALL_VULNERABILITY_DOCS = [
-    # 注入类
-    SQL_INJECTION,
-    NOSQL_INJECTION,
-    COMMAND_INJECTION,
-    CODE_INJECTION,
-    # XSS类
-    XSS_REFLECTED,
-    XSS_STORED,
-    XSS_DOM,
-    # 认证授权类
-    AUTH_BYPASS,
-    IDOR,
-    BROKEN_ACCESS_CONTROL,
-    # 加密类
-    WEAK_CRYPTO,
-    HARDCODED_SECRETS,
-    # 请求伪造
-    CSRF,
-    SSRF,
-    # 其他
-    INSECURE_DESERIALIZATION,
-    PATH_TRAVERSAL,
-    XXE,
-    RACE_CONDITION,
-    BUSINESS_LOGIC,
-    RATE_LIMITING,
-    OPEN_REDIRECT,
-]
 
 __all__ = [
     "ALL_VULNERABILITY_DOCS",
-    # 注入类
-    "SQL_INJECTION",
-    "NOSQL_INJECTION", 
-    "COMMAND_INJECTION",
-    "CODE_INJECTION",
-    # XSS类
-    "XSS_REFLECTED",
-    "XSS_STORED",
-    "XSS_DOM",
-    # 认证授权类
-    "AUTH_BYPASS",
-    "IDOR",
-    "BROKEN_ACCESS_CONTROL",
-    # 加密类
-    "WEAK_CRYPTO",
-    "HARDCODED_SECRETS",
-    # 请求伪造
-    "CSRF",
-    "SSRF",
-    # 其他
-    "INSECURE_DESERIALIZATION",
-    "PATH_TRAVERSAL",
-    "XXE",
-    "RACE_CONDITION",
-    "BUSINESS_LOGIC",
-    "RATE_LIMITING",
-    "OPEN_REDIRECT",
-]
-
-# 所有漏洞知识文档
-ALL_VULNERABILITY_DOCS = [
-    # 注入类
-    SQL_INJECTION,
-    NOSQL_INJECTION,
-    COMMAND_INJECTION,
-    CODE_INJECTION,
-    # XSS类
-    XSS_REFLECTED,
-    XSS_STORED,
-    XSS_DOM,
-    # 认证授权类
-    AUTH_BYPASS,
-    IDOR,
-    BROKEN_ACCESS_CONTROL,
-    # 加密类
-    WEAK_CRYPTO,
-    HARDCODED_SECRETS,
-    # 请求伪造
-    CSRF,
-    SSRF,
-    # 其他
-    INSECURE_DESERIALIZATION,
-    PATH_TRAVERSAL,
-    XXE,
-    RACE_CONDITION,
-    BUSINESS_LOGIC,
-    RATE_LIMITING,
-    OPEN_REDIRECT,
-]
-
-__all__ = [
-    "ALL_VULNERABILITY_DOCS",
-    # 注入类
-    "SQL_INJECTION",
-    "NOSQL_INJECTION",
-    "COMMAND_INJECTION",
-    "CODE_INJECTION",
-    # XSS类
-    "XSS_REFLECTED",
-    "XSS_STORED",
-    "XSS_DOM",
-    # 认证授权类
-    "AUTH_BYPASS",
-    "IDOR",
-    "BROKEN_ACCESS_CONTROL",
-    # 加密类
-    "WEAK_CRYPTO",
-    "HARDCODED_SECRETS",
-    # 请求伪造
-    "CSRF",
-    "SSRF",
-    # 其他
-    "INSECURE_DESERIALIZATION",
-    "PATH_TRAVERSAL",
-    "XXE",
-    "RACE_CONDITION",
-    "BUSINESS_LOGIC",
-    "RATE_LIMITING",
-    "OPEN_REDIRECT",
 ]
 
