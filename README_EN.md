@@ -525,9 +525,9 @@ This project is open-source under the [AGPL-3.0 License](LICENSE).
 
 <a href="https://star-history.com/#lintsinghua/DeepAudit&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=lintsinghua/DeepAudit&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=lintsinghua/DeepAudit&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=lintsinghua/DeepAudit&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="docs/images/star-history-dark.svg" />
+   <source media="(prefers-color-scheme: light)" srcset="docs/images/star-history-light.svg" />
+   <img alt="Star History Chart" src="docs/images/star-history-light.svg" />
  </picture>
 </a>
 

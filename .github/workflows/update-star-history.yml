@@ -1,0 +1,60 @@
+name: 更新 Star History
+
+on:
+  schedule:
+    - cron: '17 3 1,16 * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Ignore the 13-day interval'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: star-history-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.repository == 'lintsinghua/DeepAudit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 运行测试
+        run: python3 -m unittest tests.test_star_history -v
+
+      - name: 更新图表
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            python3 scripts/star_history.py update --force
+          else
+            python3 scripts/star_history.py update
+          fi
+
+      - name: 校验输出
+        run: python3 scripts/star_history.py check
+
+      - name: 提交变更
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- \
+            .github/star-history/history.json \
+            docs/images/star-history-light.svg \
+            docs/images/star-history-dark.svg
+          if git diff --cached --quiet; then
+            echo "No star history changes"
+            exit 0
+          fi
+          git commit -m "chore: update star history [skip ci]"
+          git push
