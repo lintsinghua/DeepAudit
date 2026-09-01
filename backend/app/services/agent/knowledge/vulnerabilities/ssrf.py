@@ -42,6 +42,17 @@ axios.get(userUrl);
 http.get(url, callback);
 ```
 
+### PHP
+```php
+// 危险 - 用户可控URL
+$data = file_get_contents($_GET['url']);
+$ch = curl_init($_GET['url']); curl_exec($ch);
+$html = file_get_contents($_POST['callback']);
+
+// 危险 - 内部接口拼接
+$img = file_get_contents("http://internal-api/img/" . $_GET['name']);
+```
+
 ## 攻击目标
 1. 内部服务 (localhost, 127.0.0.1, 内网IP)
 2. 云元数据服务
@@ -113,6 +124,26 @@ def is_safe_url(url):
 # 使用
 if is_safe_url(user_url):
     response = requests.get(user_url, allow_redirects=False)
+```
+
+### PHP
+```php
+// 安全 - 协议限制 + IP白名单校验 + DNS解析后防护
+function is_safe_url(string $url): bool {
+    $parts = parse_url($url);
+    if (!isset($parts['scheme'], $parts['host'])) return false;
+    if (!in_array(strtolower($parts['scheme']), ['http', 'https'], true)) return false;
+    foreach (ALLOWED_HOSTS as $allow) {
+        if ($parts['host'] === $allow) return true;
+    }
+    return false;
+}
+
+if (is_safe_url($_GET['url'])) {
+    $ch = curl_init($_GET['url']);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, 0);  // 禁用重定向防DNS重绑定
+    curl_exec($ch);
+}
 ```
 """,
 )

@@ -89,6 +89,10 @@ class SmartScanTool(AgentTool):
             (r'raw\s*\([^)]*%', "Raw SQL"),
             (r'sqlite3_exec\s*\(', "SQLite3 Exec"),
             (r'NSPredicate\(format:', "NSPredicate Format"),
+            (r'\$pdo->(?:query|exec|prepare)\s*\([^)]*\.\s*\$', "PDO查询拼接"),
+            (r'\$mysqli->query\s*\([^)]*\.\s*\$', "mysqli对象查询拼接"),
+            (r'mysqli_query\s*\([^,]+,\s*["\'].*\.\s*\$', "mysqli_query拼接"),
+            (r'mysql_query\s*\(\s*["\'].*\.\s*\$', "mysql_query拼接"),
         ],
         "command_injection": [
             (r'os\.system\s*\(', "os.system"),
@@ -97,6 +101,11 @@ class SmartScanTool(AgentTool):
             (r'exec\s*\(', "exec()"),
             (r'Process\s*\(\s*launchPath:', "Swift Process"),
             (r'NSTask\s*\.launch', "NSTask Launch"),
+            (r'proc_open\s*\(', "proc_open"),
+            (r'popen\s*\(', "popen"),
+            (r'system\s*\(\s*\$', "system命令变量"),
+            (r'shell_exec\s*\(\s*\$', "shell_exec变量"),
+            (r'passthru\s*\(\s*\$', "passthru变量"),
         ],
         "xss": [
             (r'innerHTML\s*=', "innerHTML"),
@@ -106,11 +115,16 @@ class SmartScanTool(AgentTool):
             (r'mark_safe\s*\(', "mark_safe"),
             (r'loadHTMLString', "WebView Load HTML"),
             (r'evaluateJavaScript', "WebView JS Exec"),
+            (r'echo\s+\$_(?:GET|POST|REQUEST|COOKIE|SERVER)', "echo用户输入"),
+            (r'(?:print|\?=)\s*\$_(?:GET|POST|REQUEST|COOKIE|SERVER)', "print/短标签输出用户输入"),
         ],
         "path_traversal": [
             (r'open\s*\([^)]*\+', "open拼接"),
             (r'send_file\s*\([^)]*request', "send_file"),
             (r'include\s*\(\s*\$', "include变量"),
+            (r'require\s*\(\s*\$', "require变量"),
+            (r'file_get_contents\s*\(\s*\$', "file_get_contents变量"),
+            (r'fopen\s*\(\s*\$', "fopen变量"),
         ],
         "hardcoded_secret": [
             (r'password\s*=\s*["\'][^"\']{4,}["\']', "硬编码密码"),
@@ -121,6 +135,18 @@ class SmartScanTool(AgentTool):
         "ssrf": [
             (r'requests\.(get|post)\s*\([^)]*request\.', "requests用户URL"),
             (r'fetch\s*\([^)]*req\.', "fetch用户URL"),
+            (r'curl_setopt[^;]+CURLOPT_URL[^;]+\$', "curl用户URL"),
+            (r'file_get_contents\s*\(\s*\$_', "file_get_contents用户URL"),
+        ],
+        "deserialization": [
+            (r'unserialize\s*\(\s*\$', "unserialize用户输入"),
+            (r'unserialize\s*\(\s*\$_', "反序列化超全局变量"),
+        ],
+        "type_juggling": [
+            (r'(?:md5|sha1|hash)\s*\([^)]*\)\s*==', "哈希==弱比较"),
+            (r'==\s*["\']0["\']', "与'0'弱类型比较"),
+            (r'strcmp\s*\(', "strcmp弱比较"),
+            (r'in_array\s*\([^)]*\)(?![^)]*,\s*true)', "in_array非严格模式"),
         ],
     }
     
@@ -324,6 +350,8 @@ class SmartScanTool(AgentTool):
             "xss": "high",
             "path_traversal": "high",
             "ssrf": "high",
+            "deserialization": "critical",
+            "type_juggling": "medium",
             "hardcoded_secret": "medium",
         }
         return severity_map.get(vuln_type, "medium")

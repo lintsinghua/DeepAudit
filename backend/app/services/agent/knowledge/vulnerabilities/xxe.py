@@ -125,5 +125,20 @@ dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
 dbf.setFeature("http://xml.org/sax/features/external-general-entities", false);
 dbf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
 ```
+
+### PHP
+```php
+// 安全 - 禁用外部实体 (PHP >= 5.4)
+$old = libxml_disable_entity_loader(true);
+$doc = simplexml_load_string($xml);
+libxml_disable_entity_loader($old);
+
+// 安全 - DOMDocument 禁用网络与外部实体
+$doc = new DOMDocument();
+$doc->loadXML($xml, LIBXML_NONET | LIBXML_NOENT | LIBXML_DTDLOAD);
+
+// 安全 - SimpleXML 配合 LIBXML_NONET
+$doc = simplexml_load_string($xml, 'SimpleXMLElement', LIBXML_NONET);
+```
 """,
 )
