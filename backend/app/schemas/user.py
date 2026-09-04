@@ -1,3 +1,7 @@
+"""
+模块说明：数据校验与序列化模型：user。
+"""
+
 from typing import Optional, List
 from pydantic import BaseModel, EmailStr
 

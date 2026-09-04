@@ -1,3 +1,7 @@
+"""
+模块说明：Alembic 迁移环境与配置入口。
+"""
+
 import asyncio
 from logging.config import fileConfig
 

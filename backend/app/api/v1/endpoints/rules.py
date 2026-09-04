@@ -42,7 +42,15 @@ async def list_rule_sets(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
-    """获取审计规则集列表"""
+    """
+    获取审计规则集列表。
+
+    处理流程：
+    - 构建可访问规则集查询
+    - 应用过滤条件与排序
+    - 分页并构建响应
+    """
+    # 构建规则集查询并预加载 rules
     query = select(AuditRuleSet).options(selectinload(AuditRuleSet.rules))
     
     # 过滤条件：系统规则集 + 当前用户创建的规则集
@@ -51,6 +59,7 @@ async def list_rule_sets(
         (AuditRuleSet.created_by == current_user.id)
     )
     
+    # 应用过滤条件
     if language:
         query = query.where(AuditRuleSet.language == language)
     if rule_type:
@@ -80,8 +89,10 @@ async def list_rule_sets(
     result = await db.execute(query)
     rule_sets = result.scalars().unique().all()
     
+    # 构建响应项
     items = []
     for rs in rule_sets:
+        # 解析严重程度权重
         severity_weights = {"critical": 10, "high": 5, "medium": 2, "low": 1}
         if rs.severity_weights:
             try:
@@ -89,6 +100,7 @@ async def list_rule_sets(
             except:
                 pass
         
+        # 组装规则列表
         rules = [
             AuditRuleResponse(
                 id=r.id,
@@ -109,6 +121,7 @@ async def list_rule_sets(
             for r in rs.rules
         ]
         
+        # 组装规则集响应
         items.append(AuditRuleSetResponse(
             id=rs.id,
             name=rs.name,
@@ -128,6 +141,7 @@ async def list_rule_sets(
             enabled_rules_count=len([r for r in rules if r.enabled]),
         ))
     
+    # 返回分页结果
     return AuditRuleSetListResponse(items=items, total=total)
 
 
@@ -137,7 +151,15 @@ async def get_rule_set(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
-    """获取单个规则集"""
+    """
+    获取单个规则集详情。
+
+    处理流程：
+    - 查询规则集并预加载规则
+    - 校验存在性与权限
+    - 组装并返回响应
+    """
+    # 查询规则集
     result = await db.execute(
         select(AuditRuleSet)
         .options(selectinload(AuditRuleSet.rules))
@@ -145,12 +167,15 @@ async def get_rule_set(
     )
     rule_set = result.scalar_one_or_none()
     
+    # 校验存在性
     if not rule_set:
         raise HTTPException(status_code=404, detail="规则集不存在")
     
+    # 校验访问权限
     if not rule_set.is_system and rule_set.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="无权访问此规则集")
     
+    # 解析严重程度权重
     severity_weights = {"critical": 10, "high": 5, "medium": 2, "low": 1}
     if rule_set.severity_weights:
         try:
@@ -158,6 +183,7 @@ async def get_rule_set(
         except:
             pass
     
+    # 组装规则列表
     rules = [
         AuditRuleResponse(
             id=r.id,
@@ -178,6 +204,7 @@ async def get_rule_set(
         for r in rule_set.rules
     ]
     
+    # 返回规则集详情
     return AuditRuleSetResponse(
         id=rule_set.id,
         name=rule_set.name,
@@ -204,7 +231,15 @@ async def create_rule_set(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
-    """创建审计规则集"""
+    """
+    创建审计规则集。
+
+    处理流程：
+    - 构建规则集对象
+    - 逐条创建规则
+    - 提交并返回结果
+    """
+    # 构建规则集对象
     rule_set = AuditRuleSet(
         name=rule_set_in.name,
         description=rule_set_in.description,
@@ -218,12 +253,14 @@ async def create_rule_set(
         created_by=current_user.id,
     )
     
+    # 写入数据库并获取 rule_set.id
     db.add(rule_set)
     await db.flush()
     
     # 创建规则
     rules = []
     for rule_in in (rule_set_in.rules or []):
+        # 构建规则对象
         rule = AuditRule(
             rule_set_id=rule_set.id,
             rule_code=rule_in.rule_code,
@@ -240,9 +277,11 @@ async def create_rule_set(
         db.add(rule)
         rules.append(rule)
     
+    # 提交并刷新
     await db.commit()
     await db.refresh(rule_set)
     
+    # 返回规则集响应
     return AuditRuleSetResponse(
         id=rule_set.id,
         name=rule_set.name,
@@ -288,7 +327,15 @@ async def update_rule_set(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
-    """更新审计规则集"""
+    """
+    更新审计规则集。
+
+    处理流程：
+    - 查询规则集并校验权限
+    - 更新字段并提交
+    - 返回最新规则集
+    """
+    # 查询规则集
     result = await db.execute(
         select(AuditRuleSet)
         .options(selectinload(AuditRuleSet.rules))
@@ -296,6 +343,7 @@ async def update_rule_set(
     )
     rule_set = result.scalar_one_or_none()
     
+    # 校验存在性
     if not rule_set:
         raise HTTPException(status_code=404, detail="规则集不存在")
     
@@ -306,9 +354,11 @@ async def update_rule_set(
         else:
             raise HTTPException(status_code=403, detail="系统规则集不允许修改")
     else:
+        # 校验拥有者权限
         if rule_set.created_by != current_user.id:
             raise HTTPException(status_code=403, detail="无权修改此规则集")
         
+        # 应用更新字段
         update_data = rule_set_in.dict(exclude_unset=True)
         for field, value in update_data.items():
             if field == "severity_weights" and value is not None:
@@ -316,9 +366,11 @@ async def update_rule_set(
             elif field != "is_default":
                 setattr(rule_set, field, value)
     
+    # 提交并刷新
     await db.commit()
     await db.refresh(rule_set)
     
+    # 解析严重程度权重
     severity_weights = {"critical": 10, "high": 5, "medium": 2, "low": 1}
     if rule_set.severity_weights:
         try:
@@ -326,6 +378,7 @@ async def update_rule_set(
         except:
             pass
     
+    # 组装规则列表
     rules = [
         AuditRuleResponse(
             id=r.id,
@@ -346,6 +399,7 @@ async def update_rule_set(
         for r in rule_set.rules
     ]
     
+    # 返回更新结果
     return AuditRuleSetResponse(
         id=rule_set.id,
         name=rule_set.name,
@@ -372,24 +426,37 @@ async def delete_rule_set(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
-    """删除审计规则集"""
+    """
+    删除审计规则集。
+
+    处理流程：
+    - 查询规则集并校验权限
+    - 删除规则集并提交
+    - 返回结果
+    """
+    # 查询规则集
     result = await db.execute(
         select(AuditRuleSet).where(AuditRuleSet.id == rule_set_id)
     )
     rule_set = result.scalar_one_or_none()
     
+    # 校验存在性
     if not rule_set:
         raise HTTPException(status_code=404, detail="规则集不存在")
     
+    # 系统规则集不可删除
     if rule_set.is_system:
         raise HTTPException(status_code=403, detail="系统规则集不允许删除")
     
+    # 校验拥有者权限
     if rule_set.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="无权删除此规则集")
     
+    # 删除并提交
     await db.delete(rule_set)
     await db.commit()
     
+    # 返回删除结果
     return {"message": "规则集已删除"}
 
 
@@ -399,7 +466,15 @@ async def export_rule_set(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
-    """导出规则集为JSON"""
+    """
+    导出规则集为 JSON。
+
+    处理流程：
+    - 查询规则集与规则
+    - 校验权限并构建导出结构
+    - 返回 JSON 响应并设置文件名
+    """
+    # 查询规则集
     result = await db.execute(
         select(AuditRuleSet)
         .options(selectinload(AuditRuleSet.rules))
@@ -407,12 +482,15 @@ async def export_rule_set(
     )
     rule_set = result.scalar_one_or_none()
     
+    # 校验存在性
     if not rule_set:
         raise HTTPException(status_code=404, detail="规则集不存在")
     
+    # 校验权限
     if not rule_set.is_system and rule_set.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="无权导出此规则集")
     
+    # 解析严重程度权重
     severity_weights = {"critical": 10, "high": 5, "medium": 2, "low": 1}
     if rule_set.severity_weights:
         try:
@@ -420,6 +498,7 @@ async def export_rule_set(
         except:
             pass
     
+    # 构建导出结构
     export_data = {
         "name": rule_set.name,
         "description": rule_set.description,
@@ -448,6 +527,7 @@ async def export_rule_set(
     from urllib.parse import quote
     encoded_filename = quote(f"{rule_set.name}.json")
     
+    # 返回 JSON 文件响应
     return JSONResponse(
         content=export_data,
         headers={
@@ -462,7 +542,15 @@ async def import_rule_set(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
-    """导入规则集"""
+    """
+    导入规则集。
+
+    处理流程：
+    - 创建规则集对象
+    - 批量创建规则
+    - 提交并返回结果
+    """
+    # 构建规则集对象
     rule_set = AuditRuleSet(
         name=import_data.name,
         description=import_data.description,
@@ -475,11 +563,14 @@ async def import_rule_set(
         created_by=current_user.id,
     )
     
+    # 写入数据库并获取 rule_set.id
     db.add(rule_set)
     await db.flush()
     
+    # 创建规则
     rules = []
     for rule_in in import_data.rules:
+        # 构建规则对象
         rule = AuditRule(
             rule_set_id=rule_set.id,
             rule_code=rule_in.rule_code,
@@ -496,9 +587,11 @@ async def import_rule_set(
         db.add(rule)
         rules.append(rule)
     
+    # 提交并刷新
     await db.commit()
     await db.refresh(rule_set)
     
+    # 返回规则集响应
     return AuditRuleSetResponse(
         id=rule_set.id,
         name=rule_set.name,
@@ -546,21 +639,33 @@ async def add_rule_to_set(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
-    """向规则集添加规则"""
+    """
+    向规则集添加规则。
+
+    处理流程：
+    - 查询规则集并校验权限
+    - 创建规则并提交
+    - 返回规则响应
+    """
+    # 查询规则集
     result = await db.execute(
         select(AuditRuleSet).where(AuditRuleSet.id == rule_set_id)
     )
     rule_set = result.scalar_one_or_none()
     
+    # 校验存在性
     if not rule_set:
         raise HTTPException(status_code=404, detail="规则集不存在")
     
+    # 系统规则集不可修改
     if rule_set.is_system:
         raise HTTPException(status_code=403, detail="系统规则集不允许添加规则")
     
+    # 校验拥有者权限
     if rule_set.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="无权修改此规则集")
     
+    # 构建规则对象
     rule = AuditRule(
         rule_set_id=rule_set_id,
         rule_code=rule_in.rule_code,
@@ -575,10 +680,12 @@ async def add_rule_to_set(
         sort_order=rule_in.sort_order,
     )
     
+    # 保存规则
     db.add(rule)
     await db.commit()
     await db.refresh(rule)
     
+    # 返回规则响应
     return AuditRuleResponse(
         id=rule.id,
         rule_set_id=rule.rule_set_id,
@@ -605,21 +712,33 @@ async def update_rule(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
-    """更新规则"""
+    """
+    更新规则。
+
+    处理流程：
+    - 校验规则集权限
+    - 查询规则并更新字段
+    - 提交并返回结果
+    """
+    # 查询规则集
     result = await db.execute(
         select(AuditRuleSet).where(AuditRuleSet.id == rule_set_id)
     )
     rule_set = result.scalar_one_or_none()
     
+    # 校验存在性
     if not rule_set:
         raise HTTPException(status_code=404, detail="规则集不存在")
     
+    # 系统规则集不可修改
     if rule_set.is_system:
         raise HTTPException(status_code=403, detail="系统规则集不允许修改规则")
     
+    # 校验拥有者权限
     if rule_set.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="无权修改此规则集")
     
+    # 查询规则
     result = await db.execute(
         select(AuditRule).where(
             AuditRule.id == rule_id,
@@ -628,16 +747,20 @@ async def update_rule(
     )
     rule = result.scalar_one_or_none()
     
+    # 校验规则存在性
     if not rule:
         raise HTTPException(status_code=404, detail="规则不存在")
     
+    # 应用更新字段
     update_data = rule_in.dict(exclude_unset=True)
     for field, value in update_data.items():
         setattr(rule, field, value)
     
+    # 提交并刷新
     await db.commit()
     await db.refresh(rule)
     
+    # 返回更新后的规则
     return AuditRuleResponse(
         id=rule.id,
         rule_set_id=rule.rule_set_id,
@@ -663,21 +786,33 @@ async def delete_rule(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
-    """删除规则"""
+    """
+    删除规则。
+
+    处理流程：
+    - 校验规则集权限
+    - 查询规则并删除
+    - 返回结果
+    """
+    # 查询规则集
     result = await db.execute(
         select(AuditRuleSet).where(AuditRuleSet.id == rule_set_id)
     )
     rule_set = result.scalar_one_or_none()
     
+    # 校验存在性
     if not rule_set:
         raise HTTPException(status_code=404, detail="规则集不存在")
     
+    # 系统规则集不可删除规则
     if rule_set.is_system:
         raise HTTPException(status_code=403, detail="系统规则集不允许删除规则")
     
+    # 校验拥有者权限
     if rule_set.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="无权修改此规则集")
     
+    # 查询规则
     result = await db.execute(
         select(AuditRule).where(
             AuditRule.id == rule_id,
@@ -686,12 +821,15 @@ async def delete_rule(
     )
     rule = result.scalar_one_or_none()
     
+    # 校验规则存在性
     if not rule:
         raise HTTPException(status_code=404, detail="规则不存在")
     
+    # 删除规则并提交
     await db.delete(rule)
     await db.commit()
     
+    # 返回删除结果
     return {"message": "规则已删除"}
 
 
@@ -702,12 +840,21 @@ async def toggle_rule(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
-    """切换规则启用状态"""
+    """
+    切换规则启用状态。
+
+    处理流程：
+    - 校验规则集权限
+    - 查询规则并切换启用状态
+    - 返回最新状态
+    """
+    # 查询规则集
     result = await db.execute(
         select(AuditRuleSet).where(AuditRuleSet.id == rule_set_id)
     )
     rule_set = result.scalar_one_or_none()
     
+    # 校验存在性
     if not rule_set:
         raise HTTPException(status_code=404, detail="规则集不存在")
     
@@ -715,6 +862,7 @@ async def toggle_rule(
     if not rule_set.is_system and rule_set.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="无权修改此规则集")
     
+    # 查询规则
     result = await db.execute(
         select(AuditRule).where(
             AuditRule.id == rule_id,
@@ -723,10 +871,13 @@ async def toggle_rule(
     )
     rule = result.scalar_one_or_none()
     
+    # 校验规则存在性
     if not rule:
         raise HTTPException(status_code=404, detail="规则不存在")
     
+    # 切换启用状态
     rule.enabled = not rule.enabled
     await db.commit()
     
+    # 返回切换结果
     return {"enabled": rule.enabled, "message": f"规则已{'启用' if rule.enabled else '禁用'}"}

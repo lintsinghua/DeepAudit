@@ -1,3 +1,7 @@
+"""
+模块说明：数据模型定义：analysis。
+"""
+
 import uuid
 from sqlalchemy import Column, String, Integer, DateTime, Float, Text, ForeignKey
 from sqlalchemy.sql import func
