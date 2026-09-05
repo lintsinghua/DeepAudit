@@ -21,7 +21,10 @@ on:
       - 'v*.*.*'
 
 jobs:
+  quality:
+    uses: ./.github/workflows/quality.yml
   build-and-release:
+    needs: quality
     name: 构建并发布
     runs-on: ubuntu-latest
     
@@ -40,7 +43,7 @@ jobs:
       - name: 设置 Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22.14.0'
       
       # 3. 安装 pnpm
       - name: 安装 pnpm

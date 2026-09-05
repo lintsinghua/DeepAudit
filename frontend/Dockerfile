@@ -3,7 +3,7 @@
 # =============================================
 # 使用 Nginx 提供静态文件和反向代理 (支持 SSE 流式传输)
 
-FROM node:20-slim AS builder
+FROM node:22.14.0-slim AS builder
 
 WORKDIR /app
 
@@ -19,7 +19,7 @@ ENV NO_PROXY="*"
 
 # 配置国内 npm 镜像源
 RUN npm config set registry https://registry.npmmirror.com && \
-    npm install -g pnpm && \
+    npm install -g pnpm@9 && \
     pnpm config set registry https://registry.npmmirror.com
 
 # 复制依赖文件
@@ -28,7 +28,7 @@ COPY package.json pnpm-lock.yaml ./
 # 增加网络超时设置和并发数限制，防止 ARM 架构构建卡死
 RUN pnpm config set network-timeout 300000 && \
     pnpm config set fetch-retries 5 && \
-    pnpm install --no-frozen-lockfile --network-concurrency 1
+    pnpm install --frozen-lockfile --network-concurrency 1
 
 # 复制源代码
 COPY . .

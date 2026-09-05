@@ -1,3 +1,5 @@
+import asyncio
+import tempfile
 """
 ZIP文件存储服务
 用于管理项目的ZIP文件持久化存储
@@ -45,7 +47,16 @@ async def save_project_zip(project_id: str, file_path: str, original_filename: s
     meta_path = get_project_zip_meta_path(project_id)
     
     # 复制文件到存储目录
-    shutil.copy2(file_path, target_path)
+    def atomic_copy():
+        with tempfile.NamedTemporaryFile(dir=target_path.parent, delete=False) as temporary:
+            temporary_path = Path(temporary.name)
+        try:
+            shutil.copy2(file_path, temporary_path)
+            os.chmod(temporary_path, 0o600)
+            os.replace(temporary_path, target_path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+    await asyncio.to_thread(atomic_copy)
     
     # 获取文件大小
     file_size = os.path.getsize(target_path)

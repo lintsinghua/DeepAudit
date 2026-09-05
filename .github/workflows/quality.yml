@@ -1,0 +1,68 @@
+name: Quality checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  security-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-test-password
+          POSTGRES_DB: deepaudit_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      SECRET_KEY: ci-test-secret-for-deepaudit-at-least-32-chars
+      ENVIRONMENT: test
+      DATABASE_URL: postgresql+asyncpg://postgres:ci-test-password@localhost:5432/deepaudit_test
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:ci-test-password@localhost:5432/deepaudit_test
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: '0.11.7'
+          enable-cache: true
+      - run: uv sync --frozen --group dev --python 3.12
+      - name: Migrate disposable database
+        run: uv run --frozen --python 3.12 alembic upgrade head
+      # PostgreSQL integration tests run without external LLM calls or a sandbox.
+      - name: Backend tests including security regressions
+        run: uv run --frozen --python 3.12 pytest tests
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.14.0'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm type-check
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build

@@ -1,3 +1,7 @@
+from typing import Annotated
+from fastapi import Query, Response
+from sqlalchemy import func, case
+from app.services.audit_queue import request_cancel
 from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -87,6 +91,11 @@ class AuditTaskSchema(BaseModel):
 
 @router.get("/", response_model=List[AuditTaskSchema])
 async def list_tasks(
+    response: Response = None,
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    status: Optional[str] = None,
+    search: Annotated[str, Query(max_length=200)] = "",
     project_id: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
@@ -105,7 +114,16 @@ async def list_tasks(
     query = query.where(AuditTask.project_id.in_(user_project_ids)) if user_project_ids else query.where(False)
     if project_id:
         query = query.where(AuditTask.project_id == project_id)
-    query = query.order_by(AuditTask.created_at.desc())
+    if status:
+        query = query.where(AuditTask.status == status)
+    if search:
+        pattern = "%" + search.replace("%", r"\%").replace("_", r"\_") + "%"
+        query = query.where(AuditTask.project.has(Project.name.ilike(pattern)) | AuditTask.task_type.ilike(pattern))
+    if response is not None:
+        response.headers["X-Total-Count"] = str(await db.scalar(
+            select(func.count()).select_from(query.order_by(None).subquery())
+        ))
+    query = query.order_by(AuditTask.created_at.desc(), AuditTask.id.desc()).offset(skip).limit(limit)
     result = await db.execute(query)
     return result.scalars().all()
 
@@ -157,6 +175,7 @@ async def cancel_task(
         raise HTTPException(status_code=400, detail="只能取消待处理或运行中的任务")
     
     # 标记任务为取消
+    await request_cancel(db, id)
     task_control.cancel_task(id)
     
     # 更新数据库状态
@@ -170,6 +189,11 @@ async def cancel_task(
 @router.get("/{id}/issues", response_model=List[AuditIssueSchema])
 async def read_task_issues(
     id: str,
+    response: Response = None,
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    severity: Optional[str] = None,
+    status: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
@@ -188,15 +212,20 @@ async def read_task_issues(
     if task.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="无权查看此任务的问题")
     
-    result = await db.execute(
-        select(AuditIssue)
-        .where(AuditIssue.task_id == id)
-        .order_by(
-            # 按严重程度排序
-            AuditIssue.severity.desc(),
-            AuditIssue.created_at.desc()
-        )
-    )
+    query = select(AuditIssue).where(AuditIssue.task_id == id)
+    if severity:
+        query = query.where(AuditIssue.severity == severity)
+    if status:
+        query = query.where(AuditIssue.status == status)
+    if response is not None:
+        response.headers["X-Total-Count"] = str(await db.scalar(
+            select(func.count()).select_from(query.subquery())
+        ))
+    severity_order = case({"critical": 0, "high": 1, "medium": 2, "low": 3},
+                          value=AuditIssue.severity, else_=4)
+    result = await db.execute(query.order_by(
+        severity_order, AuditIssue.created_at.desc(), AuditIssue.id.desc(),
+    ).offset(skip).limit(limit))
     return result.scalars().all()
 
 
@@ -211,6 +240,12 @@ async def update_issue(
     """
     Update issue status (e.g., resolve, mark as false positive).
     """
+    task = await db.get(AuditTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if task.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="无权修改此任务的问题")
+
     result = await db.execute(
         select(AuditIssue)
         .where(AuditIssue.id == issue_id, AuditIssue.task_id == task_id)

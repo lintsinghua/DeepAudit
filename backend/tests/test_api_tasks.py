@@ -373,6 +373,7 @@ class TestUpdateIssue:
         """Resolve an issue and set resolved_by/resolved_at."""
         issue = _make_issue(status="open")
         db = AsyncMock()
+        db.get.return_value = _make_task()
 
         issue_result = MagicMock()
         issue_scalars = MagicMock()
@@ -395,6 +396,7 @@ class TestUpdateIssue:
     async def test_update_issue_not_found(self):
         """Raises 404 when issue does not exist."""
         db = AsyncMock()
+        db.get.return_value = _make_task()
 
         issue_result = MagicMock()
         issue_scalars = MagicMock()
@@ -416,6 +418,7 @@ class TestUpdateIssue:
         """Update issue status to false_positive (not resolved, so no resolved_by)."""
         issue = _make_issue(status="open")
         db = AsyncMock()
+        db.get.return_value = _make_task()
 
         issue_result = MagicMock()
         issue_scalars = MagicMock()
@@ -433,3 +436,31 @@ class TestUpdateIssue:
         assert issue.status == "false_positive"
         # resolved_by should NOT be set since status is not "resolved"
         assert issue.resolved_by is None
+
+    @pytest.mark.asyncio
+    async def test_other_user_cannot_modify_issue(self):
+        db = AsyncMock()
+        db.get.return_value = _make_task(created_by=OTHER_USER_ID)
+        with pytest.raises(HTTPException) as exc:
+            await update_issue(
+                task_id=TASK_ID, issue_id="issue-001",
+                issue_update=IssueUpdateSchema(status="resolved"),
+                db=db, current_user=_make_user(),
+            )
+        assert exc.value.status_code == 403
+        db.execute.assert_not_awaited()
+        db.commit.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_missing_task_cannot_modify_issue(self):
+        db = AsyncMock()
+        db.get.return_value = None
+        with pytest.raises(HTTPException) as exc:
+            await update_issue(
+                task_id=TASK_ID, issue_id="issue-001",
+                issue_update=IssueUpdateSchema(status="resolved"),
+                db=db, current_user=_make_user(),
+            )
+        assert exc.value.status_code == 404
+        db.execute.assert_not_awaited()
+        db.commit.assert_not_awaited()

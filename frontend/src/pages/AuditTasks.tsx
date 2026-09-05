@@ -1,43 +1,44 @@
+import { Pagination } from "@/components/common/Pagination";
+import { fetchPage } from "@/shared/api/pagination";
+import { useDebounce } from "@/shared/hooks/useDebounce";
 /**
  * Audit Tasks Page
  * Cyberpunk Terminal Aesthetic
  * 支持普通审计任务和Agent审计任务
  */
 
-import { useState, useEffect, useRef } from "react";
+import { useEffect,useRef,useState } from "react";
 
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
-import {
-  Activity,
-  AlertTriangle,
-  CheckCircle,
-  Clock,
-  Search,
-  FileText,
-  Calendar,
-  Plus,
-  XCircle,
-  ArrowUpRight,
-  Shield,
-  Terminal,
-  Bot,
-  Zap,
-  Download
-} from "lucide-react";
-import { api } from "@/shared/config/database";
-import { apiClient } from "@/shared/api/serverClient";
-import type { AuditTask } from "@/shared/types";
-import { Link, useNavigate } from "react-router-dom";
-import { toast } from "sonner";
 import CreateTaskDialog from "@/components/audit/CreateTaskDialog";
 import TerminalProgressDialog from "@/components/audit/TerminalProgressDialog";
 import ExportReportDialog from "@/components/reports/ExportReportDialog";
-import { calculateTaskProgress } from "@/shared/utils/utils";
-import { getAgentTasks, cancelAgentTask, getAgentFindings, type AgentTask, type AgentFinding } from "@/shared/api/agentTasks";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import ReportExportDialog from "@/pages/AgentAudit/components/ReportExportDialog";
+import { cancelAgentTask,getAgentFindings,type AgentFinding,type AgentTask } from "@/shared/api/agentTasks";
+import { api } from "@/shared/config/database";
+import type { AuditTask } from "@/shared/types";
+import { calculateTaskProgress } from "@/shared/utils/utils";
+import {
+Activity,
+AlertTriangle,
+ArrowUpRight,
+Bot,
+Calendar,
+CheckCircle,
+Clock,
+Download,
+FileText,
+Plus,
+Search,
+Terminal,
+XCircle,
+Zap
+} from "lucide-react";
+import { Link,useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 
 // Zombie task detection config
 const ZOMBIE_TIMEOUT = 180000; // 3 minutes without progress is potentially stuck
@@ -54,6 +55,16 @@ export default function AuditTasks() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [page, setPage] = useState(0);
+  const [taskTotal, setTaskTotal] = useState(0);
+  const [agentTotal, setAgentTotal] = useState(0);
+  const pageSize = 20;
+  const debouncedSearch = useDebounce(searchTerm, 300);
+  const query = { skip: page * pageSize, limit: pageSize, search: debouncedSearch,
+    ...(statusFilter === 'all' ? {} : { status: statusFilter }) };
+  const taskRequest = useRef(0);
+  const agentRequest = useRef(0);
+
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
   const [showTerminal, setShowTerminal] = useState(false);
@@ -78,23 +89,28 @@ export default function AuditTasks() {
   useEffect(() => {
     loadTasks();
     loadAgentTasks();
-  }, []);
+  }, [page, debouncedSearch, statusFilter, activeTab]);
+
+  useEffect(() => { setPage(0); }, [debouncedSearch, statusFilter, activeTab]);
 
   // 加载Agent任务（支持静默更新，不触发 loading 状态）
   const loadAgentTasks = async (silent = false) => {
+    const ticket = ++agentRequest.current;
     try {
       if (!silent) {
         setAgentLoading(true);
       }
-      const data = await getAgentTasks();
-      setAgentTasks(data);
+      const data = await fetchPage<AgentTask>('/agent-tasks/', query);
+      if (ticket !== agentRequest.current) return;
+      setAgentTasks(data.items);
+      setAgentTotal(data.total);
     } catch (error) {
       console.error('Failed to load agent tasks:', error);
       if (!silent) {
         toast.error("加载Agent任务失败");
       }
     } finally {
-      if (!silent) {
+      if (ticket === agentRequest.current && !silent) {
         setAgentLoading(false);
       }
     }
@@ -111,10 +127,12 @@ export default function AuditTasks() {
       return;
     }
 
+    let disposed = false;
     const intervalId = setInterval(async () => {
       try {
-        const updatedData = await api.getAuditTasks();
+        const updatedData = (await api.getAuditTaskPage(query)).items;
 
+        if (disposed) return;
         setTasks(prevTasks => {
           return prevTasks.map(prevTask => {
             const updated = updatedData.find(t => t.id === prevTask.id);
@@ -165,8 +183,8 @@ export default function AuditTasks() {
       }
     }, 3000);
 
-    return () => clearInterval(intervalId);
-  }, [tasks.map(t => t.id + t.status).join(',')]);
+    return () => { disposed = true; clearInterval(intervalId); };
+  }, [tasks.map(t => t.id + t.status).join(','), page, debouncedSearch, statusFilter]);
 
   // 自动刷新Agent任务（静默更新，不显示 loading）
   useEffect(() => {
@@ -178,7 +196,7 @@ export default function AuditTasks() {
 
     const intervalId = setInterval(() => loadAgentTasks(true), 5000);
     return () => clearInterval(intervalId);
-  }, [agentTasks.map(t => t.id + t.status).join(',')]);
+  }, [agentTasks.map(t => t.id + t.status).join(','), page, debouncedSearch, statusFilter, activeTab]);
 
   const handleCancelTask = async (taskId: string) => {
     if (cancellingTaskId) return;
@@ -218,7 +236,7 @@ export default function AuditTasks() {
     try {
       setExportingTaskId(task.id);
       // 获取任务的问题列表
-      const issuesResponse = await apiClient.get(`/tasks/${task.id}/issues`);
+      const issuesResponse = { data: await api.getAuditIssues(task.id) };
       setExportTask(task);
       setExportIssues(issuesResponse.data || []);
       setShowExportDialog(true);
@@ -248,10 +266,13 @@ export default function AuditTasks() {
   };
 
   const loadTasks = async () => {
+    const ticket = ++taskRequest.current;
     try {
       setLoading(true);
-      const data = await api.getAuditTasks();
-      setTasks(data);
+      const data = await api.getAuditTaskPage(query);
+      if (ticket !== taskRequest.current) return;
+      setTasks(data.items);
+      setTaskTotal(data.total);
     } catch (error) {
       console.error('Failed to load tasks:', error);
       toast.error("加载任务失败");
@@ -300,19 +321,9 @@ export default function AuditTasks() {
     });
   };
 
-  const filteredTasks = tasks.filter(task => {
-    const matchesSearch = task.project?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      task.task_type.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === "all" || task.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  const filteredTasks = tasks;
+  const filteredAgentTasks = agentTasks;
 
-  const filteredAgentTasks = agentTasks.filter(task => {
-    const matchesSearch = (task.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      task.task_type.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === "all" || task.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
 
   // 统计数据
   const regularStats = {
@@ -944,6 +955,9 @@ export default function AuditTasks() {
           )}
         </>
       )}
+
+      <Pagination page={page} pageSize={pageSize} total={activeTab === 'agent' ? agentTotal : taskTotal}
+        onChange={setPage} disabled={activeTab === 'agent' ? agentLoading : loading} />
 
       {/* Create Task Dialog */}
       <CreateTaskDialog

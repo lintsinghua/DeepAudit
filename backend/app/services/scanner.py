@@ -1,3 +1,4 @@
+from app.services.analysis_checkpoint import analyze_file
 """
 仓库扫描服务 - 支持GitHub, GitLab 和 Gitea 仓库扫描
 """
@@ -319,6 +320,8 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
 
             # 2. 获取项目信息
             project = await db.get(Project, task.project_id)
+            from app.services.audit_queue import project_snapshot
+            project = await project_snapshot(task_id, project)
             if not project:
                 raise Exception("项目不存在")
             
@@ -528,15 +531,10 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
                     rule_set_id = scan_config.get('rule_set_id')
                     prompt_template_id = scan_config.get('prompt_template_id')
                     
-                    if rule_set_id or prompt_template_id:
-                        analysis = await llm_service.analyze_code_with_rules(
-                            content, language,
-                            rule_set_id=rule_set_id,
-                            prompt_template_id=prompt_template_id,
-                            db_session=db
-                        )
-                    else:
-                        analysis = await llm_service.analyze_code(content, language)
+                    analysis = await analyze_file(
+                        task_id, file_info['path'], content, llm_service, language,
+                        rule_set_id=rule_set_id, prompt_template_id=prompt_template_id, db=db,
+                    )
                     print(f"✅ LLM 分析完成: {file_info['path']}")
                     
                     # 再次检查是否取消（LLM分析后）

@@ -5,7 +5,13 @@ Shared test fixtures for all backend tests.
 import pytest
 import tempfile
 import shutil
+import os
 from unittest.mock import patch, MagicMock
+
+# Configure imports before the application constructs its settings singleton.
+os.environ["SECRET_KEY"] = "test_secret_key_for_testing_1234567890"
+os.environ["ENVIRONMENT"] = "test"
+os.environ["DEMO_ENABLED"] = "false"
 
 from app.core.config import Settings
 

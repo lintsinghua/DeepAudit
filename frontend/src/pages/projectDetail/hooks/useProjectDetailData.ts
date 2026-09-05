@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/shared/config/database";
 import type { Project, AuditTask } from "@/shared/types";
 import type { AgentTask } from "@/shared/api/agentTasks";
-import { getAgentTasks } from "@/shared/api/agentTasks";
+import { fetchAllPages } from "@/shared/api/pagination";
 import type { UnifiedTask } from "@/shared/types";
 
 export type ProjectDetailCombinedStats = {
@@ -28,7 +28,7 @@ export function useProjectDetailData(projectId: string | undefined) {
       const [projectRes, auditTasksRes, agentTasksRes] = await Promise.allSettled([
         api.getProjectById(projectId),
         api.getAuditTasks(projectId),
-        getAgentTasks({ project_id: projectId }),
+        fetchAllPages<AgentTask>("/agent-tasks/", { project_id: projectId }),
       ]);
 
       if (projectRes.status === "fulfilled") setProject(projectRes.value);

@@ -245,6 +245,9 @@ DeepAudit/
 
 ### 方式一：一行命令部署（推荐）
 
+> 当前源码已收紧默认安全配置：部署前须配置至少 32 字符的随机 `SECRET_KEY`，
+> 默认不再创建演示管理员。已有部署升级前请阅读[安全配置与迁移说明](docs/CONFIGURATION.md#后端配置)。
+
 使用预构建的 Docker 镜像，无需克隆代码，一行命令即可启动：
 
 ```bash
@@ -321,7 +324,7 @@ git clone https://github.com/lintsinghua/DeepAudit.git && cd DeepAudit
 
 # 2. 配置环境变量
 cp backend/env.example backend/.env
-# 编辑 backend/.env 填入你的 LLM API Key
+# 编辑 backend/.env 填入随机 SECRET_KEY（用 openssl rand -hex 32 生成）及 LLM API Key
 
 # 3. 一键启动
 docker compose up -d
@@ -363,6 +366,8 @@ source .venv/bin/activate
 
 # 启动 API 服务
 uvicorn app.main:app --reload
+# 另开终端，同目录启动审计 worker
+python -m app.worker
 ```
 
 ### 3. 前端启动

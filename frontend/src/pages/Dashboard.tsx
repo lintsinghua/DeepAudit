@@ -3,26 +3,42 @@
  * Cyberpunk Terminal Aesthetic
  */
 
-import { useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import {
-  LineChart, Line, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
-} from "recharts";
-import {
-  Activity, AlertTriangle, Clock, Code,
-  FileText, GitBranch, Shield, TrendingUp, Zap,
-  BarChart3, Target, ArrowUpRight, Calendar,
-  MessageSquare, Bot, Cpu, Terminal
-} from "lucide-react";
-import { api, dbMode, isDemoMode } from "@/shared/config/database";
-import type { Project, AuditTask, ProjectStats, UnifiedTask } from "@/shared/types";
-import { Link } from "react-router-dom";
-import { toast } from "sonner";
-import { getRuleSets } from "@/shared/api/rules";
+import { Button } from "@/components/ui/button";
+import { getAgentTasks,type AgentTask } from "@/shared/api/agentTasks";
 import { getPromptTemplates } from "@/shared/api/prompts";
-import { getAgentTasks, type AgentTask } from "@/shared/api/agentTasks";
+import { getRuleSets } from "@/shared/api/rules";
+import { api,dbMode,isDemoMode } from "@/shared/config/database";
+import type { AuditTask,Project,ProjectStats,UnifiedTask } from "@/shared/types";
+import {
+Activity,AlertTriangle,
+ArrowUpRight,
+BarChart3,
+Bot,
+Calendar,
+Clock,Code,
+Cpu,
+FileText,GitBranch,
+MessageSquare,
+Shield,
+Target,
+Terminal,
+TrendingUp,Zap
+} from "lucide-react";
+import { useEffect,useState } from "react";
+import { Link } from "react-router-dom";
+import {
+CartesianGrid,
+Cell,
+Line,
+LineChart,
+Pie,
+PieChart,
+ResponsiveContainer,
+Tooltip,
+XAxis,YAxis
+} from "recharts";
+import { toast } from "sonner";
 
 export default function Dashboard() {
   const [stats, setStats] = useState<ProjectStats | null>(null);
@@ -45,7 +61,7 @@ export default function Dashboard() {
       const results = await Promise.allSettled([
         api.getProjectStats(),
         api.getProjects(),
-        api.getAuditTasks(),
+        api.getAuditTaskPage({ limit: 10 }).then(page => page.items),
         getAgentTasks({ limit: 10 })
       ]);
 
@@ -108,17 +124,8 @@ export default function Dashboard() {
       }
 
       try {
-        const allIssues = await Promise.all(
-          tasks.map(task => api.getAuditIssues(task.id).catch(() => []))
-        );
-        const flatIssues = allIssues.flat();
-
-        if (flatIssues.length > 0) {
-          const typeCount: Record<string, number> = {};
-          flatIssues.forEach(issue => {
-            typeCount[issue.issue_type] = (typeCount[issue.issue_type] || 0) + 1;
-          });
-
+        const typeCount = results[0].status === 'fulfilled' ? (results[0].value.issue_types || {}) : {};
+        if (Object.keys(typeCount).length > 0) {
           const typeMap: Record<string, { name: string; color: string }> = {
             security: { name: '安全问题', color: '#f43f5e' },
             bug: { name: '潜在Bug', color: '#f97316' },

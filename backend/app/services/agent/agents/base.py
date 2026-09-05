@@ -297,6 +297,7 @@ class BaseAgent(ABC):
         self._total_tokens = 0
         self._tool_calls = 0
         self._cancelled = False
+        self._cancel_callback = None
 
         # 获取超时配置
         self._timeout_config = self._get_timeout_config()
@@ -512,9 +513,6 @@ class BaseAgent(ABC):
         self._cancelled = True
         logger.info(f"[{self.name}] Cancel requested")
     
-        # 🔥 外部取消检查回调
-        self._cancel_callback = None
-
     def set_cancel_callback(self, callback) -> None:
         """设置外部取消检查回调"""
         self._cancel_callback = callback

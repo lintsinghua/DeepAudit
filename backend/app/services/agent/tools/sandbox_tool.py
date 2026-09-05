@@ -65,9 +65,9 @@ class SandboxManager:
         try:
             import docker
             logger.info(f"🔄 Attempting to connect to Docker... (lib: {docker.__file__})")
-            self._docker_client = docker.from_env()
+            self._docker_client = await asyncio.to_thread(docker.from_env)
             # 测试连接
-            self._docker_client.ping()
+            await asyncio.to_thread(self._docker_client.ping)
             self._initialized = True
             self._init_error = None
             logger.info("✅ Docker sandbox manager initialized successfully")
@@ -92,6 +92,24 @@ class SandboxManager:
         if self.is_available:
             return "Docker Service Available"
         return f"Docker Service Unavailable. Error: {self._init_error or 'Not initialized'}"
+
+    def _daemon_path(self, path: str) -> str:
+        """Resolve a worker-container path to the Docker daemon's volume source."""
+        import socket
+        from pathlib import Path
+        resolved = Path(path).resolve()
+        if not Path("/.dockerenv").exists():
+            return str(resolved)
+        container = self._docker_client.containers.get(socket.gethostname())
+        mounts = sorted(container.attrs.get("Mounts", []),
+                        key=lambda mount: len(mount["Destination"]), reverse=True)
+        for mount in mounts:
+            try:
+                relative = resolved.relative_to(mount["Destination"])
+                return str(Path(mount["Source"]) / relative)
+            except ValueError:
+                continue
+        raise ValueError("Sandbox project must be located on a shared worker volume")
     
     async def execute_command(
         self,
@@ -149,10 +167,9 @@ class SandboxManager:
                     "network_mode": self.config.network_mode,
                     "user": self.config.user,
                     "read_only": self.config.read_only,
-                    "volumes": {
-                        temp_dir: {"bind": "/workspace", "mode": "rw"},
-                    },
+                    "labels": {"deepaudit.job_id": os.environ.get("DEEPAUDIT_JOB_ID", "local")},
                     "tmpfs": {
+                            "/workspace": "rw,size=512m,mode=1777",
                             "/home/sandbox": "rw,size=100m,mode=1777",
                             "/tmp": "rw,size=100m,mode=1777"
                         },
@@ -280,13 +297,14 @@ class SandboxManager:
                 "user": self.config.user,
                 "read_only": self.config.read_only,
                 "volumes": {
-                    host_workdir: {"bind": "/workspace", "mode": "ro"}, # 只读挂载项目代码
+                    self._daemon_path(host_workdir): {"bind": "/workspace", "mode": "ro"},
                 },
                 "tmpfs": {
                     "/home/sandbox": "rw,size=100m,mode=1777",
                     "/tmp": "rw,size=100m,mode=1777"  # 添加 /tmp 目录供工具写入临时文件
                 },
                 "working_dir": "/workspace",
+                "labels": {"deepaudit.job_id": os.environ.get("DEEPAUDIT_JOB_ID", "local")},
                 "environment": container_env,
             }
 

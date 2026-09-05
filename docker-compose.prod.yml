@@ -12,7 +12,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
     environment:
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
       - POSTGRES_DB=deepaudit
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
@@ -40,13 +40,20 @@ services:
     restart: unless-stopped
     volumes:
       - backend_uploads:/app/uploads
-      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "8000:8000"
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/deepaudit
+    environment: &audit_environment
+      - POSTGRES_SERVER=db
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=deepaudit
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY to a random secret of at least 32 characters}
+      - ENVIRONMENT=production
+      - DEMO_ENABLED=false
+      - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS:-[]}
       - REDIS_URL=redis://redis:6379/0
       - AGENT_ENABLED=true
+      - AUDIT_WORKSPACE_PATH=/app/uploads/audit_workspaces
       - SANDBOX_ENABLED=true
       - SANDBOX_IMAGE=ghcr.io/lintsinghua/deepaudit-sandbox:latest
       # LLM 配置 - 请根据需要修改
@@ -72,13 +79,46 @@ services:
         condition: service_completed_successfully
     networks:
       - deepaudit-network
+    healthcheck:
+      test: ["CMD", ".venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+
+  worker:
+    image: ghcr.io/lintsinghua/deepaudit-backend:latest
+    restart: unless-stopped
+    init: true
+    command: [".venv/bin/python", "-m", "app.worker"]
+    environment: *audit_environment
+    volumes:
+      - backend_uploads:/app/uploads
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", ".venv/bin/python", "-m", "app.worker", "--health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - deepaudit-network
 
   # 数据库迁移服务 - 在后端启动前自动执行
   db-migrate:
     image: ghcr.io/lintsinghua/deepaudit-backend:latest
     restart: "no"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/deepaudit
+      - POSTGRES_SERVER=db
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=deepaudit
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY to a random secret of at least 32 characters}
+      - ENVIRONMENT=production
     command: [".venv/bin/alembic", "upgrade", "head"]
     depends_on:
       db:

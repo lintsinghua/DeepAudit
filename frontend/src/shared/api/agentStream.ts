@@ -1,3 +1,4 @@
+import { parseSSE } from "./sse";
 /**
  * Agent 流式事件处理
  * 
@@ -207,7 +208,7 @@ export class AgentStreamHandler {
         const { done, value } = await this.reader.read();
 
         if (done) {
-          console.log('[AgentStream] Reader done, stream ended');
+          if (!this.isDisconnecting) throw new Error('事件连接已中断');
           break;
         }
 
@@ -275,51 +276,17 @@ export class AgentStreamHandler {
    * 解析 SSE 格式
    */
   private parseSSE(buffer: string): { parsed: StreamEventData[]; remaining: string } {
-    const parsed: StreamEventData[] = [];
-    const lines = buffer.split('\n');
-    let remaining = '';
-    let currentEvent: Partial<StreamEventData> = {};
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-
-      // 空行表示事件结束
-      if (line === '') {
-        if (currentEvent.type) {
-          parsed.push(currentEvent as StreamEventData);
-          currentEvent = {};
-        }
-        continue;
-      }
-
-      // 检查是否是最后一行（可能不完整）
-      if (i === lines.length - 1 && !buffer.endsWith('\n')) {
-        remaining = line;
-        break;
-      }
-
-      // 解析 event: 行
-      if (line.startsWith('event:')) {
-        currentEvent.type = line.slice(6).trim() as StreamEventType;
-      }
-      // 解析 data: 行
-      else if (line.startsWith('data:')) {
-        try {
-          const data = JSON.parse(line.slice(5).trim());
-          currentEvent = { ...currentEvent, ...data };
-        } catch {
-          // 忽略解析错误
-        }
-      }
-    }
-
-    return { parsed, remaining };
+    return parseSSE(buffer);
   }
 
   /**
    * 处理事件
    */
   private handleEvent(event: StreamEventData): void {
+    if (typeof event.sequence === 'number' && event.type !== 'task_end') {
+      if (event.sequence <= (this.options.afterSequence ?? 0)) return;
+      this.options.afterSequence = event.sequence;
+    }
     // Extract agent_name from metadata if present
     if (event.metadata?.agent_name && !event.agent_name) {
       event.agent_name = event.metadata.agent_name as string;

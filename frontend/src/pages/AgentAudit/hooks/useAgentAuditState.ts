@@ -44,7 +44,28 @@ function agentAuditReducer(state: AgentAuditState, action: AgentAuditAction): Ag
 
     case 'ADD_FINDING': {
       // 🔥 添加单个 finding，避免重复
-      const newFinding = action.payload;
+      const partial = action.payload;
+      const newFinding: AgentFinding = {
+        id: partial.id,
+        task_id: partial.task_id ?? state.task?.id ?? '',
+        vulnerability_type: partial.vulnerability_type ?? 'unknown',
+        severity: partial.severity ?? 'medium',
+        title: partial.title ?? 'Vulnerability found',
+        description: partial.description ?? null,
+        file_path: partial.file_path ?? null,
+        line_start: partial.line_start ?? null,
+        line_end: partial.line_end ?? null,
+        code_snippet: partial.code_snippet ?? null,
+        status: partial.status ?? 'new',
+        is_verified: partial.is_verified ?? false,
+        has_poc: partial.has_poc ?? false,
+        poc_code: partial.poc_code ?? null,
+        suggestion: partial.suggestion ?? null,
+        fix_code: partial.fix_code ?? null,
+        ai_explanation: partial.ai_explanation ?? null,
+        ai_confidence: partial.ai_confidence ?? null,
+        created_at: partial.created_at ?? '',
+      };
       const existingIds = new Set(state.findings.map(f => f.id));
       if (newFinding.id && existingIds.has(newFinding.id)) {
         return state; // 已存在，不添加

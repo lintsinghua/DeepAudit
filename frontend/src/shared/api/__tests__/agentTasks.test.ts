@@ -187,7 +187,7 @@ describe("agentTasks API", () => {
 
 			expect(apiClient.get).toHaveBeenCalledWith(
 				"/agent-tasks/task-1/findings",
-				{ params: { severity: "critical", is_verified: true } },
+				{ params: { severity: "critical", is_verified: true, skip: 0, limit: 100 } },
 			);
 			expect(result).toEqual(mockFindings);
 		});

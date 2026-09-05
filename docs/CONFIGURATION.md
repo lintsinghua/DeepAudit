@@ -1,5 +1,7 @@
 # 配置说明
 
+> 本次升级新增独立审计 worker，需要运行数据库迁移并同步更新 API、worker 与前端。详见[运行与升级说明](OPERATIONS.md)。
+
 本文档详细介绍 DeepAudit 的所有配置选项，包括后端环境变量、前端配置和运行时配置。
 
 ## 目录
@@ -34,6 +36,24 @@ DeepAudit 采用前后端分离架构，数据存储在后端 PostgreSQL 数据�
 cp backend/env.example backend/.env
 ```
 
+启动前，使用 `openssl rand -hex 32` 生成随机密钥，填写到 `backend/.env` 的
+`SECRET_KEY` 中。密钥不能为空、不能使用旧的示例值，且至少需要 32 个字符。
+使用生产 Compose 文件时，在项目根目录 `.env` 中设置相同变量，或通过
+`docker compose --env-file backend/.env -f docker-compose.prod.yml up -d` 显式传入。
+国内镜像配置 `docker-compose.prod.cn.yml` 使用相同方式。
+
+默认 `ENVIRONMENT=production`、`DEMO_ENABLED=false`，不再自动创建演示管理员。
+如需本地演示，必须同时设置 `ENVIRONMENT=development` 和 `DEMO_ENABLED=true`；
+生产环境会拒绝启用演示账户。已有部署升级后，仍使用默认密码的原演示账户会被禁用，
+其数据保留；升级前请创建独立管理员或修改原演示账户密码。
+
+`SECRET_KEY` 也用于加密用户保存的 API Key 等配置。已有部署请保留安全的原密钥；
+如果原来使用默认密钥，则必须更换，之后需要重新登录并重新保存加密配置。
+生产环境数据库初始化失败时，应用会停止启动，请先完成数据库迁移。
+
+同域反向代理部署可将 `BACKEND_CORS_ORIGINS` 设为 `[]`。前后端跨域时，
+填写实际前端来源，例如 `["http://localhost:5173"]`，不支持通配符。
+
 ### 完整配置参考
 
 ```env
@@ -49,7 +69,10 @@ POSTGRES_DB=deepaudit              # 数据库名称
 # DATABASE_URL=                    # 完整数据库连接字符串（可选，会覆盖上述配置）
 
 # ========== 安全配置 ==========
-SECRET_KEY=your-super-secret-key   # JWT 签名密钥（生产环境必须修改！）
+SECRET_KEY=                       # 必填，至少 32 字符的随机密钥
+ENVIRONMENT=production
+DEMO_ENABLED=false
+BACKEND_CORS_ORIGINS=[]            # 跨域部署时填写实际前端来源
 ALGORITHM=HS256                    # JWT 加密算法
 ACCESS_TOKEN_EXPIRE_MINUTES=11520  # Token 过期时间（分钟），默认 8 天
 

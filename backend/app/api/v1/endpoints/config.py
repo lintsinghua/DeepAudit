@@ -24,7 +24,7 @@ SENSITIVE_LLM_FIELDS = [
     'qwenApiKey', 'deepseekApiKey', 'zhipuApiKey', 'moonshotApiKey',
     'baiduApiKey', 'minimaxApiKey', 'doubaoApiKey'
 ]
-SENSITIVE_OTHER_FIELDS = ['githubToken', 'gitlabToken']
+SENSITIVE_OTHER_FIELDS = ['githubToken', 'gitlabToken', 'giteaToken']
 
 
 def encrypt_config(config: dict, sensitive_fields: list) -> dict:

@@ -43,15 +43,15 @@ services:
     volumes:
       # - ./backend/app:/app/app:ro  # 挂载代码目录，修改后自动生效
       - backend_uploads:/app/uploads
-      - /var/run/docker.sock:/var/run/docker.sock # 沙箱执行必须
     ports:
       - "8000:8000"
     env_file:
       - ./backend/.env
-    environment:
+    environment: &audit_environment
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/deepaudit
       - REDIS_URL=redis://redis:6379/0
       - AGENT_ENABLED=true
+      - AUDIT_WORKSPACE_PATH=/app/uploads/audit_workspaces
       - SANDBOX_ENABLED=true
       - SANDBOX_IMAGE=deepaudit/sandbox:latest  # 使用本地构建的沙箱镜像
       # 禁用代理设置，防止容器内无法连接外部 API
@@ -67,6 +67,37 @@ services:
         condition: service_healthy
     # 开发模式：启用 --reload 热重载
     command: sh -c ".venv/bin/alembic upgrade head && .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    networks:
+      - deepaudit-network
+    healthcheck:
+      test: ["CMD", ".venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+
+  worker:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    init: true
+    command: [".venv/bin/python", "-m", "app.worker"]
+    environment: *audit_environment
+    env_file:
+      - ./backend/.env
+    volumes:
+      - backend_uploads:/app/uploads
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", ".venv/bin/python", "-m", "app.worker", "--health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     networks:
       - deepaudit-network
 

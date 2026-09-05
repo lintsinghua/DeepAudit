@@ -10,7 +10,10 @@ on:
   workflow_dispatch:
 
 jobs:
+  quality:
+    uses: ./.github/workflows/quality.yml
   check-and-release:
+    needs: quality
     name: 检查并发布
     runs-on: ubuntu-latest
     

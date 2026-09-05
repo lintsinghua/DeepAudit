@@ -15,8 +15,6 @@ import base64
 if sys.platform == 'darwin':
     os.environ['DYLD_FALLBACK_LIBRARY_PATH'] = '/opt/homebrew/lib:' + os.environ.get('DYLD_FALLBACK_LIBRARY_PATH', '')
 
-from weasyprint import HTML, CSS
-from weasyprint.text.fonts import FontConfiguration
 from jinja2 import Template
 
 class ReportGenerator:
@@ -452,6 +450,10 @@ class ReportGenerator:
 
     @classmethod
     def _render_pdf(cls, context: Dict[str, Any]) -> bytes:
+        # Load native PDF dependencies only when rendering a PDF.
+        from weasyprint import HTML
+        from weasyprint.text.fonts import FontConfiguration
+
         # 注入 Logo
         context['logo_b64'] = cls._get_logo_base64()
         

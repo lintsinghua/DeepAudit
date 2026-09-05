@@ -64,6 +64,9 @@ async def lifespan(app: FastAPI):
             await init_db(db)
         logger.info("  - 数据库初始化完成")
     except Exception as e:
+        if settings.ENVIRONMENT == "production":
+            # Bootstrap also disables legacy default credentials: fail closed.
+            raise
         # 表不存在时静默跳过，等待用户运行数据库迁移
         error_msg = str(e)
         if "does not exist" in error_msg or "UndefinedTableError" in error_msg:
@@ -71,24 +74,10 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning(f"数据库初始化跳过: {e}")
 
-    # 检查 Agent 服务
-    logger.info("检查 Agent 核心服务...")
-    issues = await check_agent_services()
-    if issues:
-        logger.warning("=" * 50)
-        logger.warning("Agent 服务检查发现问题:")
-        for issue in issues:
-            logger.warning(f"  - {issue}")
-        logger.warning("部分功能可能不可用，请检查配置")
-        logger.warning("=" * 50)
-    else:
-        logger.info("  - Agent 核心服务检查通过")
+    logger.info("审计任务通过持久化队列交由独立 worker 执行")
 
-    logger.info("=" * 50)
     logger.info("DeepAudit 后端服务已启动")
     logger.info(f"API 文档: http://localhost:8000/docs")
-    logger.info("=" * 50)
-    logger.info("演示账户: demo@example.com / demo123")
     logger.info("=" * 50)
 
     yield
@@ -102,13 +91,17 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Configure CORS - Allow all origins in development
+from app.core.upload_limit import UploadLimitMiddleware
+app.add_middleware(UploadLimitMiddleware)
+
+# Same-origin deployments need no CORS entries; cross-origin clients are explicit.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific frontend URL
+    allow_origins=[str(origin).rstrip("/") for origin in settings.BACKEND_CORS_ORIGINS],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Total-Count"],
 )
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
@@ -124,8 +117,17 @@ async def root():
     return {
         "message": "Welcome to DeepAudit API",
         "docs": "/docs",
-        "demo_account": {
-            "email": "demo@example.com",
-            "password": "demo123"
-        }
     }
+
+
+@app.get("/ready")
+async def readiness():
+    from fastapi.responses import JSONResponse
+    from sqlalchemy import select
+    from app.models.audit_job import AuditJob
+    try:
+        async with AsyncSessionLocal() as db:
+            await db.execute(select(AuditJob.id).limit(1))
+        return {"status": "ready"}
+    except Exception:
+        return JSONResponse(status_code=503, content={"status": "unavailable"})

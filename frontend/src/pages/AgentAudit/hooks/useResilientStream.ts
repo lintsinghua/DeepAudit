@@ -1,3 +1,4 @@
+import { parseSSE as parseEventStream } from "@/shared/api/sse";
 /**
  * Resilient Stream Hook
  * Enhanced stream connection with automatic reconnection, heartbeat monitoring,
@@ -80,6 +81,10 @@ export function useResilientStream(
   const heartbeatTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamOptionsRef = useRef(streamOptions);
   const isDisconnectingRef = useRef(false);
+  const cursorRef = useRef({ taskId, sequence: streamOptions.afterSequence ?? 0 });
+  if (cursorRef.current.taskId !== taskId) {
+    cursorRef.current = { taskId, sequence: streamOptions.afterSequence ?? 0 };
+  }
 
   // Update refs when options change
   streamOptionsRef.current = streamOptions;
@@ -153,45 +158,16 @@ export function useResilientStream(
   // ============ SSE Parsing ============
 
   const parseSSE = useCallback((buffer: string): { parsed: StreamEventData[]; remaining: string } => {
-    const parsed: StreamEventData[] = [];
-    const lines = buffer.split('\n');
-    let remaining = '';
-    let currentEvent: Partial<StreamEventData> = {};
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-
-      if (line === '') {
-        if (currentEvent.type) {
-          parsed.push(currentEvent as StreamEventData);
-          currentEvent = {};
-        }
-        continue;
-      }
-
-      if (i === lines.length - 1 && !buffer.endsWith('\n')) {
-        remaining = line;
-        break;
-      }
-
-      if (line.startsWith('event:')) {
-        currentEvent.type = line.slice(6).trim() as StreamEventData['type'];
-      } else if (line.startsWith('data:')) {
-        try {
-          const data = JSON.parse(line.slice(5).trim());
-          currentEvent = { ...currentEvent, ...data };
-        } catch {
-          // Ignore parse errors
-        }
-      }
-    }
-
-    return { parsed, remaining };
+    return parseEventStream(buffer);
   }, []);
 
   // ============ Event Handling ============
 
   const handleEvent = useCallback((event: StreamEventData) => {
+    if (typeof event.sequence === 'number' && event.type !== 'task_end') {
+      if (event.sequence <= cursorRef.current.sequence) return;
+      cursorRef.current.sequence = event.sequence;
+    }
     const opts = streamOptionsRef.current;
 
     // Extract agent_name from metadata
@@ -310,7 +286,7 @@ export function useResilientStream(
     const params = new URLSearchParams({
       include_thinking: String(streamOptionsRef.current.includeThinking ?? true),
       include_tool_calls: String(streamOptionsRef.current.includeToolCalls ?? true),
-      after_sequence: String(streamOptionsRef.current.afterSequence ?? 0),
+      after_sequence: String(Math.max(cursorRef.current.sequence, streamOptionsRef.current.afterSequence ?? 0)),
     });
 
     const url = `/api/v1/agent-tasks/${taskId}/stream?${params}`;
@@ -346,7 +322,10 @@ export function useResilientStream(
         if (isDisconnectingRef.current) break;
 
         const { done, value } = await readerRef.current.read();
-        if (done) break;
+        if (done) {
+          if (!isDisconnectingRef.current) throw new Error('事件连接已中断');
+          break;
+        }
 
         buffer += decoder.decode(value, { stream: true });
         const events = parseSSE(buffer);

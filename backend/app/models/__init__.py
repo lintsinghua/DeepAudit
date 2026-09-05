@@ -1,4 +1,5 @@
 from .user import User
+from .audit_job import AuditJob
 from .user_config import UserConfig
 from .project import Project, ProjectMember
 from .audit import AuditTask, AuditIssue
@@ -10,6 +11,5 @@ from .agent_task import (
     AgentTaskStatus, AgentTaskPhase, AgentEventType,
     VulnerabilitySeverity, VulnerabilityType, FindingStatus
 )
-
 
 

@@ -1,7 +1,8 @@
+import { fetchAllPages } from "@/shared/api/pagination";
 import { useEffect, useMemo, useState } from "react";
 
 import { apiClient } from "@/shared/api/serverClient";
-import type { AuditTask } from "@/shared/types";
+import type { AuditTask, AuditIssue } from "@/shared/types";
 import type { AgentTask, AgentFinding } from "@/shared/api/agentTasks";
 import type {
   AggregatedAuditIssue,
@@ -53,22 +54,12 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-async function fetchAuditIssues(taskId: string) {
-  const res = await withTimeout(
-    apiClient.get(`/tasks/${taskId}/issues`),
-    PROJECT_DETAIL_REQUEST_TIMEOUT_MS,
-    `GET /tasks/${taskId}/issues`
-  );
-  return res.data;
+async function fetchAuditIssues(taskId: string): Promise<AuditIssue[]> {
+  return fetchAllPages<AuditIssue>(`/tasks/${taskId}/issues`);
 }
 
 async function fetchAgentFindings(taskId: string): Promise<AgentFinding[]> {
-  const res = await withTimeout(
-    apiClient.get(`/agent-tasks/${taskId}/findings`),
-    PROJECT_DETAIL_REQUEST_TIMEOUT_MS,
-    `GET /agent-tasks/${taskId}/findings`
-  );
-  return res.data;
+  return fetchAllPages<AgentFinding>(`/agent-tasks/${taskId}/findings`);
 }
 
 function normalizeSeverity(severity: unknown): LatestProblem["severity"] {

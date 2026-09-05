@@ -1,5 +1,7 @@
 # 部署指南
 
+> 本次升级新增独立审计 worker，需要运行数据库迁移并同步更新 API、worker 与前端。详见[运行与升级说明](OPERATIONS.md)。
+
 本文档详细介绍 DeepAudit v3.0.0 的各种部署方式，包括 Docker Compose 一键部署、Agent 审计模式部署和本地开发环境搭建。
 
 ## 目录
@@ -36,12 +38,15 @@ docker compose up -d
 
 ### 演示账户
 
-系统启动时会自动创建演示账户，包含示例项目和审计数据，可直接体验完整功能：
+默认不创建演示账户。仅在本地开发中同时设置 `ENVIRONMENT=development` 和
+`DEMO_ENABLED=true` 后，系统才会创建以下演示账户及示例数据：
 
 - 📧 邮箱：`demo@example.com`
 - 🔑 密码：`demo123`
 
-> ⚠️ **安全提示**: 生产环境部署后，请删除演示账户或修改密码。
+> 生产环境禁止启用演示账户，并要求配置至少 32 字符的随机 `SECRET_KEY`。
+> 升级会禁用仍使用默认密码的旧演示账户。升级前请创建独立管理员或修改密码，
+> 详情见[安全配置与迁移说明](CONFIGURATION.md#后端配置)。
 
 ---
 
@@ -79,7 +84,8 @@ POSTGRES_PASSWORD=postgres
 POSTGRES_DB=deepaudit
 
 # 安全配置（生产环境请修改）
-SECRET_KEY=your-super-secret-key-change-this-in-production
+# 使用 openssl rand -hex 32 生成随机值；已有部署保留原有安全密钥
+SECRET_KEY=<填入随机密钥>
 
 # LLM 配置（必填）
 LLM_PROVIDER=openai
@@ -332,6 +338,8 @@ uv run alembic upgrade head
 
 # 6. 启动后端服务（开发模式，支持热重载）
 uv run uvicorn app.main:app --reload --port 8000
+# 另开终端，同目录启动审计 worker
+uv run python -m app.worker
 ```
 
 ### 前端启动

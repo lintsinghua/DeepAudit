@@ -84,6 +84,33 @@ class AgentGraphController:
                 "note": "Agent将在当前迭代完成后停止",
             }
     
+    def stop_agent_tree(self, root_agent_id: str) -> Dict[str, Any]:
+        """Stop one task's root and descendants without touching other task trees."""
+        tree = agent_registry.get_agent_tree()
+        nodes = tree["nodes"]
+        if root_agent_id not in nodes:
+            return {"success": False, "stopped": [], "error": "Agent root not found"}
+
+        pending = [root_agent_id]
+        children: Dict[Optional[str], List[str]] = {}
+        for agent_id, node in nodes.items():
+            children.setdefault(node.get("parent_id"), []).append(agent_id)
+        visited = set()
+        stopped = []
+        failed = []
+        while pending:
+            agent_id = pending.pop()
+            if agent_id in visited:
+                continue
+            visited.add(agent_id)
+            pending.extend(children.get(agent_id, []))
+            result = self.stop_agent(agent_id)
+            if result.get("success"):
+                stopped.append(agent_id)
+            else:
+                failed.append({"id": agent_id, "error": result.get("error")})
+        return {"success": not failed, "stopped": stopped, "failed": failed}
+
     def stop_all_agents(self, exclude_root: bool = True) -> Dict[str, Any]:
         """
         停止所有Agent

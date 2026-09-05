@@ -4,6 +4,8 @@ Agent 事件管理器
 """
 
 import asyncio
+import time
+from .config import get_agent_config
 import json
 import logging
 from typing import Optional, Dict, Any, List, AsyncGenerator, Callable
@@ -54,17 +56,16 @@ class AgentEventEmitter:
         self.event_manager = event_manager
         self._sequence = 0
         self._current_phase = None
+        self._emit_lock = asyncio.Lock()
     
     async def emit(self, event_data: AgentEventData):
         """发射事件"""
-        self._sequence += 1
-        event_data.phase = event_data.phase or self._current_phase
-        
-        await self.event_manager.add_event(
-            task_id=self.task_id,
-            sequence=self._sequence,
-            **event_data.to_dict()
-        )
+        async with self._emit_lock:
+            self._sequence += 1
+            event_data.phase = event_data.phase or self._current_phase
+            await self.event_manager.add_event(
+                task_id=self.task_id, sequence=self._sequence, **event_data.to_dict()
+            )
     
     async def emit_phase_start(self, phase: str, message: Optional[str] = None):
         """发射阶段开始事件"""
@@ -263,6 +264,8 @@ class EventManager:
         self.db_session_factory = db_session_factory
         self._event_queues: Dict[str, asyncio.Queue] = {}
         self._event_callbacks: Dict[str, List[Callable]] = {}
+        self._token_buffers = {}
+        self._persist_lock = asyncio.Lock()
     
     async def add_event(
         self,
@@ -300,13 +303,27 @@ class EventManager:
             "timestamp": timestamp.isoformat(),
         }
         
-        # 保存到数据库（跳过高频事件如 thinking_token）
-        skip_db_events = {"thinking_token"}
-        if self.db_session_factory and event_type not in skip_db_events:
-            try:
-                await self._save_event_to_db(event_data)
-            except Exception as e:
-                logger.error(f"Failed to save event to database: {e}")
+        # Persist ordinary events immediately and batch adjacent tokens from the same agent.
+        if self.db_session_factory:
+            async with self._persist_lock:
+                if event_type == "thinking_token":
+                    buffered, since = self._token_buffers.get(task_id, (None, time.monotonic()))
+                    if buffered and any(
+                        (buffered.get("metadata") or {}).get(key) != (metadata or {}).get(key)
+                        for key in ("agent_id", "agent_name")
+                    ):
+                        await self._flush_tokens_unlocked(task_id)
+                        buffered, since = None, time.monotonic()
+                    token = (event_data.get("metadata") or {}).get("token", "")
+                    if buffered:
+                        token = buffered["metadata"].get("token", "") + token
+                    buffered = {**event_data, "metadata": {**(metadata or {}), "token": token}}
+                    self._token_buffers[task_id] = (buffered, since)
+                    if len(token) >= 1024 or time.monotonic() - since >= 0.2:
+                        await self._flush_tokens_unlocked(task_id)
+                else:
+                    await self._flush_tokens_unlocked(task_id)
+                    await self._save_event_to_db(event_data)
         
         # 推送到队列（非阻塞）
         if task_id in self._event_queues:
@@ -335,6 +352,17 @@ class EventManager:
         
         return event_id
     
+    async def _flush_tokens_unlocked(self, task_id):
+        buffered = self._token_buffers.get(task_id)
+        if buffered:
+            await self._save_event_to_db(buffered[0])
+            self._token_buffers.pop(task_id, None)
+
+    async def flush_tokens(self):
+        async with self._persist_lock:
+            for task_id in list(self._token_buffers):
+                await self._flush_tokens_unlocked(task_id)
+
     async def _save_event_to_db(self, event_data: Dict):
         """保存事件到数据库"""
         from app.models.agent_task import AgentEvent
@@ -493,11 +521,12 @@ class EventManager:
         logger.info(f"[StreamEvents] Task {task_id}: Entering real-time loop, queue size: {queue.qsize()}")
 
         # 然后实时推送新事件
+        heartbeat_interval = get_agent_config().sse_heartbeat_interval_seconds
         try:
             while True:
                 try:
                     logger.debug(f"[StreamEvents] Task {task_id}: Waiting for next event from queue...")
-                    event = await asyncio.wait_for(queue.get(), timeout=30)
+                    event = await asyncio.wait_for(queue.get(), timeout=heartbeat_interval)
                     logger.debug(f"[StreamEvents] Task {task_id}: Got event from queue: {event.get('event_type')}")
 
                     # 🔥 过滤掉序列号 <= after_sequence 的事件
@@ -544,4 +573,3 @@ class EventManager:
         self._event_callbacks.clear()
         
         logger.debug("EventManager closed")
-

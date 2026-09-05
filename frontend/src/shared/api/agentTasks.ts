@@ -1,3 +1,4 @@
+import { fetchAllPages } from "./pagination";
 /**
  * Agent Tasks API
  * Agent 审计任务相关的 API 调用
@@ -214,8 +215,10 @@ export async function getAgentFindings(
     is_verified?: boolean;
   }
 ): Promise<AgentFinding[]> {
-  const response = await apiClient.get(`/agent-tasks/${taskId}/findings`, { params });
-  return response.data;
+  const { is_verified, ...filters } = params || {};
+  return fetchAllPages<AgentFinding>(`/agent-tasks/${taskId}/findings`, {
+    ...filters, ...(is_verified === undefined ? {} : {is_verified}),
+  });
 }
 
 /**

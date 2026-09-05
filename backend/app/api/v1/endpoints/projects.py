@@ -1,3 +1,5 @@
+from app.services.audit_queue import enqueue
+from app.services.archive import save_upload
 from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.responses import FileResponse
@@ -82,6 +84,7 @@ class StatsResponse(BaseModel):
     total_issues: int
     resolved_issues: int
     avg_quality_score: float = 0.0
+    issue_types: dict[str, int] = {}
 
 @router.post("/", response_model=ProjectResponse)
 async def create_project(
@@ -157,67 +160,8 @@ async def get_stats(
     """
     Get statistics for current user.
     """
-    # 只统计当前用户的项目
-    projects_result = await db.execute(
-        select(Project).where(Project.owner_id == current_user.id)
-    )
-    projects = projects_result.scalars().all()
-    project_ids = [p.id for p in projects]
-
-    # 统计旧的 AuditTask
-    tasks_result = await db.execute(
-        select(AuditTask).where(AuditTask.project_id.in_(project_ids)) if project_ids else select(AuditTask).where(False)
-    )
-    tasks = tasks_result.scalars().all()
-    task_ids = [t.id for t in tasks]
-
-    # 统计旧的 AuditIssue
-    issues_result = await db.execute(
-        select(AuditIssue).where(AuditIssue.task_id.in_(task_ids)) if task_ids else select(AuditIssue).where(False)
-    )
-    issues = issues_result.scalars().all()
-
-    # 🔥 同时统计新的 AgentTask
-    agent_tasks_result = await db.execute(
-        select(AgentTask).where(AgentTask.project_id.in_(project_ids)) if project_ids else select(AgentTask).where(False)
-    )
-    agent_tasks = agent_tasks_result.scalars().all()
-    agent_task_ids = [t.id for t in agent_tasks]
-
-    # 🔥 统计 AgentFinding
-    agent_findings_result = await db.execute(
-        select(AgentFinding).where(AgentFinding.task_id.in_(agent_task_ids)) if agent_task_ids else select(AgentFinding).where(False)
-    )
-    agent_findings = agent_findings_result.scalars().all()
-
-    # 合并统计（旧任务 + 新 Agent 任务）
-    total_tasks = len(tasks) + len(agent_tasks)
-    completed_tasks = (
-        len([t for t in tasks if t.status == "completed"]) +
-        len([t for t in agent_tasks if t.status == AgentTaskStatus.COMPLETED])
-    )
-    total_issues = len(issues) + len(agent_findings)
-    resolved_issues = (
-        len([i for i in issues if i.status == "resolved"]) +
-        len([f for f in agent_findings if f.status in ("fixed", "wont_fix", "false_positive")])
-    )
-
-    # 计算平均质量分（只统计已完成且有质量分的任务）
-    quality_scores = (
-        [t.quality_score for t in tasks if t.status == "completed" and t.quality_score and t.quality_score > 0] +
-        [t.quality_score for t in agent_tasks if t.status == AgentTaskStatus.COMPLETED and t.quality_score and t.quality_score > 0]
-    )
-    avg_quality_score = sum(quality_scores) / len(quality_scores) if quality_scores else 0.0
-
-    return {
-        "total_projects": len(projects),
-        "active_projects": len([p for p in projects if p.is_active]),
-        "total_tasks": total_tasks,
-        "completed_tasks": completed_tasks,
-        "total_issues": total_issues,
-        "resolved_issues": resolved_issues,
-        "avg_quality_score": avg_quality_score,
-    }
+    from app.services.project_stats import project_stats
+    return await project_stats(db, current_user.id)
 
 @router.get("/{id}", response_model=ProjectResponse)
 async def read_project(
@@ -508,6 +452,9 @@ async def scan_project(
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
 
+    if project.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权操作此项目")
+
     # 获取分支和排除模式
     branch_name = scan_request.branch_name if scan_request else None
     exclude_patterns = scan_request.exclude_patterns if scan_request else None
@@ -523,50 +470,9 @@ async def scan_project(
         scan_config=json.dumps(scan_request.dict()) if scan_request else "{}"
     )
     db.add(task)
+    await enqueue(db, task, "repository")
     await db.commit()
     await db.refresh(task)
-
-    # 获取用户配置（包含解密敏感字段）
-    from app.core.encryption import decrypt_sensitive_data
-
-    # 需要解密的敏感字段列表
-    SENSITIVE_LLM_FIELDS = [
-        'llmApiKey', 'geminiApiKey', 'openaiApiKey', 'claudeApiKey',
-        'qwenApiKey', 'deepseekApiKey', 'zhipuApiKey', 'moonshotApiKey',
-        'baiduApiKey', 'minimaxApiKey', 'doubaoApiKey'
-    ]
-    SENSITIVE_OTHER_FIELDS = ['githubToken', 'gitlabToken']
-
-    def decrypt_config(config_dict: dict, sensitive_fields: list) -> dict:
-        """解密配置中的敏感字段"""
-        decrypted = config_dict.copy()
-        for field in sensitive_fields:
-            if field in decrypted and decrypted[field]:
-                decrypted[field] = decrypt_sensitive_data(decrypted[field])
-        return decrypted
-
-    result = await db.execute(
-        select(UserConfig).where(UserConfig.user_id == current_user.id)
-    )
-    config = result.scalar_one_or_none()
-    user_config = {}
-    if config:
-        llm_config = json.loads(config.llm_config) if config.llm_config else {}
-        other_config = json.loads(config.other_config) if config.other_config else {}
-        # 解密敏感字段
-        llm_config = decrypt_config(llm_config, SENSITIVE_LLM_FIELDS)
-        other_config = decrypt_config(other_config, SENSITIVE_OTHER_FIELDS)
-        user_config = {
-            'llmConfig': llm_config,
-            'otherConfig': other_config,
-        }
-
-    # 将扫描配置注入到 user_config 中，以便 scan_repo_task 使用
-    if scan_request and scan_request.file_paths:
-        user_config['scan_config'] = {'file_paths': scan_request.file_paths}
-
-    # Trigger Background Task
-    background_tasks.add_task(scan_repo_task, task.id, AsyncSessionLocal, user_config)
 
     return {"task_id": task.id, "status": "started"}
 
@@ -642,14 +548,8 @@ async def upload_project_zip(
     temp_file_path = f"/tmp/{temp_file_id}.zip"
     
     try:
-        with open(temp_file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        
-        # 检查文件大小
-        file_size = os.path.getsize(temp_file_path)
-        if file_size > 500 * 1024 * 1024:  # 500MB limit
-            raise HTTPException(status_code=400, detail="文件大小不能超过500MB")
-        
+        await save_upload(file, temp_file_path)
+
         # 保存到持久化存储
         meta = await save_project_zip(id, temp_file_path, file.filename)
         

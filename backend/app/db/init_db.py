@@ -8,7 +8,8 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.security import get_password_hash
+from app.core.config import settings
+from app.core.security import get_password_hash, verify_password
 from app.models.user import User
 from app.models.project import Project, ProjectMember
 from app.models.audit import AuditTask, AuditIssue
@@ -265,12 +266,19 @@ async def init_db(db: AsyncSession) -> None:
     """
     logger.info("开始初始化数据库...")
     
-    # 创建演示用户
-    demo_user = await create_demo_user(db)
-    
-    # 创建演示数据
-    if demo_user:
-        await create_demo_data(db, demo_user)
+    if settings.DEMO_ENABLED:
+        demo_user = await create_demo_user(db)
+        if demo_user:
+            await create_demo_data(db, demo_user)
+    else:
+        # Retire the known default credential on upgrades without deleting user data.
+        result = await db.execute(select(User).where(User.email == DEFAULT_DEMO_EMAIL))
+        demo_user = result.scalars().first()
+        if demo_user and demo_user.is_active and verify_password(
+            DEFAULT_DEMO_PASSWORD, demo_user.hashed_password
+        ):
+            demo_user.is_active = False
+            logger.warning("Disabled legacy demo account using the default password")
     
     await db.commit()
     

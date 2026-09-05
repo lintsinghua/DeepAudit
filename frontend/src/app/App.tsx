@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Outlet } from "react-router-dom";
 import { Toaster } from "sonner";
 import Sidebar from "@/components/layout/Sidebar";
@@ -19,7 +19,9 @@ function AppLayout() {
         className={`transition-all duration-300 min-h-screen ${collapsed ? "md:ml-20" : "md:ml-64"
           }`}
       >
-        <Outlet />
+        <Suspense fallback={<div role="status" className="p-8 text-muted-foreground">加载中…</div>}>
+          <Outlet />
+        </Suspense>
       </main>
     </div>
   );

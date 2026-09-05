@@ -1,5 +1,5 @@
-from typing import List, Union, Optional
-from pydantic import AnyHttpUrl, validator
+from typing import List, Union, Optional, Literal
+from pydantic import AnyHttpUrl, Field, field_validator, model_validator, validator
 from pydantic_settings import BaseSettings
 
 
@@ -8,12 +8,30 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     
     # SECURITY
-    SECRET_KEY: str = "changethis_in_production_to_a_long_random_string"
+    ENVIRONMENT: Literal["development", "test", "production"] = "production"
+    SECRET_KEY: str = Field(min_length=32)
+    DEMO_ENABLED: bool = False
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
     
     # CORS
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
+
+    @field_validator("SECRET_KEY")
+    @classmethod
+    def reject_placeholder_secret(cls, value: str) -> str:
+        if value in {
+            "changethis_in_production_to_a_long_random_string",
+            "your-super-secret-key-change-this-in-production",
+        } or len(value.strip()) < 32:
+            raise ValueError("SECRET_KEY must be a random secret of at least 32 characters")
+        return value
+
+    @model_validator(mode="after")
+    def validate_demo_environment(self):
+        if self.ENVIRONMENT == "production" and self.DEMO_ENABLED:
+            raise ValueError("DEMO_ENABLED is not allowed in production")
+        return self
 
     @validator("BACKEND_CORS_ORIGINS", pre=True)
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[List[str], str]:
@@ -34,7 +52,10 @@ class Settings(BaseSettings):
     def assemble_db_connection(cls, v: str | None, values: dict[str, any]) -> str:
         if isinstance(v, str):
             return v
-        return str(f"postgresql+asyncpg://{values.get('POSTGRES_USER')}:{values.get('POSTGRES_PASSWORD')}@{values.get('POSTGRES_SERVER')}/{values.get('POSTGRES_DB')}")
+        from sqlalchemy.engine import URL
+        return URL.create("postgresql+asyncpg", username=values.get("POSTGRES_USER"),
+                          password=values.get("POSTGRES_PASSWORD"), host=values.get("POSTGRES_SERVER"),
+                          database=values.get("POSTGRES_DB")).render_as_string(hide_password=False)
 
     # LLM配置
     LLM_PROVIDER: str = "openai"  # gemini, openai, claude, qwen, deepseek, zhipu, moonshot, baidu, minimax, doubao, ollama
@@ -82,6 +103,18 @@ class Settings(BaseSettings):
     
     # ZIP文件存储配置
     ZIP_STORAGE_PATH: str = "./uploads/zip_files"  # ZIP文件存储目录
+    ZIP_MAX_UPLOAD_BYTES: int = Field(default=500 * 1024 * 1024, gt=0)
+    ZIP_MAX_EXTRACTED_BYTES: int = Field(default=2 * 1024 * 1024 * 1024, gt=0)
+    ZIP_MAX_FILE_BYTES: int = Field(default=50 * 1024 * 1024, gt=0)
+    ZIP_MAX_ENTRIES: int = Field(default=50000, gt=0)
+    ZIP_MAX_COMPRESSION_RATIO: int = Field(default=200, gt=0)
+    AUDIT_WORKSPACE_PATH: str = "./uploads/audit_workspaces"
+    WORKER_POLL_SECONDS: float = Field(default=1.0, gt=0)
+    WORKER_HEARTBEAT_SECONDS: float = Field(default=2.0, gt=0)
+    WORKER_LEASE_SECONDS: int = Field(default=30, ge=10)
+    WORKER_MAX_ATTEMPTS: int = Field(default=3, ge=1)
+    WORKER_TASK_TIMEOUT_SECONDS: int = Field(default=3600, ge=30)
+    WORKER_RETENTION_DAYS: int = Field(default=7, ge=1)
     
     # 输出语言配置 - 支持 zh-CN（中文）和 en-US（英文）
     OUTPUT_LANGUAGE: str = "zh-CN"
@@ -109,6 +142,7 @@ class Settings(BaseSettings):
     AGENT_TIMEOUT_SECONDS: int = 1800  # Agent 超时时间（30分钟）
     
     # 沙箱配置（必须）
+    SANDBOX_ENABLED: bool = True
     SANDBOX_IMAGE: str = "deepaudit/sandbox:latest"  # 沙箱 Docker 镜像
     SANDBOX_MEMORY_LIMIT: str = "512m"  # 沙箱内存限制
     SANDBOX_CPU_LIMIT: float = 1.0  # 沙箱 CPU 限制
@@ -121,6 +155,12 @@ class Settings(BaseSettings):
     RAG_CHUNK_SIZE: int = 1500  # 代码块大小（Token）
     RAG_CHUNK_OVERLAP: int = 50  # 代码块重叠（Token）
     RAG_TOP_K: int = 10  # 检索返回数量
+
+    @model_validator(mode="after")
+    def validate_worker_timing(self):
+        if self.WORKER_HEARTBEAT_SECONDS >= self.WORKER_LEASE_SECONDS:
+            raise ValueError("WORKER_HEARTBEAT_SECONDS must be less than WORKER_LEASE_SECONDS")
+        return self
 
     class Config:
         case_sensitive = True

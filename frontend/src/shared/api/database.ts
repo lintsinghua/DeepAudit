@@ -1,3 +1,4 @@
+import { fetchPage, fetchAllPages, type Page, type PageOptions } from "./pagination";
 import { apiClient } from "./serverClient";
 import type {
   Profile,
@@ -158,8 +159,15 @@ export const api = {
 
   async getAuditTasks(projectId?: string): Promise<AuditTask[]> {
     const params = projectId ? { project_id: projectId } : {};
-    const res = await apiClient.get('/tasks/', { params });
-    return res.data;
+    return fetchAllPages<AuditTask>('/tasks/', params);
+  },
+
+  async getAuditTaskPage(options: PageOptions = {}, projectId?: string): Promise<Page<AuditTask>> {
+    return fetchPage<AuditTask>('/tasks/', { ...options, ...(projectId ? {project_id: projectId} : {}) });
+  },
+
+  async getAuditIssuePage(taskId: string, options: PageOptions = {}): Promise<Page<AuditIssue>> {
+    return fetchPage<AuditIssue>(`/tasks/${taskId}/issues`, { ...options });
   },
 
   async getAuditTaskById(id: string): Promise<AuditTask | null> {
@@ -198,8 +206,7 @@ export const api = {
   // ==================== AuditIssue 相关方法 ====================
 
   async getAuditIssues(taskId: string): Promise<AuditIssue[]> {
-    const res = await apiClient.get(`/tasks/${taskId}/issues`);
-    return res.data;
+    return fetchAllPages<AuditIssue>(`/tasks/${taskId}/issues`);
   },
 
   async createAuditIssue(_issue: Omit<AuditIssue, 'id' | 'created_at' | 'task' | 'resolver'>): Promise<AuditIssue> {
@@ -269,6 +276,7 @@ export const api = {
     total_issues: number;
     resolved_issues: number;
     avg_quality_score: number;
+    issue_types?: Record<string, number>;
   }> {
     try {
       const res = await apiClient.get('/projects/stats');

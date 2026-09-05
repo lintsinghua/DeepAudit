@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from .state import AgentState, AgentStatus
 from .registry import agent_registry
 from .message import message_bus, MessageType
+from ..config import get_agent_config
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +89,7 @@ class DynamicAgentExecutor:
         tools: Dict[str, Any],
         event_emitter=None,
         max_parallel: int = 5,
-        default_timeout: int = 600,
+        default_timeout: Optional[int] = None,
     ):
         """
         初始化执行器
@@ -104,7 +105,10 @@ class DynamicAgentExecutor:
         self.tools = tools
         self.event_emitter = event_emitter
         self.max_parallel = max_parallel
-        self.default_timeout = default_timeout
+        self.default_timeout = (
+            default_timeout if default_timeout is not None
+            else get_agent_config().sub_agent_timeout_seconds
+        )
         
         # 执行状态
         self._tasks: Dict[str, ExecutionTask] = {}

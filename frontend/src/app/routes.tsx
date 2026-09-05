@@ -1,15 +1,16 @@
-import Dashboard from "@/pages/Dashboard";
-import Projects from "@/pages/Projects";
-import ProjectDetail from "@/pages/ProjectDetail";
-import RecycleBin from "@/pages/RecycleBin";
-import InstantAnalysis from "@/pages/InstantAnalysis";
-import AuditTasks from "@/pages/AuditTasks";
-import TaskDetail from "@/pages/TaskDetail";
-import AgentAudit from "@/pages/AgentAudit";
-import AdminDashboard from "@/pages/AdminDashboard";
-import Account from "@/pages/Account";
-import AuditRules from "@/pages/AuditRules";
-import PromptManager from "@/pages/PromptManager";
+import { lazy } from "react";
+const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const Projects = lazy(() => import("@/pages/Projects"));
+const ProjectDetail = lazy(() => import("@/pages/ProjectDetail"));
+const RecycleBin = lazy(() => import("@/pages/RecycleBin"));
+const InstantAnalysis = lazy(() => import("@/pages/InstantAnalysis"));
+const AuditTasks = lazy(() => import("@/pages/AuditTasks"));
+const TaskDetail = lazy(() => import("@/pages/TaskDetail"));
+const AgentAudit = lazy(() => import("@/pages/AgentAudit"));
+const AdminDashboard = lazy(() => import("@/pages/AdminDashboard"));
+const Account = lazy(() => import("@/pages/Account"));
+const AuditRules = lazy(() => import("@/pages/AuditRules"));
+const PromptManager = lazy(() => import("@/pages/PromptManager"));
 import type { ReactNode } from 'react';
 
 export interface RouteConfig {
