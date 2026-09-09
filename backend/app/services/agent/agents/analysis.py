@@ -759,10 +759,33 @@ Final Answer:""",
             # 标准化发现
             logger.info(f"[{self.name}] Standardizing {len(all_findings)} findings")
             standardized_findings = []
+            skipped_no_filepath = 0
             for finding in all_findings:
                 # 确保 finding 是字典
                 if not isinstance(finding, dict):
                     logger.warning(f"Skipping invalid finding (not a dict): {finding}")
+                    continue
+                
+                # 🔥 v2.2: file_path 必填校验 - 没有 file_path 的 finding 直接拒绝
+                # 优先从 file_path 获取，fallback 到 file / location
+                file_path = finding.get("file_path") or finding.get("file") or ""
+                if not file_path.strip() and finding.get("location"):
+                    loc = finding.get("location", "")
+                    if isinstance(loc, str):
+                        file_path = loc.split(":")[0] if ":" in loc else loc
+                    else:
+                        # location 是非字符串类型（dict/list 等），跳过
+                        logger.warning(
+                            f"[Analysis] 🚫 跳过 location 非字符串的 finding: "
+                            f"location type={type(loc).__name__}, title={finding.get('title', '?')[:50]}"
+                        )
+                        continue
+                if not file_path.strip():
+                    skipped_no_filepath += 1
+                    logger.warning(
+                        f"[Analysis] 🚫 跳过无 file_path 的 finding: "
+                        f"title={finding.get('title', '?')[:50]}, type={finding.get('vulnerability_type', '?')}"
+                    )
                     continue
                     
                 standardized = {
@@ -770,7 +793,7 @@ Final Answer:""",
                     "severity": finding.get("severity", "medium"),
                     "title": finding.get("title", "Unknown Finding"),
                     "description": finding.get("description", ""),
-                    "file_path": finding.get("file_path", ""),
+                    "file_path": file_path,
                     "line_start": finding.get("line_start") or finding.get("line", 0),
                     "code_snippet": finding.get("code_snippet", ""),
                     "source": finding.get("source", ""),
@@ -780,6 +803,12 @@ Final Answer:""",
                     "needs_verification": finding.get("needs_verification", True),
                 }
                 standardized_findings.append(standardized)
+            
+            if skipped_no_filepath > 0:
+                logger.warning(
+                    f"[Analysis] ⚠️ 跳过了 {skipped_no_filepath} 个无 file_path 的 findings，"
+                    f"保留 {len(standardized_findings)} 个有效 findings"
+                )
             
             await self.emit_event(
                 "info",
