@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useParams } from "react-router-dom";
-import { Terminal, Bot, Loader2, Radio, Filter, Maximize2, ArrowDown } from "lucide-react";
+import { Terminal, Bot, Loader2, Radio, Filter, Maximize2, ArrowDown, Download } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useAgentStream } from "@/hooks/useAgentStream";
@@ -34,7 +34,15 @@ import {
 import ReportExportDialog from "./components/ReportExportDialog";
 import { useAgentAuditState } from "./hooks";
 import { ACTION_VERBS, POLLING_INTERVALS } from "./constants";
-import { cleanThinkingContent, truncateOutput, createLogItem } from "./utils";
+import {
+  cleanThinkingContent,
+  truncateOutput,
+  createLogItem,
+  getDistinctAgentNames,
+  exportLogsAsJSON,
+  exportLogsAsMarkdown,
+  downloadTextFile,
+} from "./utils";
 import type { LogItem } from "./types";
 
 function AgentAuditPageContent() {
@@ -56,6 +64,8 @@ function AgentAuditPageContent() {
   const [isCancelling, setIsCancelling] = useState(false);
   const [statusVerb, setStatusVerb] = useState(ACTION_VERBS[0]);
   const [statusDots, setStatusDots] = useState(0);
+  const [agentNameFilter, setAgentNameFilter] = useState<string | null>(null); // M4: 按 Agent 名称过滤
+  const [exportingLogs, setExportingLogs] = useState(false); // M4: 导出日志按钮占用态
 
   const logEndRef = useRef<HTMLDivElement>(null);
   const agentTreeRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -87,6 +97,7 @@ function AgentAuditPageContent() {
       hasLoadedHistoricalEventsRef.current = false; // 🔥 重置历史事件加载标志
       setHistoricalEventsLoaded(false); // 🔥 重置历史事件加载状态
       setAfterSequence(0); // 🔥 重置 afterSequence state
+      setAgentNameFilter(null); // M4: 重置 Agent 名称过滤
     }
     previousTaskIdRef.current = taskId;
   }, [taskId, reset]);
@@ -747,6 +758,35 @@ function AgentAuditPageContent() {
     setShowExportDialog(true);
   };
 
+  // M4: 日志导出的 Agent 列表与"当前所见"日志
+  const agentNames = useMemo(() => getDistinctAgentNames(logs), [logs]);
+  const displayLogs = useMemo(() => {
+    if (!agentNameFilter) return filteredLogs;
+    return filteredLogs.filter(log => log.agentName === agentNameFilter);
+  }, [filteredLogs, agentNameFilter]);
+
+  const handleExportLogs = async (format: 'json' | 'md') => {
+    if (exportingLogs) return;
+    setExportingLogs(true);
+    try {
+      const ext = format === 'json' ? 'json' : 'md';
+      const filename = `agent-log-${(taskId || 'task').slice(0, 8)}.${ext}`;
+      const content = format === 'json'
+        ? exportLogsAsJSON(displayLogs)
+        : exportLogsAsMarkdown(displayLogs, taskId);
+      downloadTextFile(
+        filename,
+        content,
+        format === 'json' ? 'application/json' : 'text/markdown'
+      );
+      toast.success(`Exported ${displayLogs.length} log entries`);
+    } catch (err) {
+      toast.error(`Failed to export logs: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setExportingLogs(false);
+    }
+  };
+
   // ============ Render ============
 
   if (showSplash && !taskId) {
@@ -804,59 +844,103 @@ function AgentAuditPageContent() {
                 </div>
               )}
               <Badge variant="outline" className="h-6 px-2 text-xs border-border text-muted-foreground font-mono bg-muted">
-                {filteredLogs.length}{!showAllLogs && logs.length !== filteredLogs.length ? ` / ${logs.length}` : ''} entries
+                {displayLogs.length}{logs.length !== displayLogs.length ? ` / ${logs.length}` : ''} entries
               </Badge>
             </div>
 
-            <button
-              onClick={() => setAutoScroll(!isAutoScroll)}
-              className={`
-                flex items-center gap-2 text-xs px-3 py-1.5 rounded-md font-mono uppercase tracking-wider
-                ${isAutoScroll
-                  ? 'bg-primary/15 text-primary border border-primary/50'
-                  : 'text-muted-foreground hover:text-foreground border border-border hover:bg-muted'
-                }
-              `}
-            >
-              <ArrowDown className="w-3.5 h-3.5" />
-              <span>Auto-scroll</span>
-            </button>
+            <div className="flex items-center gap-2">
+              {/* M4: 按 Agent 名称过滤 */}
+              {agentNames.length > 0 && (
+                <select
+                  value={agentNameFilter || ''}
+                  onChange={(e) => setAgentNameFilter(e.target.value || null)}
+                  title="Filter logs by agent"
+                  className="h-7 max-w-[150px] text-xs bg-muted border border-border rounded-md px-2 text-muted-foreground font-mono outline-none focus:border-primary/50 focus:text-foreground cursor-pointer"
+                >
+                  <option value="">All agents</option>
+                  {agentNames.map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+              )}
+
+              {/* M4: 导出日志 JSON / Markdown */}
+              <div className="flex items-center gap-1">
+                {(['json', 'md'] as const).map(fmt => (
+                  <button
+                    key={fmt}
+                    onClick={() => handleExportLogs(fmt)}
+                    disabled={exportingLogs}
+                    title={`Export logs as ${fmt.toUpperCase()}`}
+                    className="
+                      flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md font-mono uppercase tracking-wider
+                      text-muted-foreground hover:text-foreground border border-border hover:bg-muted
+                      disabled:opacity-50 disabled:cursor-not-allowed
+                    "
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    {fmt}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                onClick={() => setAutoScroll(!isAutoScroll)}
+                className={`
+                  flex items-center gap-2 text-xs px-3 py-1.5 rounded-md font-mono uppercase tracking-wider
+                  ${isAutoScroll
+                    ? 'bg-primary/15 text-primary border border-primary/50'
+                    : 'text-muted-foreground hover:text-foreground border border-border hover:bg-muted'
+                  }
+                `}
+              >
+                <ArrowDown className="w-3.5 h-3.5" />
+                <span>Auto-scroll</span>
+              </button>
+            </div>
           </div>
 
           {/* Log content */}
           <div className="flex-1 overflow-y-auto p-5 custom-scrollbar bg-muted/30">
             {/* Filter indicator */}
-            {selectedAgentId && !showAllLogs && (
-              <div className="mb-4 px-4 py-2.5 bg-primary/10 border border-primary/30 rounded-lg flex items-center justify-between">
-                <div className="flex items-center gap-2.5 text-sm text-primary">
-                  <Filter className="w-3.5 h-3.5" />
-                  <span className="font-medium">Filtering logs for selected agent</span>
+            {(selectedAgentId && !showAllLogs) || agentNameFilter ? (
+              <div className="mb-4 px-4 py-2.5 bg-primary/10 border border-primary/30 rounded-lg flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 text-sm text-primary min-w-0">
+                  <Filter className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span className="font-medium truncate">
+                    {selectedAgentId && !showAllLogs ? `Filtering for agent subtree` : ''}
+                    {selectedAgentId && !showAllLogs && agentNameFilter ? ' · ' : ''}
+                    {agentNameFilter ? `Filtering for agent: ${agentNameFilter}` : ''}
+                  </span>
                 </div>
                 <button
-                  onClick={() => selectAgent(null)}
-                  className="text-xs text-muted-foreground hover:text-primary font-mono uppercase px-2 py-1 rounded hover:bg-primary/10"
+                  onClick={() => {
+                    selectAgent(null);
+                    setAgentNameFilter(null);
+                  }}
+                  className="text-xs text-muted-foreground hover:text-primary font-mono uppercase px-2 py-1 rounded hover:bg-primary/10 flex-shrink-0"
                 >
                   Clear Filter
                 </button>
               </div>
-            )}
+            ) : null}
 
             {/* Logs */}
-            {filteredLogs.length === 0 ? (
+            {displayLogs.length === 0 ? (
               <div className="h-full flex items-center justify-center">
                 <div className="text-center text-muted-foreground">
                   {isRunning ? (
                     <div className="flex flex-col items-center gap-3">
                       <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
                       <span className="text-sm font-mono tracking-wide">
-                        {selectedAgentId && !showAllLogs
+                        {(selectedAgentId && !showAllLogs) || agentNameFilter
                           ? 'WAITING FOR ACTIVITY FROM SELECTED AGENT...'
                           : 'WAITING FOR AGENT ACTIVITY...'}
                       </span>
                     </div>
                   ) : (
                     <span className="text-sm font-mono tracking-wide">
-                      {selectedAgentId && !showAllLogs
+                      {(selectedAgentId && !showAllLogs) || agentNameFilter
                         ? 'NO ACTIVITY FROM SELECTED AGENT'
                         : 'NO ACTIVITY YET'}
                     </span>
@@ -865,7 +949,7 @@ function AgentAuditPageContent() {
               </div>
             ) : (
               <div className="space-y-3">
-                {filteredLogs.map(item => (
+                {displayLogs.map(item => (
                   <LogEntry
                     key={item.id}
                     item={item}
