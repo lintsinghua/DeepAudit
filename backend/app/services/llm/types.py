@@ -70,6 +70,8 @@ class LLMResponse:
     model: Optional[str] = None
     usage: Optional[LLMUsage] = None
     finish_reason: Optional[str] = None
+    reasoning_content: Optional[str] = None
+    reasoning_tokens: int = 0
 
 
 class LLMError(Exception):
