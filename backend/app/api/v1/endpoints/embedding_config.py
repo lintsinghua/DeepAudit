@@ -176,18 +176,32 @@ EMBEDDING_CONFIG_KEY = "embedding_config"
 
 
 async def get_embedding_config_from_db(db: AsyncSession, user_id: str) -> EmbeddingConfig:
-    """从数据库获取嵌入配置（异步）"""
+    """
+    从数据库获取嵌入配置（异步）。
+
+    处理流程：
+    - 查询用户配置记录
+    - 解析 other_config 并读取嵌入配置
+    - 若无配置则返回默认值
+    """
+    # 查询用户配置记录
     result = await db.execute(
         select(UserConfig).where(UserConfig.user_id == user_id)
     )
+    # 获取用户配置对象
     user_config = result.scalar_one_or_none()
 
+    # 若存在 other_config 则尝试解析
     if user_config and user_config.other_config:
         try:
+            # 解析 other_config
             other_config = json.loads(user_config.other_config) if isinstance(user_config.other_config, str) else user_config.other_config
+            # 读取嵌入配置数据
             embedding_data = other_config.get(EMBEDDING_CONFIG_KEY)
 
+            # 若存在嵌入配置则构建对象
             if embedding_data:
+                # 组装嵌入配置对象
                 config = EmbeddingConfig(
                     provider=embedding_data.get("provider", settings.EMBEDDING_PROVIDER),
                     model=embedding_data.get("model", settings.EMBEDDING_MODEL),
@@ -196,9 +210,12 @@ async def get_embedding_config_from_db(db: AsyncSession, user_id: str) -> Embedd
                     dimensions=embedding_data.get("dimensions"),
                     batch_size=embedding_data.get("batch_size", 100),
                 )
+                # 记录读取日志
                 print(f"[EmbeddingConfig] 读取用户 {user_id} 的嵌入配置: provider={config.provider}, model={config.model}")
+                # 返回用户配置
                 return config
         except (json.JSONDecodeError, AttributeError) as e:
+            # 记录解析失败日志
             print(f"[EmbeddingConfig] 解析用户 {user_id} 配置失败: {e}")
 
     # 返回默认配置
@@ -213,10 +230,20 @@ async def get_embedding_config_from_db(db: AsyncSession, user_id: str) -> Embedd
 
 
 async def save_embedding_config_to_db(db: AsyncSession, user_id: str, config: EmbeddingConfig) -> None:
-    """保存嵌入配置到数据库（异步）"""
+    """
+    保存嵌入配置到数据库（异步）。
+
+    处理流程：
+    - 查询用户配置记录
+    - 构建嵌入配置数据
+    - 更新或创建配置记录
+    - 提交事务
+    """
+    # 查询用户配置记录
     result = await db.execute(
         select(UserConfig).where(UserConfig.user_id == user_id)
     )
+    # 获取用户配置对象
     user_config = result.scalar_one_or_none()
 
     # 准备嵌入配置数据
@@ -236,7 +263,9 @@ async def save_embedding_config_to_db(db: AsyncSession, user_id: str, config: Em
         except (json.JSONDecodeError, TypeError):
             other_config = {}
 
+        # 写入嵌入配置
         other_config[EMBEDDING_CONFIG_KEY] = embedding_data
+        # 保存到 other_config 字段
         user_config.other_config = json.dumps(other_config)
         # 🔥 显式标记 other_config 字段已修改，确保 SQLAlchemy 检测到变化
         flag_modified(user_config, "other_config")
@@ -248,9 +277,12 @@ async def save_embedding_config_to_db(db: AsyncSession, user_id: str, config: Em
             llm_config="{}",
             other_config=json.dumps({EMBEDDING_CONFIG_KEY: embedding_data}),
         )
+        # 新配置入库
         db.add(user_config)
 
+    # 提交事务
     await db.commit()
+    # 记录保存日志
     print(f"[EmbeddingConfig] 已保存用户 {user_id} 的嵌入配置: provider={config.provider}, model={config.model}")
 
 
@@ -261,8 +293,13 @@ async def list_embedding_providers(
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """
-    获取可用的嵌入模型提供商列表
+    获取可用的嵌入模型提供商列表。
+
+    处理流程：
+    - 依赖鉴权
+    - 返回静态提供商列表
     """
+    # 返回提供商列表
     return EMBEDDING_PROVIDERS
 
 
@@ -272,13 +309,20 @@ async def get_current_config(
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """
-    获取当前嵌入模型配置（从数据库读取）
+    获取当前嵌入模型配置（从数据库读取）。
+
+    处理流程：
+    - 查询数据库配置
+    - 计算默认维度
+    - 返回配置响应
     """
+    # 读取用户配置
     config = await get_embedding_config_from_db(db, current_user.id)
 
     # 获取维度：优先使用用户配置的维度，否则使用默认值
     dimensions = config.dimensions if config.dimensions else _get_model_dimensions(config.provider, config.model)
 
+    # 返回配置响应
     return EmbeddingConfigResponse(
         provider=config.provider,
         model=config.model,
@@ -296,7 +340,12 @@ async def update_config(
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """
-    更新嵌入模型配置（持久化到数据库）
+    更新嵌入模型配置（持久化到数据库）。
+
+    处理流程：
+    - 校验提供商合法性
+    - 检查 API Key 要求
+    - 保存配置
     """
     # 验证提供商
     provider_ids = [p.id for p in EMBEDDING_PROVIDERS]
@@ -314,6 +363,7 @@ async def update_config(
     # 保存到数据库
     await save_embedding_config_to_db(db, current_user.id, config)
 
+    # 返回保存结果
     return {"message": "配置已保存", "provider": config.provider, "model": config.model}
 
 
@@ -323,14 +373,24 @@ async def test_embedding(
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """
-    测试嵌入模型配置
+    测试嵌入模型配置。
+
+    处理流程：
+    - 初始化嵌入服务
+    - 执行测试嵌入
+    - 固定响应时间防止时间侧信道
+    - 返回测试结果
     """
+    # 固定响应时间，防止 SSRF 时间侧信道攻击
     FIXED_DURATION = 3.0  # 固定响应时间，防止SSRF时间侧信道攻击
+    # 记录开始时间
     start_time = time.time()
 
     try:
+        # 延迟导入嵌入服务
         from app.services.rag.embeddings import EmbeddingService
 
+        # 创建嵌入服务实例
         service = EmbeddingService(
             provider=request.provider,
             model=request.model,
@@ -340,13 +400,17 @@ async def test_embedding(
             cache_enabled=False,
         )
 
+        # 生成嵌入向量
         embedding = await service.embed(request.test_text)
 
+        # 计算耗时
         elapsed = time.time() - start_time
+        # 记录实际延迟
         latency_ms = int(elapsed * 1000)  # 在sleep前计算实际延迟
+        # 若耗时不足则补足固定时长
         if elapsed < FIXED_DURATION:
             await asyncio.sleep(FIXED_DURATION - elapsed)
-        
+        # 返回成功结果
         return TestEmbeddingResponse(
             success=True,
             message=f"嵌入成功! 维度: {len(embedding)}",
@@ -354,13 +418,15 @@ async def test_embedding(
             sample_embedding=embedding[:5],  # 返回前 5 维
             latency_ms=latency_ms,
         )
-        
+
     except Exception as e:
+        # 发生异常时也同样等待，确保时间特征一致
         # 发生异常时也同样等待，确保时间特征一致
         elapsed = time.time() - start_time
         if elapsed < FIXED_DURATION:
             await asyncio.sleep(FIXED_DURATION - elapsed)
 
+        # 返回失败结果
         return TestEmbeddingResponse(
             success=False,
             message=f"嵌入失败: {str(e)}",
@@ -373,13 +439,19 @@ async def get_provider_models(
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """
-    获取指定提供商的模型列表
+    获取指定提供商的模型列表。
+
+    处理流程：
+    - 查询提供商信息
+    - 校验存在性
+    - 返回模型信息
     """
+    # 查找提供商信息
     provider_info = next((p for p in EMBEDDING_PROVIDERS if p.id == provider), None)
-    
+    # 若提供商不存在则返回 404
     if not provider_info:
         raise HTTPException(status_code=404, detail=f"提供商不存在: {provider}")
-    
+    # 返回提供商模型信息
     return {
         "provider": provider,
         "models": provider_info.models,
@@ -389,7 +461,14 @@ async def get_provider_models(
 
 
 def _get_model_dimensions(provider: str, model: str) -> int:
-    """获取模型维度"""
+    """
+    获取模型维度。
+
+    处理流程：
+    - 通过模型名称查表
+    - 若无匹配则返回默认值
+    """
+    # 模型维度映射表
     dimensions_map = {
         # OpenAI
         "text-embedding-3-small": 1536,
@@ -431,5 +510,5 @@ def _get_model_dimensions(provider: str, model: str) -> int:
         "text-embedding-v2": 1536,  # 支持维度: 1536
     }
 
+    # 返回模型维度，默认 768
     return dimensions_map.get(model, 768)
-

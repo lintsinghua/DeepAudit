@@ -24,7 +24,7 @@ router = APIRouter()
 
 
 class DatabaseExportResponse(BaseModel):
-    """数据库导出响应"""
+    """数据库导出响应模型。"""
     export_date: str
     user_id: str
     data: Dict[str, Any]
@@ -39,8 +39,12 @@ async def export_database(
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """
-    导出当前用户的所有数据
-    包括：项目、任务、问题、即时分析、用户配置
+    导出当前用户的所有数据。
+
+    处理流程：
+    - 查询项目、任务、问题、即时分析与配置
+    - 构建标准化导出结构
+    - 返回导出响应
     """
     try:
         # 1. 获取用户的所有项目
@@ -182,6 +186,7 @@ async def export_database(
             ],
         }
         
+        # 返回导出结果
         return DatabaseExportResponse(
             export_date=export_data["export_date"],
             user_id=current_user.id,
@@ -189,12 +194,13 @@ async def export_database(
         )
         
     except Exception as e:
+        # 记录错误并返回异常
         print(f"导出数据失败: {e}")
         raise HTTPException(status_code=500, detail=f"导出数据失败: {str(e)}")
 
 
 class DatabaseImportRequest(BaseModel):
-    """数据库导入请求"""
+    """数据库导入请求模型。"""
     data: Dict[str, Any]
 
 
@@ -205,8 +211,12 @@ async def import_database(
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """
-    从 JSON 文件导入数据
-    注意：导入会合并数据，不会删除现有数据
+    从 JSON 文件导入数据。
+
+    处理流程：
+    - 读取并解析 JSON
+    - 校验用户身份
+    - 逐类导入并合并数据
     """
     try:
         # 读取文件内容
@@ -216,12 +226,14 @@ async def import_database(
         if not isinstance(import_data, dict) or "data" not in import_data:
             raise HTTPException(status_code=400, detail="无效的导入文件格式")
         
+        # 提取数据载荷
         data = import_data["data"]
         
-        # 验证用户ID（只能导入自己的数据）
+        # 验证用户 ID（只能导入自己的数据）
         if data.get("user", {}).get("id") != current_user.id:
             raise HTTPException(status_code=403, detail="只能导入自己的数据")
         
+        # 初始化导入计数
         imported_count = {
             "projects": 0,
             "tasks": 0,
@@ -235,6 +247,7 @@ async def import_database(
             for p_data in data["projects"]:
                 existing = await db.get(Project, p_data.get("id"))
                 if not existing:
+                    # 构建项目对象
                     project = Project(
                         id=p_data.get("id"),
                         name=p_data.get("name"),
@@ -250,6 +263,7 @@ async def import_database(
                     db.add(project)
                     imported_count["projects"] += 1
         
+        # 提交项目导入
         await db.commit()
         
         # 2. 导入任务（需要先有项目）
@@ -260,6 +274,7 @@ async def import_database(
                     # 检查项目是否存在
                     project = await db.get(Project, t_data.get("project_id"))
                     if project:
+                        # 构建任务对象
                         task = AuditTask(
                             id=t_data.get("id"),
                             project_id=t_data.get("project_id"),
@@ -278,6 +293,7 @@ async def import_database(
                         db.add(task)
                         imported_count["tasks"] += 1
         
+        # 提交任务导入
         await db.commit()
         
         # 3. 导入问题（需要先有任务）
@@ -288,6 +304,7 @@ async def import_database(
                     # 检查任务是否存在
                     task = await db.get(AuditTask, i_data.get("task_id"))
                     if task:
+                        # 构建问题对象
                         issue = AuditIssue(
                             id=i_data.get("id"),
                             task_id=i_data.get("task_id"),
@@ -307,6 +324,7 @@ async def import_database(
                         db.add(issue)
                         imported_count["issues"] += 1
         
+        # 提交问题导入
         await db.commit()
         
         # 4. 导入即时分析
@@ -314,6 +332,7 @@ async def import_database(
             for a_data in data["instant_analyses"]:
                 existing = await db.get(InstantAnalysis, a_data.get("id"))
                 if not existing:
+                    # 构建分析记录
                     analysis = InstantAnalysis(
                         id=a_data.get("id"),
                         user_id=current_user.id,
@@ -327,6 +346,7 @@ async def import_database(
                     db.add(analysis)
                     imported_count["analyses"] += 1
         
+        # 提交分析导入
         await db.commit()
         
         # 5. 导入用户配置（合并）
@@ -338,6 +358,7 @@ async def import_database(
             config = config_result.scalar_one_or_none()
             
             if not config:
+                # 创建配置记录
                 config = UserConfig(
                     user_id=current_user.id,
                     llm_config=json.dumps(data["user_config"].get("llm_config", {})),
@@ -355,8 +376,10 @@ async def import_database(
             
             imported_count["config"] = 1
         
+        # 提交配置导入
         await db.commit()
         
+        # 返回导入统计
         return {
             "message": "数据导入成功",
             "imported": imported_count
@@ -365,6 +388,7 @@ async def import_database(
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="无效的 JSON 文件格式")
     except Exception as e:
+        # 记录错误并回滚
         print(f"导入数据失败: {e}")
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"导入数据失败: {str(e)}")
@@ -376,10 +400,15 @@ async def clear_database(
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """
-    清空当前用户的所有数据
-    注意：此操作不可恢复，请谨慎使用
+    清空当前用户的所有数据。
+
+    处理流程：
+    - 删除问题、任务、项目、分析与配置
+    - 统计删除数量
+    - 提交事务并返回结果
     """
     try:
+        # 初始化删除计数
         deleted_count = {
             "projects": 0,
             "tasks": 0,
@@ -450,21 +479,24 @@ async def clear_database(
         for member in members:
             await db.delete(member)
         
+        # 提交删除
         await db.commit()
         
+        # 返回删除结果
         return {
             "message": "数据已清空",
             "deleted": deleted_count
         }
         
     except Exception as e:
+        # 记录错误并回滚
         print(f"清空数据失败: {e}")
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"清空数据失败: {str(e)}")
 
 
 class DatabaseStatsResponse(BaseModel):
-    """数据库统计信息响应"""
+    """数据库统计信息响应模型。"""
     total_projects: int
     active_projects: int
     total_tasks: int
@@ -490,7 +522,12 @@ async def get_database_stats(
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """
-    获取当前用户的数据库统计信息
+    获取当前用户的数据库统计信息。
+
+    处理流程：
+    - 统计项目、任务与问题
+    - 统计即时分析与成员
+    - 汇总并返回
     """
     try:
         # 1. 项目统计
@@ -561,6 +598,7 @@ async def get_database_stats(
         )
         has_config = config_result.scalar_one_or_none() is not None
         
+        # 返回统计结果
         return DatabaseStatsResponse(
             total_projects=total_projects,
             active_projects=active_projects,
@@ -582,12 +620,13 @@ async def get_database_stats(
         )
         
     except Exception as e:
+        # 记录错误并返回异常
         print(f"获取统计信息失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取统计信息失败: {str(e)}")
 
 
 class DatabaseHealthResponse(BaseModel):
-    """数据库健康检查响应"""
+    """数据库健康检查响应模型。"""
     status: str  # healthy, warning, error
     database_connected: bool
     total_records: int
@@ -602,9 +641,16 @@ async def check_database_health(
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """
-    检查数据库健康状态
+    检查数据库健康状态。
+
+    处理流程：
+    - 校验数据库连接
+    - 统计记录数量
+    - 检查数据完整性
+    - 返回健康状态
     """
     try:
+        # 初始化状态与指标
         issues = []
         warnings = []
         database_connected = True
@@ -679,6 +725,7 @@ async def check_database_health(
         else:
             status = "healthy"
         
+        # 返回健康检查结果
         return DatabaseHealthResponse(
             status=status,
             database_connected=database_connected,
@@ -689,6 +736,6 @@ async def check_database_health(
         )
         
     except Exception as e:
+        # 记录错误并返回异常
         print(f"健康检查失败: {e}")
         raise HTTPException(status_code=500, detail=f"健康检查失败: {str(e)}")
-

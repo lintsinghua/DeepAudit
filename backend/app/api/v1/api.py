@@ -1,3 +1,7 @@
+"""
+模块说明：API 路由与依赖定义：api。
+"""
+
 from fastapi import APIRouter
 from app.api.v1.endpoints import auth, users, projects, tasks, scan, members, config, database, prompts, rules, agent_tasks, embedding_config, ssh_keys
 

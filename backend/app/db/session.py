@@ -1,3 +1,7 @@
+"""
+模块说明：数据库初始化与会话管理：session。
+"""
+
 from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker

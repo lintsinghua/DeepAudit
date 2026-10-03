@@ -1,3 +1,7 @@
+"""
+模块说明：后端模块：check_sandbox。
+"""
+
 
 import asyncio
 import logging

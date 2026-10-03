@@ -1,3 +1,7 @@
+"""
+模块说明：后端模块：main。
+"""
+
 def main():
     print("Hello from deepaudit-backend!")
 

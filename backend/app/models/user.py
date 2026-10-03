@@ -1,3 +1,7 @@
+"""
+模块说明：数据模型定义：user。
+"""
+
 import uuid
 from sqlalchemy import Column, String, Boolean, DateTime
 from sqlalchemy.sql import func
