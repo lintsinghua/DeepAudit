@@ -878,10 +878,11 @@ Action Input: {{"参数": "值"}}
                                 potential_file = parts[0].strip()
                                 # 只有当 parts[0] 看起来像文件路径时才提取
                                 # 文件路径通常包含 . 且没有空格（或只在结尾有扩展名）
+                                # 🔥 FIX: 放宽文件路径校验 - 不再限制扩展名，只要像文件路径就提取
                                 if ("." in potential_file and
                                     " " not in potential_file and
                                     len(potential_file) < 100 and
-                                    any(potential_file.endswith(ext) for ext in ['.py', '.js', '.ts', '.java', '.go', '.php', '.rb', '.c', '.cpp', '.h'])):
+                                    not potential_file.endswith("/")):
                                     file_path = potential_file
                                     # 尝试提取行号
                                     if len(parts) > 1:
@@ -932,6 +933,8 @@ Action Input: {{"参数": "值"}}
                     for new_f in valid_findings:
                         # Normalize the finding first
                         normalized_new = self._normalize_finding(new_f)
+                        if not normalized_new:
+                            continue
 
                         # Create fingerprint for deduplication (file + description similarity)
                         new_file = normalized_new.get("file_path", "").lower().strip()
@@ -962,7 +965,28 @@ Action Input: {{"参数": "值"}}
                                 (new_type in existing_type) or (existing_type in new_type)
                             )
 
+                            # 🔥 Match criteria for same-file findings
                             if same_file and (same_line or similar_desc or same_type):
+                                match_found = True
+                            elif same_type and same_line and not same_file:
+                                # 🔥 FIX: Only allow cross-file matching when:
+                                # 1. new_file is garbage ("?"/empty) and descriptions still match
+                                # 2. One path is a prefix of the other ("src/foo.py" vs "foo.py")
+                                # Do NOT merge when existing_file is garbage - that would lose the real path.
+                                new_is_garbage = not new_file or new_file == "?"
+                                prefix_match = (
+                                    new_file.endswith("/" + existing_file) or
+                                    existing_file.endswith("/" + new_file)
+                                )
+                                if (new_is_garbage and similar_desc) or prefix_match:
+                                    match_found = True
+                                    logger.info(f"[Orchestrator] Matched by type+line despite file mismatch: {new_file} vs {existing_file}")
+                                else:
+                                    match_found = False
+                            else:
+                                match_found = False
+
+                            if match_found:
                                 # Update existing with new info (e.g. verification results)
                                 # 🔥 FIX: Smart merge - don't overwrite good data with empty values
                                 merged = dict(existing_f)  # Start with existing data
