@@ -27,6 +27,7 @@ httpx>=0.25.0
 # ============ LLM Integration ============
 litellm>=1.0.0
 tiktoken>=0.5.2
+lazyllm>=0.7.3
 
 # ============ Report Generation ============
 reportlab>=4.0.0

@@ -130,6 +130,10 @@ class LLMService:
             LLMProvider.BAIDU: 'baiduApiKey',
             LLMProvider.MINIMAX: 'minimaxApiKey',
             LLMProvider.DOUBAO: 'doubaoApiKey',
+            LLMProvider.SILICONFLOW: 'siliconflowApiKey',
+            LLMProvider.SENSENOVA: 'sensenovaApiKey',
+            LLMProvider.AIPING: 'aipingApiKey',
+            LLMProvider.PPIO: 'ppioApiKey',
         }
         key_name = provider_key_map.get(provider)
         if key_name:
@@ -149,6 +153,10 @@ class LLMService:
             LLMProvider.BAIDU: 'BAIDU_API_KEY',
             LLMProvider.MINIMAX: 'MINIMAX_API_KEY',
             LLMProvider.DOUBAO: 'DOUBAO_API_KEY',
+            LLMProvider.SILICONFLOW: 'SILICONFLOW_API_KEY',
+            LLMProvider.SENSENOVA: 'SENSENOVA_API_KEY',
+            LLMProvider.AIPING: 'AIPING_API_KEY',
+            LLMProvider.PPIO: 'PPIO_API_KEY',
             LLMProvider.OLLAMA: None,  # Ollama 不需要 API Key
         }
         key_name = provider_key_map.get(provider)
@@ -178,6 +186,10 @@ class LLMService:
             'minimax': LLMProvider.MINIMAX,
             'doubao': LLMProvider.DOUBAO,
             'ollama': LLMProvider.OLLAMA,
+            'siliconflow': LLMProvider.SILICONFLOW,
+            'sensenova': LLMProvider.SENSENOVA,
+            'aiping': LLMProvider.AIPING,
+            'ppio': LLMProvider.PPIO,
         }
         return provider_map.get(provider_str.lower(), LLMProvider.OPENAI)
     
@@ -387,6 +399,7 @@ Please analyze the following code:
             )
             
             response = await adapter.complete(request)
+
             content = response.content
             
             # 记录 LLM 原始响应（用于调试）
