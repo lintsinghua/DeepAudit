@@ -16,6 +16,7 @@ class LLMProvider(str, Enum):
     DEEPSEEK = "deepseek"    # DeepSeek
     ZHIPU = "zhipu"          # 智谱AI (GLM系列)
     MOONSHOT = "moonshot"    # 月之暗面 Kimi
+    ATLASCLOUD = "atlascloud"  # Atlas Cloud (OpenAI 兼容聚合网关)
     BAIDU = "baidu"          # 百度文心一言
     MINIMAX = "minimax"      # MiniMax
     DOUBAO = "doubao"        # 字节豆包
@@ -98,6 +99,7 @@ DEFAULT_MODELS: Dict[LLMProvider, str] = {
     LLMProvider.DEEPSEEK: "deepseek-v3.1-terminus",
     LLMProvider.ZHIPU: "glm-4.6",
     LLMProvider.MOONSHOT: "kimi-k2",
+    LLMProvider.ATLASCLOUD: "deepseek-ai/DeepSeek-V3.1-Terminus",
     LLMProvider.BAIDU: "ernie-4.5",
     LLMProvider.MINIMAX: "minimax-m2",
     LLMProvider.DOUBAO: "doubao-1.6-pro",
@@ -112,6 +114,7 @@ DEFAULT_BASE_URLS: Dict[LLMProvider, str] = {
     LLMProvider.DEEPSEEK: "https://api.deepseek.com",
     LLMProvider.ZHIPU: "https://open.bigmodel.cn/api/paas/v4",
     LLMProvider.MOONSHOT: "https://api.moonshot.cn/v1",
+    LLMProvider.ATLASCLOUD: "https://api.atlascloud.ai/v1",
     LLMProvider.BAIDU: "https://aip.baidubce.com/rpc/2.0/ai_custom/v1",
     LLMProvider.MINIMAX: "https://api.minimax.chat/v1",
     LLMProvider.DOUBAO: "https://ark.cn-beijing.volces.com/api/v3",

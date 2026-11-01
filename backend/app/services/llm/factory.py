@@ -179,6 +179,13 @@ class LLMFactory:
                 "kimi-researcher",
                 "kimi-linear",
             ],
+            LLMProvider.ATLASCLOUD: [
+                "deepseek-ai/DeepSeek-V3.1-Terminus",
+                "deepseek-ai/DeepSeek-V3.1",
+                "Qwen/Qwen3-235B-A22B-Instruct-2507",
+                "moonshotai/kimi-k2.6",
+                "zai-org/glm-4.7",
+            ],
             LLMProvider.BAIDU: [
                 "ernie-4.5",
                 "ernie-4.5-21b-a3b-thinking",

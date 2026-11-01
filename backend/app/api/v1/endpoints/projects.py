@@ -532,7 +532,7 @@ async def scan_project(
     # 需要解密的敏感字段列表
     SENSITIVE_LLM_FIELDS = [
         'llmApiKey', 'geminiApiKey', 'openaiApiKey', 'claudeApiKey',
-        'qwenApiKey', 'deepseekApiKey', 'zhipuApiKey', 'moonshotApiKey',
+        'qwenApiKey', 'deepseekApiKey', 'zhipuApiKey', 'moonshotApiKey', 'atlascloudApiKey',
         'baiduApiKey', 'minimaxApiKey', 'doubaoApiKey'
     ]
     SENSITIVE_OTHER_FIELDS = ['githubToken', 'gitlabToken']

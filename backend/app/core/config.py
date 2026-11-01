@@ -37,7 +37,7 @@ class Settings(BaseSettings):
         return str(f"postgresql+asyncpg://{values.get('POSTGRES_USER')}:{values.get('POSTGRES_PASSWORD')}@{values.get('POSTGRES_SERVER')}/{values.get('POSTGRES_DB')}")
 
     # LLM配置
-    LLM_PROVIDER: str = "openai"  # gemini, openai, claude, qwen, deepseek, zhipu, moonshot, baidu, minimax, doubao, ollama
+    LLM_PROVIDER: str = "openai"  # gemini, openai, claude, qwen, deepseek, zhipu, moonshot, atlascloud, baidu, minimax, doubao, ollama
     LLM_API_KEY: Optional[str] = None
     LLM_MODEL: Optional[str] = None  # 不指定时使用provider的默认模型
     LLM_BASE_URL: Optional[str] = None  # 自定义API端点（如中转站）
@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     DEEPSEEK_API_KEY: Optional[str] = None
     ZHIPU_API_KEY: Optional[str] = None
     MOONSHOT_API_KEY: Optional[str] = None
+    ATLASCLOUD_API_KEY: Optional[str] = None
     BAIDU_API_KEY: Optional[str] = None  # 格式: api_key:secret_key
     MINIMAX_API_KEY: Optional[str] = None
     DOUBAO_API_KEY: Optional[str] = None
