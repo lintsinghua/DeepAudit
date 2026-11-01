@@ -635,7 +635,7 @@ watchfiles==1.1.1
     # via uvicorn
 wcwidth==0.2.14
     # via prettytable
-weasyprint==67.0
+weasyprint==70.0
     # via deepaudit-backend (pyproject.toml)
 webencodings==0.5.1
     # via
