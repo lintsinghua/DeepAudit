@@ -1,3 +1,7 @@
+"""
+模块说明：数据库初始化与会话管理：base。
+"""
+
 from sqlalchemy.orm import as_declarative, declared_attr
 
 @as_declarative()

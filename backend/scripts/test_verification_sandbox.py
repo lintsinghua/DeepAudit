@@ -1,3 +1,7 @@
+"""
+模块说明：用于脚本化执行的工具脚本：test_verification_sandbox。
+"""
+
 
 import asyncio
 import os

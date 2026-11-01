@@ -1,3 +1,7 @@
+"""
+模块说明：核心配置与安全组件：config。
+"""
+
 from typing import List, Union, Optional
 from pydantic import AnyHttpUrl, validator
 from pydantic_settings import BaseSettings

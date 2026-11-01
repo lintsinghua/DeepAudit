@@ -1,3 +1,7 @@
+"""
+模块说明：API 路由与依赖定义：scan。
+"""
+
 from fastapi import APIRouter, UploadFile, File, Form, Depends, BackgroundTasks, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -29,10 +33,13 @@ router = APIRouter()
 
 def normalize_path(path: str) -> str:
     """
-    统一路径分隔符为正斜杠，确保跨平台兼容性
-    Windows 使用反斜杠 (\)，Unix/Mac 使用正斜杠 (/)
-    统一转换为正斜杠以保证一致性
+    统一路径分隔符为正斜杠，确保跨平台兼容性。
+
+    处理流程：
+    - 将反斜杠替换为正斜杠
+    - 返回标准化路径
     """
+    # 统一替换为正斜杠
     return path.replace("\\", "/")
 
 
@@ -45,24 +52,36 @@ TEXT_EXTENSIONS = [
 
 
 async def process_zip_task(task_id: str, file_path: str, db_session_factory, user_config: dict = None):
-    """后台ZIP文件处理任务"""
+    """
+    后台 ZIP 文件处理任务。
+
+    处理流程：
+    - 查询任务并标记运行
+    - 解压 ZIP 并筛选可扫描文件
+    - 按配置逐文件分析并写入问题
+    - 汇总结果并更新任务状态
+    """
+    # 打开数据库会话
     async with db_session_factory() as db:
+        # 查询任务
         task = await db.get(AuditTask, task_id)
         if not task:
             return
 
         try:
+            # 更新任务为运行中
             task.status = "running"
             task.started_at = datetime.now(timezone.utc)
             await db.commit()
             
-            # 创建使用用户配置的LLM服务实例
+            # 创建使用用户配置的 LLM 服务实例
             llm_service = LLMService(user_config=user_config or {})
 
-            # Extract ZIP
+            # 准备解压目录
             extract_dir = Path(f"/tmp/{task_id}")
             extract_dir.mkdir(parents=True, exist_ok=True)
             
+            # 解压 ZIP
             with zipfile.ZipFile(file_path, 'r') as zip_ref:
                 zip_ref.extractall(extract_dir)
 
@@ -70,13 +89,14 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
             scan_config = (user_config or {}).get('scan_config', {})
             custom_exclude_patterns = scan_config.get('exclude_patterns', [])
             
-            # Find files
+            # 扫描可分析文件
             files_to_scan = []
             for root, dirs, files in os.walk(extract_dir):
                 # 排除常见非代码目录
                 dirs[:] = [d for d in dirs if d not in ['node_modules', '__pycache__', '.git', 'dist', 'build', 'vendor']]
                 
                 for file in files:
+                    # 计算相对路径
                     full_path = Path(root) / file
                     # 统一使用正斜杠，确保跨平台兼容性
                     rel_path = normalize_path(str(full_path.relative_to(extract_dir)))
@@ -84,6 +104,7 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
                     # 检查文件类型和排除规则（包含用户自定义排除模式）
                     if is_text_file(rel_path) and not should_exclude(rel_path, custom_exclude_patterns):
                         try:
+                            # 读取文本内容并检查大小
                             content = full_path.read_text(errors='ignore')
                             if len(content) <= settings.MAX_FILE_SIZE_BYTES:
                                 files_to_scan.append({
@@ -105,15 +126,19 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
                 # 统一目标文件路径的分隔符，确保匹配一致性
                 normalized_targets = {normalize_path(p) for p in target_files}
                 print(f"🎯 ZIP任务: 指定分析 {len(normalized_targets)} 个文件")
+                # 仅保留目标文件
                 files_to_scan = [f for f in files_to_scan if f['path'] in normalized_targets]
             elif max_analyze_files > 0:
+                # 按最大文件数裁剪
                 files_to_scan = files_to_scan[:max_analyze_files]
 
+            # 更新任务统计信息
             task.total_files = len(files_to_scan)
             await db.commit()
 
             print(f"📊 ZIP任务 {task_id}: 找到 {len(files_to_scan)} 个文件 (最大文件数: {max_analyze_files}, 请求间隔: {llm_gap_ms}ms)")
 
+            # 初始化统计变量
             total_issues = 0
             total_lines = 0
             quality_scores = []
@@ -131,11 +156,12 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
                     return
 
                 try:
+                    # 读取文件内容与语言
                     content = file_info['content']
                     total_lines += content.count('\n') + 1
                     language = get_language_from_path(file_info['path'])
                     
-                    # 获取规则集和提示词模板ID
+                    # 获取规则集和提示词模板 ID
                     scan_config = (user_config or {}).get('scan_config', {})
                     rule_set_id = scan_config.get('rule_set_id')
                     prompt_template_id = scan_config.get('prompt_template_id')
@@ -149,8 +175,10 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
                             db_session=db
                         )
                     else:
+                        # 使用默认规则分析
                         result = await llm_service.analyze_code(content, language)
                     
+                    # 写入问题记录
                     issues = result.get("issues", [])
                     for i in issues:
                         issue = AuditIssue(
@@ -171,9 +199,11 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
                         db.add(issue)
                         total_issues += 1
                     
+                    # 记录质量评分
                     if "quality_score" in result:
                         quality_scores.append(result["quality_score"])
                     
+                    # 更新任务进度
                     scanned_files += 1
                     task.scanned_files = scanned_files
                     task.total_lines = total_lines
@@ -186,6 +216,7 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
                     await asyncio.sleep(llm_gap_ms / 1000)
 
                 except Exception as file_error:
+                    # 记录单文件失败
                     failed_files += 1
                     print(f"❌ ZIP任务分析文件失败 ({file_info['path']}): {file_error}")
                     await asyncio.sleep(llm_gap_ms / 1000)
@@ -204,6 +235,7 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
                 await db.commit()
                 print(f"❌ ZIP任务 {task_id} 失败: 所有 {len(files_to_scan)} 个文件分析均失败，请检查 LLM API 配置")
             else:
+                # 标记完成并写入统计
                 task.status = "completed"
                 task.completed_at = datetime.now(timezone.utc)
                 task.scanned_files = scanned_files
@@ -212,16 +244,19 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
                 task.quality_score = avg_quality_score
                 await db.commit()
                 print(f"✅ ZIP任务 {task_id} 完成: 扫描 {scanned_files} 个文件, 发现 {total_issues} 个问题")
+            # 清理任务控制状态
             task_control.cleanup_task(task_id)
             
         except Exception as e:
+            # 记录失败
             print(f"❌ ZIP扫描失败: {e}")
             task.status = "failed"
             task.completed_at = datetime.now(timezone.utc)
             await db.commit()
+            # 清理任务控制状态
             task_control.cleanup_task(task_id)
         finally:
-            # Cleanup - 只清理解压目录，不删除源ZIP文件（已持久化存储）
+            # Cleanup - 只清理解压目录，不删除源 ZIP 文件（已持久化存储）
             if extract_dir.exists():
                 shutil.rmtree(extract_dir)
 
@@ -236,10 +271,15 @@ async def scan_zip(
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """
-    Upload and scan a ZIP file.
-    上传ZIP文件并启动扫描，同时将ZIP文件保存到持久化存储
+    上传 ZIP 文件并启动扫描，同时将 ZIP 文件保存到持久化存储。
+
+    处理流程：
+    - 校验项目与权限
+    - 校验 ZIP 文件与大小
+    - 保存 ZIP 到持久化存储
+    - 创建任务并触发后台处理
     """
-    # Verify project exists
+    # 校验项目存在
     project = await db.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -248,26 +288,26 @@ async def scan_zip(
     if project.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权操作此项目")
     
-    # Validate file
+    # 校验文件类型
     if not file.filename.lower().endswith('.zip'):
         raise HTTPException(status_code=400, detail="请上传ZIP格式文件")
         
-    # Save Uploaded File to temp
+    # 保存上传文件到临时路径
     file_id = str(uuid.uuid4())
     file_path = f"/tmp/{file_id}.zip"
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     
-    # Check file size
+    # 校验文件大小
     file_size = os.path.getsize(file_path)
     if file_size > 500 * 1024 * 1024:  # 500MB limit
         os.remove(file_path)
         raise HTTPException(status_code=400, detail="文件大小不能超过500MB")
     
-    # 保存ZIP文件到持久化存储
+    # 保存 ZIP 文件到持久化存储
     await save_project_zip(project_id, file_path, file.filename)
     
-    # Parse scan_config if provided
+    # 解析扫描配置
     parsed_scan_config = {}
     if scan_config:
         try:
@@ -275,7 +315,7 @@ async def scan_zip(
         except json.JSONDecodeError:
             pass
 
-    # Create Task
+    # 创建扫描任务
     task = AuditTask(
         project_id=project_id,
         created_by=current_user.id,
@@ -299,14 +339,16 @@ async def scan_zip(
             'prompt_template_id': parsed_scan_config.get('prompt_template_id'),
         }
 
-    # Trigger Background Task - 使用持久化存储的文件路径
+    # 触发后台任务 - 使用持久化存储的文件路径
     stored_zip_path = await load_project_zip(project_id)
     background_tasks.add_task(process_zip_task, task.id, stored_zip_path or file_path, AsyncSessionLocal, user_config)
 
+    # 返回任务状态
     return {"task_id": task.id, "status": "queued"}
 
 
 class ScanRequest(BaseModel):
+    """扫描配置请求模型。"""
     file_paths: Optional[List[str]] = None
     full_scan: bool = True
     exclude_patterns: Optional[List[str]] = None
@@ -323,9 +365,14 @@ async def scan_stored_zip(
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """
-    使用已存储的ZIP文件启动扫描（无需重新上传）
+    使用已存储的 ZIP 文件启动扫描（无需重新上传）。
+
+    处理流程：
+    - 校验项目与权限
+    - 校验已存储 ZIP
+    - 创建任务并触发后台处理
     """
-    # Verify project exists
+    # 校验项目存在
     project = await db.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -334,12 +381,12 @@ async def scan_stored_zip(
     if project.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权操作此项目")
     
-    # 检查是否有存储的ZIP文件
+    # 检查是否有存储的 ZIP 文件
     stored_zip_path = await load_project_zip(project_id)
     if not stored_zip_path:
         raise HTTPException(status_code=400, detail="项目没有已存储的ZIP文件，请先上传")
     
-    # Create Task
+    # 创建扫描任务
     task = AuditTask(
         project_id=project_id,
         created_by=current_user.id,
@@ -363,19 +410,22 @@ async def scan_stored_zip(
             'prompt_template_id': scan_request.prompt_template_id,
         }
 
-    # Trigger Background Task
+    # 触发后台任务
     background_tasks.add_task(process_zip_task, task.id, stored_zip_path, AsyncSessionLocal, user_config)
 
+    # 返回任务状态
     return {"task_id": task.id, "status": "queued"}
 
 
 class InstantAnalysisRequest(BaseModel):
+    """即时分析请求模型。"""
     code: str
     language: str
     prompt_template_id: Optional[str] = None
 
 
 class InstantAnalysisResponse(BaseModel):
+    """即时分析响应模型。"""
     id: str
     user_id: str
     language: str
@@ -390,7 +440,15 @@ class InstantAnalysisResponse(BaseModel):
 
 
 async def get_user_config_dict(db: AsyncSession, user_id: str) -> dict:
-    """获取用户配置字典（包含解密敏感字段）"""
+    """
+    获取用户配置字典（包含解密敏感字段）。
+
+    处理流程：
+    - 查询用户配置
+    - 解析并解密敏感字段
+    - 返回统一配置字典
+    """
+    # 延迟导入解密函数
     from app.core.encryption import decrypt_sensitive_data
     
     # 需要解密的敏感字段列表（与 config.py 保持一致）
@@ -402,16 +460,29 @@ async def get_user_config_dict(db: AsyncSession, user_id: str) -> dict:
     SENSITIVE_OTHER_FIELDS = ['githubToken', 'gitlabToken']
     
     def decrypt_config(config: dict, sensitive_fields: list) -> dict:
-        """解密配置中的敏感字段"""
+        """
+        解密配置中的敏感字段。
+
+        处理流程：
+        - 拷贝配置
+        - 遍历敏感字段并解密
+        - 返回解密结果
+        """
+        # 拷贝配置
         decrypted = config.copy()
+        # 遍历敏感字段
         for field in sensitive_fields:
+            # 有值时解密
             if field in decrypted and decrypted[field]:
                 decrypted[field] = decrypt_sensitive_data(decrypted[field])
+        # 返回解密后的配置
         return decrypted
     
+    # 查询用户配置
     result = await db.execute(
         select(UserConfig).where(UserConfig.user_id == user_id)
     )
+    # 获取配置对象
     config = result.scalar_one_or_none()
     if not config:
         return {}
@@ -424,6 +495,7 @@ async def get_user_config_dict(db: AsyncSession, user_id: str) -> dict:
     llm_config = decrypt_config(llm_config, SENSITIVE_LLM_FIELDS)
     other_config = decrypt_config(other_config, SENSITIVE_OTHER_FIELDS)
     
+    # 返回组合后的配置
     return {
         'llmConfig': llm_config,
         'otherConfig': other_config,
@@ -437,14 +509,21 @@ async def instant_analysis(
     current_user: User = Depends(deps.get_current_user), 
 ) -> Any:
     """
-    Perform instant code analysis.
+    执行即时代码分析。
+
+    处理流程：
+    - 获取用户配置
+    - 调用 LLM 分析
+    - 保存分析记录
+    - 返回分析结果
     """
     # 获取用户配置
     user_config = await get_user_config_dict(db, current_user.id)
     
-    # 创建使用用户配置的LLM服务实例
+    # 创建使用用户配置的 LLM 服务实例
     llm_service = LLMService(user_config=user_config)
     
+    # 记录开始时间
     start_time = datetime.now(timezone.utc)
     
     try:
@@ -465,10 +544,11 @@ async def instant_analysis(
             detail=f"代码分析失败: {error_msg}"
         )
     
+    # 计算分析耗时
     end_time = datetime.now(timezone.utc)
     duration = (end_time - start_time).total_seconds()
 
-    # Save record
+    # 保存分析记录
     analysis = InstantAnalysis(
         user_id=current_user.id,
         language=req.language,
@@ -482,7 +562,7 @@ async def instant_analysis(
     await db.commit()
     await db.refresh(analysis)
     
-    # Return result with analysis ID for export functionality
+    # 返回结果并附带分析记录 ID
     return {
         **result,
         "analysis_id": analysis.id,
@@ -497,14 +577,20 @@ async def get_instant_analysis_history(
     limit: int = 20,
 ) -> Any:
     """
-    Get user's instant analysis history.
+    获取用户即时分析历史记录。
+
+    处理流程：
+    - 查询用户历史记录
+    - 按时间倒序返回
     """
+    # 查询历史记录
     result = await db.execute(
         select(InstantAnalysis)
         .where(InstantAnalysis.user_id == current_user.id)
         .order_by(InstantAnalysis.created_at.desc())
         .limit(limit)
     )
+    # 返回记录列表
     return result.scalars().all()
 
 
@@ -515,21 +601,30 @@ async def delete_instant_analysis(
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """
-    Delete a specific instant analysis record.
+    删除指定的即时分析记录。
+
+    处理流程：
+    - 查询记录
+    - 校验存在性
+    - 删除并提交
     """
+    # 查询分析记录
     result = await db.execute(
         select(InstantAnalysis)
         .where(InstantAnalysis.id == analysis_id)
         .where(InstantAnalysis.user_id == current_user.id)
     )
+    # 获取记录对象
     analysis = result.scalar_one_or_none()
     
     if not analysis:
         raise HTTPException(status_code=404, detail="分析记录不存在")
     
+    # 删除记录
     await db.delete(analysis)
     await db.commit()
     
+    # 返回删除结果
     return {"message": "删除成功"}
 
 
@@ -539,15 +634,22 @@ async def delete_all_instant_analyses(
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """
-    Delete all instant analysis records for current user.
+    删除当前用户的全部即时分析记录。
+
+    处理流程：
+    - 批量删除用户记录
+    - 提交事务
     """
+    # 延迟导入 delete
     from sqlalchemy import delete
     
+    # 执行批量删除
     await db.execute(
         delete(InstantAnalysis).where(InstantAnalysis.user_id == current_user.id)
     )
     await db.commit()
     
+    # 返回删除结果
     return {"message": "已清空所有历史记录"}
 
 
@@ -558,8 +660,14 @@ async def export_instant_report_pdf(
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """
-    Export instant analysis report as PDF by analysis ID.
+    根据分析记录 ID 导出即时分析 PDF 报告。
+
+    处理流程：
+    - 查询分析记录
+    - 解析分析结果
+    - 生成 PDF 并返回
     """
+    # 延迟导入响应与报告生成器
     from fastapi.responses import Response
     from app.services.report_generator import ReportGenerator
     
@@ -587,7 +695,7 @@ async def export_instant_report_pdf(
         analysis.analysis_time
     )
     
-    # 返回 PDF 文件
+    # 构建文件名并返回 PDF 文件
     filename = f"instant-analysis-{analysis.language}-{analysis.id[:8]}.pdf"
     return Response(
         content=pdf_bytes,
