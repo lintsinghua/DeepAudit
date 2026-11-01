@@ -51,6 +51,20 @@ if username == "admin" and password == "admin":
     return login_success()
 ```
 
+### PHP 认证/会话
+```php
+// 危险 - 弱密码哈希
+if (md5($password) === $user['password_hash']) { login(); }
+if (sha1($_POST['pw']) === $row['pass']) { grant(); }
+
+// 危险 - 松脆比较 (type juggling)
+if ($_POST['password'] == $user['password']) { login(); }  // '0' == 'abc' 可能绕过
+
+// 危险 - 可预测令牌 / 会话未重新生成
+$token = md5($username);
+$_SESSION['user_id'] = $user['id'];  // 登录后未 session_regenerate_id()
+```
+
 ## 检测要点
 1. JWT的算法和签名验证
 2. 会话ID的随机性
@@ -73,6 +87,17 @@ jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
 # 安全 - 登录后重新生成会话
 session.regenerate()
 session['user_id'] = user.id
+```
+
+### PHP
+```php
+// 安全 - password_hash / password_verify
+if (password_verify($_POST['password'], $user['password_hash'])) { login(); }
+
+// 安全 - 登录后重新生成会话 + 强随机令牌
+session_regenerate_id(true);
+$_SESSION['user_id'] = $user['id'];
+$csrf = bin2hex(random_bytes(32));
 ```
 """,
 )

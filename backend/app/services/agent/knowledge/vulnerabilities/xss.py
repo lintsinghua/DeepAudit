@@ -69,6 +69,16 @@ return f"<h1>搜索结果: {escape(query)}</h1>"
 # 安全 - 使用模板（自动转义）
 return render_template('search.html', query=query)
 ```
+
+### PHP
+```php
+// 安全 - htmlspecialchars 输出转义
+echo "Hello " . htmlspecialchars($_GET['name'], ENT_QUOTES, 'UTF-8');
+
+// 安全 - Laravel Blade（默认转义）/ 避免 {!! !!}
+{{ $name }}            // Blade 自动转义
+{!! $name !!}          // 危险 - 不要用，除非已净化
+```
 """,
 )
 

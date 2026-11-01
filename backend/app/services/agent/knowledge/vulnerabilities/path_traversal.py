@@ -125,5 +125,24 @@ def download(file_id):
         return send_file(file_record.path)
     abort(404)
 ```
+
+### PHP
+```php
+// 安全 - realpath 解析后校验前缀 (LFI 防护)
+function safe_path(string $user_file): string {
+    $base = realpath(__DIR__ . '/uploads');
+    $full = realpath($base . '/' . $user_file);
+    if ($full === false || strpos($full, $base) !== 0) {
+        http_response_code(403);
+        exit;
+    }
+    return $full;
+}
+
+// 安全 - 使用文件名映射替代直接包含
+$pages = ['home' => 'home.php', 'about' => 'about.php'];
+$page = $pages[$_GET['p']] ?? 'home.php';   // 白名单映射
+include __DIR__ . '/views/' . $page;
+```
 """,
 )

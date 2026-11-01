@@ -115,5 +115,24 @@ def safe_loads(data, signature, key):
         raise ValueError("Invalid signature")
     return pickle.loads(data)
 ```
+
+### PHP
+```php
+// 安全 - 优先 JSON，避免 unserialize 不可信数据
+$data = json_decode($_POST['data'], true);
+
+// 如必须使用 unserialize：sign 签名 + 类名白名单
+$payload = base64_decode($_POST['serialized']);
+if (!hash_equals(hash_hmac('sha256', $payload, SECRET_KEY), $_POST['sign'])) {
+    http_response_code(403); exit;
+}
+// 仅允许白名单内的类，防止 gadget 链
+$allowed = ['User', 'Config'];
+if (preg_match('/O:\d+:"([^"]+)"/', $payload, $m)
+    && !in_array($m[1], $allowed, true)) {
+    throw new Exception('Disallowed class: ' . $m[1]);
+}
+$obj = unserialize($payload);
+```
 """,
 )
