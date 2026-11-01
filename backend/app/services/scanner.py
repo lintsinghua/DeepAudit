@@ -3,6 +3,7 @@
 """
 
 import asyncio
+from collections.abc import Awaitable, Callable
 import httpx
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
@@ -155,6 +156,28 @@ async def gitlab_api(url: str, token: str = None) -> Any:
         return response.json()
 
 
+async def fetch_all_pages(
+    api_func: Callable[..., Awaitable[Any]],
+    url: str,
+    token: str | None = None,
+    per_page_param: str = "per_page",
+    per_page: int = 100,
+    max_pages: int = 500,
+) -> list[Any]:
+    """逐页请求列表接口，直到返回空页（GitHub/GitLab/Gitea 列表接口每次只返回一页）"""
+    items: list[Any] = []
+    sep = "&" if "?" in url else "?"
+    previous = None
+    for page in range(1, max_pages + 1):
+        data = await api_func(f"{url}{sep}{per_page_param}={per_page}&page={page}", token)
+        # 空页表示结束；与上一页相同说明服务端忽略了 page 参数，停止以免重复和无限请求
+        if not isinstance(data, list) or not data or data == previous:
+            break
+        items.extend(data)
+        previous = data
+    return items
+
+
 async def fetch_file_content(url: str, headers: Dict[str, str] = None) -> Optional[str]:
     """获取文件内容"""
     async with httpx.AsyncClient(timeout=30) as client:
@@ -172,8 +195,8 @@ async def get_github_branches(repo_url: str, token: str = None) -> List[str]:
     repo_info = parse_repository_url(repo_url, "github")
     owner, repo = repo_info['owner'], repo_info['repo']
     
-    branches_url = f"https://api.github.com/repos/{owner}/{repo}/branches?per_page=100"
-    branches_data = await github_api(branches_url, token)
+    branches_url = f"https://api.github.com/repos/{owner}/{repo}/branches"
+    branches_data = await fetch_all_pages(github_api, branches_url, token)
     
     return [b["name"] for b in branches_data]
 
@@ -188,7 +211,7 @@ async def get_gitea_branches(repo_url: str, token: str = None) -> List[str]:
     owner, repo = repo_info['owner'], repo_info['repo']
     
     branches_url = f"{base_url}/repos/{owner}/{repo}/branches"
-    branches_data = await gitea_api(branches_url, token)
+    branches_data = await fetch_all_pages(gitea_api, branches_url, token, per_page_param="limit", per_page=50)
     
     return [b["name"] for b in branches_data]
 
@@ -208,8 +231,8 @@ async def get_gitlab_branches(repo_url: str, token: str = None) -> List[str]:
     base_url = repo_info['base_url']
     project_path = quote(repo_info['project_path'], safe='')
     
-    branches_url = f"{base_url}/projects/{project_path}/repository/branches?per_page=100"
-    branches_data = await gitlab_api(branches_url, extracted_token)
+    branches_url = f"{base_url}/projects/{project_path}/repository/branches"
+    branches_data = await fetch_all_pages(gitlab_api, branches_url, extracted_token)
     
     return [b["name"] for b in branches_data]
 
@@ -255,8 +278,8 @@ async def get_gitlab_files(repo_url: str, branch: str, token: str = None, exclud
     project_path = quote(repo_info['project_path'], safe='')
     
     # 获取仓库文件树
-    tree_url = f"{base_url}/projects/{project_path}/repository/tree?ref={quote(branch)}&recursive=true&per_page=100"
-    tree_data = await gitlab_api(tree_url, extracted_token)
+    tree_url = f"{base_url}/projects/{project_path}/repository/tree?ref={quote(branch)}&recursive=true"
+    tree_data = await fetch_all_pages(gitlab_api, tree_url, extracted_token)
     
     files = []
     for item in tree_data:
