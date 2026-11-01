@@ -390,8 +390,8 @@ Please analyze the following code:
             content = response.content
             
             # 记录 LLM 原始响应（用于调试）
-            logger.info(f"📥 LLM 原始响应长度: {len(content) if content else 0} 字符")
-            logger.info(f"📥 LLM 原始响应内容:\n{content}")
+            logger.debug(f"📥 LLM 原始响应长度: {len(content) if content else 0} 字符")
+            logger.debug(f"📥 LLM 原始响应内容:\n{content[:500]}..." if content and len(content) > 500 else f"📥 LLM 原始响应内容:\n{content}")
             
             # 检查响应内容是否为空
             if not content or not content.strip():

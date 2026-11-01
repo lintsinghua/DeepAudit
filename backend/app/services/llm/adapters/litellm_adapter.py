@@ -293,11 +293,30 @@ class LiteLLMAdapter(BaseLLMAdapter):
                     total_input_tokens=response.usage.prompt_tokens or 0,
                 )
 
+        # 🔥 提取 reasoning_content（推理模型如 DeepSeek V4 Pro 会在该字段输出推理过程）
+        reasoning_content = ""
+        if hasattr(choice.message, "reasoning_content") and choice.message.reasoning_content:
+            reasoning_content = choice.message.reasoning_content
+        elif hasattr(choice.message, "__dict__"):
+            reasoning_content = choice.message.__dict__.get("reasoning_content", "") or ""
+
+        reasoning_tokens = estimate_tokens(reasoning_content, self.config.model) if reasoning_content else 0
+        if reasoning_content:
+            logger.debug(f"[reasoning] model={response.model}, reasoning_chars={len(reasoning_content)}, est_tokens={reasoning_tokens}")
+
+        # 🔥 FALLBACK: 推理模型（DeepSeek V4 Pro 等）可能将全部输出放在 reasoning_content，content 为空
+        final_content = choice.message.content or ""
+        if not final_content.strip() and reasoning_content.strip():
+            logger.debug(f"[reasoning-fallback] model={response.model}, content empty, falling back to reasoning_content ({len(reasoning_content)} chars)")
+            final_content = reasoning_content
+
         return LLMResponse(
-            content=choice.message.content or "",
+            content=final_content,
             model=response.model,
             usage=usage,
             finish_reason=choice.finish_reason,
+            reasoning_content=reasoning_content,
+            reasoning_tokens=reasoning_tokens,
         )
 
     async def stream_complete(self, request: LLMRequest):
@@ -347,6 +366,7 @@ class LiteLLMAdapter(BaseLLMAdapter):
         kwargs["timeout"] = self.config.timeout
 
         accumulated_content = ""
+        accumulated_reasoning = ""  # 🔥 累积推理内容
         final_usage = None  # 🔥 存储最终的 usage 信息
         chunk_count = 0  # 🔥 跟踪 chunk 数量
 
@@ -371,7 +391,20 @@ class LiteLLMAdapter(BaseLLMAdapter):
 
                 delta = chunk.choices[0].delta
                 content = getattr(delta, "content", "") or ""
+                # 🔥 提取 reasoning_content（推理模型如 DeepSeek V4 Pro）
+                reasoning = getattr(delta, "reasoning_content", "") or ""
                 finish_reason = chunk.choices[0].finish_reason
+
+                if reasoning:
+                    accumulated_reasoning += reasoning
+                    # Yield a keepalive chunk so downstream knows the stream is active
+                    # (reasoning-only models would otherwise cause a first-token timeout)
+                    if not content:
+                        yield {
+                            "type": "token",
+                            "content": "",
+                            "accumulated": accumulated_content,
+                        }
 
                 if content:
                     accumulated_content += content
@@ -380,12 +413,22 @@ class LiteLLMAdapter(BaseLLMAdapter):
                         "content": content,
                         "accumulated": accumulated_content,
                     }
+                elif reasoning and not finish_reason:
+                    yield {"type": "keepalive"}
                 # 🔥 ENHANCED: 处理没有 content 但也没有 finish_reason 的情况
                 # 某些模型（如智谱 GLM）可能在某些 chunk 中不返回内容
 
                 if finish_reason:
                     # 流式完成
-                    # 🔥 如果没有从 chunk 获取到 usage，进行估算
+                    # 🔥 FALLBACK: 推理模型可能将全部输出放在 reasoning_content，content 为空
+                    # 必须在 token 估算之前执行，确保估算基于最终 content
+                    if not accumulated_content.strip() and accumulated_reasoning.strip():
+                        logger.debug(f"[reasoning-fallback-stream] model={self.config.model}, content empty after {chunk_count} chunks, falling back to reasoning_content ({len(accumulated_reasoning)} chars)")
+                        accumulated_content = accumulated_reasoning
+                    elif not accumulated_content:
+                        logger.warning(f"Stream completed with no content after {chunk_count} chunks, finish_reason={finish_reason}")
+
+                    # 🔥 如果没有从 chunk 获取到 usage，进行估算（基于最终 content）
                     if not final_usage:
                         output_tokens_estimate = estimate_tokens(
                             accumulated_content, self.config.model
@@ -397,19 +440,27 @@ class LiteLLMAdapter(BaseLLMAdapter):
                         }
                         logger.debug(f"Estimated usage: {final_usage}")
 
-                    # 🔥 ENHANCED: 如果累积内容为空但有 finish_reason，记录警告
-                    if not accumulated_content:
-                        logger.warning(f"Stream completed with no content after {chunk_count} chunks, finish_reason={finish_reason}")
+                    # 🔥 记录推理内容长度
+                    reasoning_tokens_est = estimate_tokens(accumulated_reasoning, self.config.model) if accumulated_reasoning else 0
+                    if accumulated_reasoning:
+                        logger.debug(f"[reasoning-stream] model={self.config.model}, reasoning_chars={len(accumulated_reasoning)}, est_tokens={reasoning_tokens_est}")
 
                     yield {
                         "type": "done",
                         "content": accumulated_content,
                         "usage": final_usage,
                         "finish_reason": finish_reason,
+                        "reasoning_content": accumulated_reasoning,
+                        "reasoning_tokens": reasoning_tokens_est,
                     }
                     break
 
             # 🔥 ENHANCED: 如果循环结束但没有收到 finish_reason，也需要返回 done
+            # 🔥 FALLBACK: 推理模型 content 为空时回退到 reasoning_content
+            # 必须在 token 估算之前执行，确保估算基于最终 content
+            if not accumulated_content.strip() and accumulated_reasoning.strip():
+                logger.debug(f"[reasoning-fallback-stream] model={self.config.model}, stream ended without finish_reason, falling back to reasoning_content ({len(accumulated_reasoning)} chars)")
+                accumulated_content = accumulated_reasoning
             if accumulated_content:
                 logger.warning(f"Stream ended without finish_reason, returning accumulated content ({len(accumulated_content)} chars)")
                 if not final_usage:
@@ -421,11 +472,16 @@ class LiteLLMAdapter(BaseLLMAdapter):
                         "completion_tokens": output_tokens_estimate,
                         "total_tokens": input_tokens_estimate + output_tokens_estimate,
                     }
+                reasoning_tokens_est = estimate_tokens(accumulated_reasoning, self.config.model) if accumulated_reasoning else 0
+                if accumulated_reasoning:
+                    logger.debug(f"[reasoning-stream] model={self.config.model}, reasoning_chars={len(accumulated_reasoning)}, est_tokens={reasoning_tokens_est}")
                 yield {
                     "type": "done",
                     "content": accumulated_content,
                     "usage": final_usage,
                     "finish_reason": "complete",
+                    "reasoning_content": accumulated_reasoning,
+                    "reasoning_tokens": reasoning_tokens_est,
                 }
 
         except litellm.exceptions.RateLimitError as e:
