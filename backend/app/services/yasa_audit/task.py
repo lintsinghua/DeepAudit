@@ -32,6 +32,19 @@ from .runner import (
 )
 
 logger = logging.getLogger(__name__)
+SOURCE_EXT = {".java", ".jsp", ".jspx", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
+SKIP_DIRS = {"node_modules", ".git", "dist", "build", "target", "vendor"}
+
+
+def count_sources(root: Path) -> int:
+    """Files the pipeline can analyse (Java/JSP, JS/TS), for the task's file counter."""
+    n = 0
+    for _dir, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        n += sum(1 for f in files if os.path.splitext(f)[1] in SOURCE_EXT)
+    return n
+
+
 RUNS_DIR = Path(os.environ.get("YASA_AUDIT_RUNS_DIR", "/tmp/deepaudit-yasa-runs"))
 
 
@@ -75,6 +88,7 @@ async def execute_yasa_task(
         raise RuntimeError("YASA mode needs an OpenAI-compatible LLM (base URL, API key, model)")
 
     root = Path(project_root).resolve()
+    task.total_files = count_sources(root)
     out = RUNS_DIR / task.id
     out.mkdir(parents=True, exist_ok=True)
     start = time.time()

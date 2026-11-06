@@ -40,6 +40,7 @@ import {
   Play,
   Upload,
   FolderOpen,
+  Microscope,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/shared/config/database";
@@ -79,6 +80,9 @@ export default function CreateAgentTaskDialog({
   const [loadingBranches, setLoadingBranches] = useState(false);
   const [excludePatterns, setExcludePatterns] = useState(DEFAULT_EXCLUDES);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  // 审计引擎：agent = 动态 Agent 树；yasa = YASA 混合审计（规则 + 引擎 + 分组复核 + 权限审计）
+  const [engine, setEngine] = useState<"agent" | "yasa">("agent");
+  const [productContext, setProductContext] = useState("");
   const [creating, setCreating] = useState(false);
 
   // ZIP 文件状态
@@ -196,17 +200,23 @@ export default function CreateAgentTaskDialog({
 
     setCreating(true);
     try {
+      const isYasa = engine === "yasa";
       const agentTask = await createAgentTask({
         project_id: selectedProject.id,
-        name: `Agent审计-${selectedProject.name}`,
+        name: `${isYasa ? "YASA审计" : "Agent审计"}-${selectedProject.name}`,
         branch_name: isRepositoryProject(selectedProject) ? branch : undefined,
         exclude_patterns: excludePatterns,
-        target_files: selectedFiles,
-        verification_level: "sandbox",
+        target_files: isYasa ? undefined : selectedFiles,
+        verification_level: isYasa ? "analysis_only" : "sandbox",
+        ...(isYasa && {
+          audit_mode: "yasa" as const,
+          timeout_seconds: 1800,
+          audit_scope: productContext.trim() ? { product: productContext.trim() } : undefined,
+        }),
       });
 
       onOpenChange(false);
-      toast.success("Agent 审计任务已创建");
+      toast.success(isYasa ? "YASA 混合审计任务已创建" : "Agent 审计任务已创建");
       navigate(`/agent-audit/${agentTask.id}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "创建失败";
@@ -375,6 +385,58 @@ export default function CreateAgentTaskDialog({
                   </div>
                 </div>
               )}
+
+              {/* 审计引擎 */}
+              <div className="space-y-2">
+                <span className="text-xs font-mono font-bold uppercase text-muted-foreground">
+                  Engine
+                </span>
+                <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="审计引擎">
+                  {([
+                    { id: "agent", icon: Bot, title: "Agent", desc: "多 Agent 自主审计 + 沙箱验证" },
+                    { id: "yasa", icon: Microscope, title: "YASA Hybrid", desc: "规则 + 污点引擎 + 权限审计，≤30 分钟" },
+                  ] as const).map(({ id, icon: Icon, title, desc }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      role="radio"
+                      aria-checked={engine === id}
+                      onClick={() => setEngine(id)}
+                      disabled={creating}
+                      className={`text-left p-3 rounded border transition-colors ${
+                        engine === id
+                          ? "border-primary/60 bg-primary/10"
+                          : "border-border bg-muted/50 hover:border-primary/30"
+                      }`}
+                    >
+                      <span className="flex items-center gap-2 font-mono text-sm font-bold">
+                        <Icon className="w-4 h-4" />
+                        {title}
+                      </span>
+                      <span className="block text-xs text-muted-foreground mt-1">{desc}</span>
+                    </button>
+                  ))}
+                </div>
+                {engine === "yasa" && (
+                  <div className="space-y-1">
+                    <label
+                      htmlFor="yasa-product-context"
+                      className="block text-xs font-mono text-muted-foreground"
+                    >
+                      产品上下文（可选）：哪些入口按设计公开、有哪些角色
+                    </label>
+                    <textarea
+                      id="yasa-product-context"
+                      value={productContext}
+                      onChange={(e) => setProductContext(e.target.value)}
+                      disabled={creating}
+                      rows={2}
+                      placeholder="例如：公开 /login、/search；角色 admin / user"
+                      className="w-full text-sm font-mono p-2 rounded border border-border bg-background"
+                    />
+                  </div>
+                )}
+              </div>
 
               {/* 高级选项 */}
               <Collapsible open={showAdvanced} onOpenChange={setShowAdvanced}>

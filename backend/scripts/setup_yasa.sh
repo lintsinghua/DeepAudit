@@ -5,6 +5,9 @@
 #   YASAMCP_HOME=/opt/yasamcp bash backend/scripts/setup_yasa.sh
 #
 # Linux x86_64 only (the platforms YASA publishes binaries for are linux-x64 and macOS).
+# yasa-mcp goes into its own virtualenv ($YASAMCP_HOME/venv), so system Python is left untouched.
+# With the default location no environment variables are needed: app.services.yasa_audit finds
+# everything under ~/.yasamcp.
 # yasa-mcp is installed from source because its pip package currently omits non-Python resources
 # (repository/mapper/**/*.sql, tools/ast_grep/rules/**); without them `func` and `search` fail
 # with KeyError. This script copies those files into the installed package.
@@ -32,14 +35,22 @@ echo "{\"binary_path\": \"$TOOLS\"}" > "$HOME_DIR/config.json"
 
 echo "installing yasa-mcp from source ($YASA_REF)..."
 git clone --depth 1 --branch "$YASA_REF" https://github.com/antgroup/YASA-Engine.git "$WORK/yasa-src"
-python3 -m pip install --quiet "$WORK/yasa-src/yasamcp"
-PKG_DIR="$(python3 -c 'import yasa_mcp, os; print(os.path.dirname(yasa_mcp.__file__))')"
+PY="${PYTHON:-python3}"
+[ -x "$HOME_DIR/venv/bin/python" ] || "$PY" -m venv "$HOME_DIR/venv"
+"$HOME_DIR/venv/bin/python" -m pip install --quiet --upgrade pip
+"$HOME_DIR/venv/bin/python" -m pip install --quiet "$WORK/yasa-src/yasamcp"
+PKG_DIR="$("$HOME_DIR/venv/bin/python" -c 'import yasa_mcp, os; print(os.path.dirname(yasa_mcp.__file__))')"
 ( cd "$WORK/yasa-src/yasamcp/src/yasa_mcp" &&
   find . -type f ! -name '*.py' ! -path '*/__pycache__/*' -exec sh -c \
     'mkdir -p "$1/$(dirname "$2")" && cp "$2" "$1/$2"' _ "$PKG_DIR" {} \; )
 
+
+"$TOOLS/$PLAT/yasa/yasa" --version >/dev/null 2>&1 || "$TOOLS/$PLAT/yasa/yasa" --help >/dev/null 2>&1 \
+  || { echo "YASA engine does not start" >&2; exit 1; }
+"$HOME_DIR/venv/bin/yasa-mcp" --help >/dev/null || { echo "yasa-mcp does not start" >&2; exit 1; }
+
 echo
-echo "done. Export these for app.services.yasa_audit:"
-echo "  export YASA_BIN=$TOOLS/$PLAT/yasa/yasa"
-echo "  export YASA_RG_BIN=$TOOLS/$PLAT/ripgrep/rg"
-echo "  export YASAMCP_TOOLS_DIR=$TOOLS"
+echo "done: $HOME_DIR"
+if [ "$HOME_DIR" != "$HOME/.yasamcp" ]; then
+  echo "non-default location: start the backend with YASAMCP_HOME=$HOME_DIR"
+fi
