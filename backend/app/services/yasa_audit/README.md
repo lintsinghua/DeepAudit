@@ -27,22 +27,23 @@ see `backend/benchmarks/yasa_audit/README.md`).
 ## Setup
 
 ```bash
-bash backend/scripts/setup_yasa.sh        # YASA engines + yasa-mcp into ~/.yasamcp (Linux x86_64)
-export YASA_BIN=~/.yasamcp/tools/linux-x86-64/yasa/yasa
-export YASA_RG_BIN=~/.yasamcp/tools/linux-x86-64/ripgrep/rg
-export YASAMCP_TOOLS_DIR=~/.yasamcp/tools
-export LLM_BASE_URL=... LLM_API_KEY=... LLM_MODEL=...   # same variables as DeepAudit; OpenAI-compatible, tool calling
+bash backend/scripts/setup_yasa.sh        # YASA engines + yasa-mcp (own virtualenv) into ~/.yasamcp, Linux x86_64
+export LLM_BASE_URL=... LLM_API_KEY=... LLM_MODEL=...   # CLI only; OpenAI-compatible with tool calling
 ```
+
+With the default location nothing else is needed. For another location run the script with
+`YASAMCP_HOME=/opt/yasamcp` and start the CLI or backend with the same variable; `YASA_BIN`, `YASAMCP_BIN`,
+`YASA_RG_BIN` and `YASAMCP_TOOLS_DIR` override single tools.
 
 ## Usage
 
 ```bash
 cd backend
-python -m app.services.yasa_audit init  /path/to/project                 # navigation cache (once per version)
-python -m app.services.yasa_audit run   /path/to/project --out out/ \
+uv run python -m app.services.yasa_audit init  /path/to/project                 # navigation cache (once per version)
+uv run python -m app.services.yasa_audit run   /path/to/project --out out/ \
        --deploy "Linux container, Node 22"                               # build + triage
-python -m app.services.yasa_audit trace /path/to/project --out out-a/    # baseline: agent tracing only
-python -m app.services.yasa_audit authz /path/to/project --out out-z/ \
+uv run python -m app.services.yasa_audit trace /path/to/project --out out-a/    # baseline: agent tracing only
+uv run python -m app.services.yasa_audit authz /path/to/project --out out-z/ \
        --product "Roles: user, admin. Public by design: /login, /search"  # access control
 ```
 
@@ -68,9 +69,8 @@ is needed. `task.py` then runs, within `timeout_seconds` (default 1800):
 LLM settings come from the user's DeepAudit LLM config (then the environment); the provider must be
 OpenAI-compatible with tool calling. Cancelling the task stops agent loops and pending units. Run
 directories (rules, SARIF, transcripts, `not_reviewed`) go to `$YASA_AUDIT_RUNS_DIR/<task id>`
-(default `/tmp/deepaudit-yasa-runs`). The backend process needs `YASA_BIN`, `YASAMCP_BIN`, `YASA_RG_BIN`
-and `YASAMCP_TOOLS_DIR` (see Setup); the stock backend image does not include these tools, so run
-`setup_yasa.sh` in the image or mount `~/.yasamcp`.
+(default `/tmp/deepaudit-yasa-runs`). The backend finds the tools installed by `setup_yasa.sh` (see Setup);
+these variables are read from the process environment, not from `backend/.env`.
 
 ## Measured (deepseek-flash, 2026-11-05/06)
 

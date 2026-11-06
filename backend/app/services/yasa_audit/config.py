@@ -16,6 +16,12 @@ DEFAULT_HOME = Path(os.environ.get("YASAMCP_HOME", Path.home() / ".yasamcp"))
 DEFAULT_TOOLS = DEFAULT_HOME / "tools" / "linux-x86-64"
 
 
+def _default_yasamcp() -> str:
+    """yasa-mcp from the virtualenv created by scripts/setup_yasa.sh, else the one on PATH."""
+    venv_bin = DEFAULT_HOME / "venv" / "bin" / "yasa-mcp"
+    return str(venv_bin) if venv_bin.exists() else "yasa-mcp"
+
+
 @dataclass
 class AuditConfig:
     # LLM (OpenAI-compatible chat completions with tool calling)
@@ -32,7 +38,7 @@ class AuditConfig:
     yasa_bin: str = field(
         default_factory=lambda: os.environ.get("YASA_BIN", str(DEFAULT_TOOLS / "yasa" / "yasa"))
     )
-    yasamcp_bin: str = field(default_factory=lambda: os.environ.get("YASAMCP_BIN", "yasa-mcp"))
+    yasamcp_bin: str = field(default_factory=lambda: os.environ.get("YASAMCP_BIN", _default_yasamcp()))
     yasamcp_tools_dir: str = field(
         default_factory=lambda: os.environ.get("YASAMCP_TOOLS_DIR", str(DEFAULT_HOME / "tools"))
     )

@@ -106,14 +106,14 @@ then residual sinks by class) so that anything cut by the budget is the least se
 | --- | --- | --- | --- | --- |
 | juice (10k LOC) | `run` with `--deploy` | 16/18 data-flow, 0 negatives hit | 11.3 min | 3.0 M |
 | powerjob v5.1.2 (45k LOC Java/Spring) | `authz` with `--product` | 2/2 known CVEs (CVE-2025-11580, CVE-2025-11581) | 1.1 min | 1.0 M |
-| powerjob v5.1.2 | `run` | 37 reports from residual tracing, not yet reviewed | 20.4 min | 7.7 M |
+| powerjob v5.1.2 | `run` | 37 reports from residual tracing; manual review: 12 real, 15 by design, 10 false positives | 20.4 min | 7.7 M |
 
 PowerJob's two stages ran in parallel after a 40 s index build: about 21 minutes in total.
 
 - The access-control stage found both CVEs through peer comparison: `/user/list` lacks the `@ApiPermission`
   that its neighbours carry, and the global interceptor lets unannotated handlers through without login.
-  It reported 14 further endpoints; these are under manual review and their details are deliberately not
-  recorded here.
+  It reported 14 further endpoints. Details of these and of the 12 confirmed data-flow reports are withheld
+  until they have gone through coordinated disclosure.
 - The engine did not contribute on PowerJob: with default entrypoint collection YASA was killed for memory on
   an 8 GB machine (whole repository, and `powerjob-server` alone at 24k LOC), and a single custom controller
   entrypoint was not resolved (entryPointCount 0). The pipeline degraded to residual-sink tracing and still

@@ -405,3 +405,13 @@ async def test_execute_yasa_task_saves_findings(tmp_path, monkeypatch):
     assert t.findings_count == 2 and t.tokens_used == 150 and t.status == "completed"
     assert (t.high_count, t.medium_count) == (1, 1) and t.security_score == 42.0
     assert "emit_task_complete" in events and "emit_warning" in events  # C.java not reviewed
+
+
+def test_count_sources_skips_vendor_dirs(tmp_path):
+    from app.services.yasa_audit.task import count_sources
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "node_modules" / "x").mkdir(parents=True)
+    for p in ("src/A.java", "src/b.jsp", "src/c.ts", "src/readme.md", "node_modules/x/i.js"):
+        (tmp_path / p).write_text("")
+    assert count_sources(tmp_path) == 3
