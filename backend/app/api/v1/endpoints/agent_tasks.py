@@ -10,7 +10,7 @@ import os
 import re
 import zipfile
 import shutil
-from typing import Any, List, Optional, Dict, Set
+from typing import Any, List, Literal, Optional, Dict, Set
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -81,6 +81,9 @@ class AgentTaskCreate(BaseModel):
     # Agent 配置
     max_iterations: int = Field(50, ge=1, le=200, description="最大迭代次数")
     timeout_seconds: int = Field(1800, ge=60, le=7200, description="超时时间（秒）")
+
+    # 审计引擎: agent = 动态 Agent 树; yasa = YASA 混合审计（Agent 建规则 + 引擎 + 分组复核 + 权限审计）
+    audit_mode: Literal["agent", "yasa"] = Field("agent", description="审计引擎")
 
 
 class AgentTaskResponse(BaseModel):
@@ -228,6 +231,13 @@ _running_orchestrators: Dict[str, Any] = {}
 _running_event_managers: Dict[str, EventManager] = {}
 # 🔥 已取消的任务集合（用于前置操作的取消检查）
 _cancelled_tasks: Set[str] = set()
+
+
+def _audit_scope_with_mode(scope: Optional[dict], mode: str) -> Optional[dict]:
+    """audit_scope 中记录审计引擎（不新增数据库列）。"""
+    if mode == "agent" and not scope:
+        return scope
+    return {**(scope or {}), "mode": mode}
 
 
 def is_task_cancelled(task_id: str) -> bool:
@@ -396,6 +406,17 @@ async def _execute_agent_task(task_id: str):
 
             # 创建 LLM 服务
             llm_service = LLMService(user_config=user_config)
+
+            # 🔬 YASA 混合审计模式：独立流水线，复用任务状态 / 事件 / 发现保存
+            if (task.audit_scope or {}).get("mode") == "yasa":
+                from app.services.yasa_audit.task import execute_yasa_task
+                await execute_yasa_task(
+                    db, task, project_root, llm_service.config, event_emitter,
+                    is_cancelled=lambda: is_task_cancelled(task_id),
+                    save_findings=_save_findings,
+                    score=_calculate_security_score,
+                )
+                return
 
             # 初始化工具集 - 传递排除模式和目标文件以及预初始化的 sandbox_manager
             # 🔥 传递 event_emitter 以发送索引进度，传递 task_id 以支持取消
@@ -1560,6 +1581,7 @@ async def create_agent_task(
         target_files=request.target_files,
         max_iterations=request.max_iterations or 50,
         timeout_seconds=request.timeout_seconds or 1800,
+        audit_scope=_audit_scope_with_mode(request.audit_scope, request.audit_mode),
         created_by=current_user.id,
     )
     

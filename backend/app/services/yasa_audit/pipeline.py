@@ -115,7 +115,8 @@ def _cand_rank(c: dict) -> int:
     return min((CLASS_RANK.get(k, 3) for k in c.get("suspected_classes", [])), default=3)
 
 
-def _schedule(units: list, work, workers: int, deadline: float | None) -> tuple[list[dict], list]:
+def _schedule(units: list, work, workers: int, deadline: float | None,
+              stop=None) -> tuple[list[dict], list]:
     """Run work(i, unit) for units in order with a thread pool. Units that would start with less
     than MIN_UNIT_S left before the deadline are skipped and returned separately."""
     skipped: list = []
@@ -123,7 +124,7 @@ def _schedule(units: list, work, workers: int, deadline: float | None) -> tuple[
 
     def guarded(i_unit: tuple[int, object]) -> dict | None:
         i, unit = i_unit
-        if deadline is not None and time.time() > deadline - MIN_UNIT_S:
+        if (stop and stop()) or (deadline is not None and time.time() > deadline - MIN_UNIT_S):
             with lock:
                 skipped.append(unit)
             return None
@@ -233,7 +234,7 @@ def triage(cfg: AuditConfig, root: Path, engine_dir: Path, out: Path, group: str
 
     results, skipped = _schedule(
         units, lambda i, u: _triage_unit(cfg, root, out / f"unit-{i:03d}", u[0], u[1], deploy, deadline),
-        cfg.workers, deadline)
+        cfg.workers, deadline, cfg.stopped)
     not_reviewed = [c["origin"] for u, _, _ in skipped for c in u.get("candidates", [u])]
 
     findings = [f for r in results for f in r["findings"]]
@@ -287,7 +288,7 @@ def authz(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", product: st
             f["_unit"] = unit["origin"]
         return {"findings": tb.findings, **_metrics(llm, res)}
 
-    results, skipped = _schedule(units, review, cfg.workers, deadline)
+    results, skipped = _schedule(units, review, cfg.workers, deadline, cfg.stopped)
     not_reviewed = [f for u in skipped for f in u["batch_files"]]
     findings = [f for r in results for f in r["findings"]]
     (out / "findings.json").write_text(json.dumps({"findings": findings, "not_reviewed": not_reviewed},

@@ -52,6 +52,26 @@ and a `transcript.jsonl` per agent.
 
 `--deploy` matters: whether a path check can be bypassed with a backslash depends on the OS, for example.
 
+## In DeepAudit (task system + web UI)
+
+The new-audit dialog has a third mode, **YASA 混合审计**, with an optional product-context field. It
+creates a normal agent task (`POST /api/v1/agent-tasks/` with `audit_mode: "yasa"`); the mode and the
+optional `product` / `deploy` / `stages` / `workers` settings are kept in `audit_scope`, so no DB migration
+is needed. `task.py` then runs, within `timeout_seconds` (default 1800):
+
+1. `yasa-mcp init` (navigation cache; on failure the run continues with grep/read only)
+2. dataflow (build + triage) and access control (authz) side by side, workers split about 2:1
+3. findings saved through `_save_findings`, so the task page, finding status workflow and reports work as
+   for agent tasks. Triage verdicts become confidence (confirmed 0.85, likely 0.6, one severity lower), not
+   `is_verified`: nothing is executed.
+
+LLM settings come from the user's DeepAudit LLM config (then the environment); the provider must be
+OpenAI-compatible with tool calling. Cancelling the task stops agent loops and pending units. Run
+directories (rules, SARIF, transcripts, `not_reviewed`) go to `$YASA_AUDIT_RUNS_DIR/<task id>`
+(default `/tmp/deepaudit-yasa-runs`). The backend process needs `YASA_BIN`, `YASAMCP_BIN`, `YASA_RG_BIN`
+and `YASAMCP_TOOLS_DIR` (see Setup); the stock backend image does not include these tools, so run
+`setup_yasa.sh` in the image or mount `~/.yasamcp`.
+
 ## Measured (deepseek-flash, 2026-11-05/06)
 
 | Target | Recall | Negatives hit | Tokens | Wall time |

@@ -8,6 +8,7 @@ backend/scripts/setup_yasa.sh and can be overridden with YASA_* variables.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -49,6 +50,12 @@ class AuditConfig:
     triage_group_budget_cap: int = 24
     trace_budget: int = 80
     workers: int = 6
+
+    # Cooperative cancellation: agent loops and the unit scheduler stop when this returns True.
+    should_stop: Callable[[], bool] | None = field(default=None, repr=False, compare=False)
+
+    def stopped(self) -> bool:
+        return bool(self.should_stop and self.should_stop())
 
     def require_llm(self) -> None:
         missing = [

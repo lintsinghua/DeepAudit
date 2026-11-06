@@ -44,6 +44,8 @@ def run_agent(llm: LLM, tb: Toolbox, tools: list[dict], system: str, user: str, 
     with open(log_path, "w") as log:
         while steps < budget + 6 and not tb.finished:
             _compact(messages)
+            if tb.cfg.stopped():
+                break
             now = time.time()
             if deadline is not None and now > deadline + 60:
                 timed_out = True
