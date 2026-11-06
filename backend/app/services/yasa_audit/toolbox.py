@@ -15,6 +15,7 @@ import json
 import shutil
 import subprocess
 import tempfile
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -81,6 +82,7 @@ class Toolbox:
         self.max_yasa_runs = cfg.builder_max_yasa_runs
         self.compact_engine_output = True
         self.yasa_runs = 0
+        self.deadline: float | None = None  # epoch seconds; engine runs never exceed it
         self.registry: dict[str, dict] = {}
         self.findings: list[dict] = []
         self.finished = False
@@ -213,6 +215,11 @@ class Toolbox:
             return "error: yasa_run is not available in this stage"
         if self.yasa_runs >= self.max_yasa_runs:
             return f"error: yasa_run budget ({self.max_yasa_runs} runs) exhausted"
+        timeout = self.cfg.yasa_timeout_s
+        if self.deadline is not None:
+            timeout = int(min(timeout, self.deadline - time.time()))
+            if timeout < 60:
+                return "error: not enough time left for another engine run; call finish"
         self.yasa_runs += 1
         n = self.yasa_runs
         out_dir = self.run_dir / f"yasa-{n}"
@@ -251,9 +258,10 @@ class Toolbox:
         if entrypoint_mode:
             cmd += ["--entrypointMode", entrypoint_mode]
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=self.cfg.yasa_timeout_s)
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         except subprocess.TimeoutExpired:
-            return f"error: YASA timed out after {self.cfg.yasa_timeout_s}s"
+            return (f"error: YASA timed out after {timeout}s; narrow the entrypoints "
+                    "(see playbook: bootstrap file as the only entrypoint) or finish")
         except FileNotFoundError:
             return "error: YASA binary not found (set YASA_BIN or run setup_yasa.sh)"
         (out_dir / "stdout.txt").write_text(r.stdout[-200000:] + "\n" + r.stderr[-50000:])

@@ -149,6 +149,15 @@ GT_AUTHZ: dict[str, dict] = {
                 "routes/b2bOrder.ts", "routes/search.ts"],
     },
 }
+GT_AUTHZ["powerjob"] = {
+    "pos": [("PA-01", "powerjob-server/powerjob-server-starter/src/main/java/tech/powerjob/server/web/controller/"
+             "UserInfoController.java", None, "list"),
+            ("PA-02", "powerjob-server/powerjob-server-starter/src/main/java/tech/powerjob/server/openapi/"
+             "OpenAPIController.java",
+             "powerjob-server/powerjob-server-starter/src/main/java/tech/powerjob/server/openapi/"
+             "OpenApiInterceptor.java", "")],
+    "neg": [],
+}
 AUTHZ_CWES = {"CWE-306", "CWE-862", "CWE-863", "CWE-639", "CWE-284", "CWE-285", "CWE-552", "CWE-548",
               "CWE-538", "CWE-200", "CWE-425", "CWE-287", "CWE-668"}
 

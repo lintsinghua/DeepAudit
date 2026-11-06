@@ -176,3 +176,88 @@ def test_java_entries(tmp_path):
     (tmp_path / "WebContent" / "delptnt.jsp").write_text("<% %>")
     got = {(e["route"], e["file"]) for e in java_entries(tmp_path)}
     assert got == {("/Plogin", "src/Login.java"), ("/delptnt.jsp", "WebContent/delptnt.jsp")}
+
+
+def test_schedule_respects_deadline_and_order():
+    import time as _t
+
+    from app.services.yasa_audit.pipeline import MIN_UNIT_S, _schedule
+
+    seen = []
+    results, skipped = _schedule(["a", "b", "c"], lambda i, u: seen.append(u) or {"findings": [u]},
+                                 workers=1, deadline=None)
+    assert seen == ["a", "b", "c"] and skipped == []
+    results, skipped = _schedule(["a", "b"], lambda i, u: {"findings": [u]}, workers=2,
+                                 deadline=_t.time() + MIN_UNIT_S / 2)
+    assert results == [] and sorted(skipped) == ["a", "b"]
+
+
+def test_candidate_rank_prefers_engine_then_severe_classes():
+    from app.services.yasa_audit.pipeline import _cand_rank
+
+    assert _cand_rank({"origin": "engine:R1-F1"}) == 0
+    assert _cand_rank({"origin": "residual:a.ts:1", "suspected_classes": ["CWE-89"]}) == 1
+    assert _cand_rank({"origin": "residual:a.ts:2", "suspected_classes": ["CWE-79"]}) == 3
+
+
+def test_agent_loop_stops_after_deadline(tmp_path):
+    import time as _t
+    from types import SimpleNamespace
+
+    from app.services.yasa_audit.agent_loop import run_agent
+
+    class FakeLLM:
+        def chat(self, messages, tools=None):
+            call = SimpleNamespace(id="c1", function=SimpleNamespace(name="grep", arguments='{"pattern": "x"}'))
+            return SimpleNamespace(content="", tool_calls=[call])
+
+    tb = Toolbox(AuditConfig(), tmp_path, tmp_path, enable_yasa=False)
+    res = run_agent(FakeLLM(), tb, tool_schemas(enable_yasa=False), "sys", "user", budget=50,
+                    log_path=tmp_path / "t.jsonl", deadline=_t.time() - 120)
+    assert res["timed_out"] and res["steps"] == 0
+
+
+SPRING_CTRL = """package x;
+@Slf4j
+@RestController
+@RequestMapping("/user")
+public class UserInfoController {
+
+    /**
+     * list users
+     */
+    @GetMapping("/list")
+    public ResultDTO<List<User>> list(@RequestParam(required = false) String name) {
+        return null;
+    }
+
+    @PostMapping("/query")
+    @ApiPermission(name = "User-Query", requiredPermission = Permission.SU)
+    public ResultDTO<List<User>> query(@RequestBody Query q) {
+        return null;
+    }
+}
+"""
+
+SPRING_CFG = """public class WebConfig implements WebMvcConfigurer {
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(authInterceptor)
+                .addPathPatterns("/**")
+                .excludePathPatterns("/css/**");
+    }
+}
+"""
+
+
+def test_spring_entries_and_global_guards(tmp_path):
+    from app.services.yasa_audit.entrypoints import java_global_guards, spring_entries
+
+    (tmp_path / "UserInfoController.java").write_text(SPRING_CTRL)
+    (tmp_path / "WebConfig.java").write_text(SPRING_CFG)
+    routes = {e["route"]: e for e in spring_entries(tmp_path)}
+    assert set(routes) == {"/user/list", "/user/query"}
+    assert routes["/user/list"]["guards"] == [] and routes["/user/list"]["handler"] == "list"
+    assert routes["/user/query"]["guards"][0].startswith("@ApiPermission")
+    assert routes["/user/query"]["method"] == "POST"
+    guards = java_global_guards(tmp_path)
+    assert len(guards) == 1 and 'addPathPatterns("/**")' in guards[0]

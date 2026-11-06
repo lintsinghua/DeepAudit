@@ -7,6 +7,8 @@
 #   <dest>/juice       OWASP Juice Shop backend at commit 717f5ef (MIT): routes, lib, models, data, server.ts
 #   <dest>/juice-mini  21 route files + lib/models/data, with the trimmed server.ts from this directory
 #   <dest>/hms         projectworlds Hospital-Management-System (Java Servlet + JSP), vendored assets removed
+#   <dest>/powerjob    PowerJob v5.1.2 (Apache-2.0, Java/Spring, ~45k LOC), before the fixes for
+#                      CVE-2025-11580 and CVE-2025-11581
 set -euo pipefail
 
 DEST="${1:?usage: prepare_targets.sh <dest-dir>}"
@@ -49,4 +51,11 @@ find "$DEST/hms" -type f \( -name '*.js' -o -name '*.css' -o -name '*.map' -o -n
   -o -name '*.ttf' -o -name '*.eot' -o -name '*.svg' -o -name '*.png' -o -name '*.jpg' -o -name '*.gif' \
   -o -name '*.jar' -o -name '*.class' \) -delete
 
-echo "targets ready in $DEST: juice, juice-mini, hms"
+# ---- PowerJob ----
+rm -rf "$DEST/powerjob"
+git clone -q --depth 1 --branch v5.1.2 https://github.com/PowerJob/PowerJob.git "$DEST/powerjob"
+[ "$(git -C "$DEST/powerjob" rev-parse HEAD)" = "332179de26b44f0a949f7594ce9f57ee26fb6b27" ] \
+  || echo "warning: PowerJob v5.1.2 tag moved" >&2
+rm -rf "$DEST/powerjob/.git" "$DEST/powerjob/powerjob-server/powerjob-server-starter/src/main/resources/static"
+
+echo "targets ready in $DEST: juice, juice-mini, hms, powerjob"

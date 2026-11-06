@@ -29,3 +29,14 @@ juice-mini:
     - {id: JA-N03, file: routes/likeProductReviews.ts, why: "isAuthorized; liking another user's review is intended"}
     - {id: JA-N04, file: routes/b2bOrder.ts, why: "/b2b/v2 behind isAuthorized"}
     - {id: JA-N05, file: routes/search.ts, why: "public product search by design"}
+powerjob:
+  # PowerJob v5.1.2. PowerJobAuthInterceptor lets any handler without @ApiPermission through without login.
+  pos:
+    - {id: PA-01, cve: CVE-2025-11580, file: powerjob-server/powerjob-server-starter/src/main/java/tech/powerjob/server/web/controller/UserInfoController.java, cwe: CWE-862,
+       why: "GET /user/list has no @ApiPermission (peer /user/query requires SU) and returns all users"}
+    - {id: PA-02, cve: CVE-2025-11581, file: powerjob-server/powerjob-server-starter/src/main/java/tech/powerjob/server/openapi/OpenAPIController.java,
+       alt: powerjob-server/powerjob-server-starter/src/main/java/tech/powerjob/server/openapi/OpenApiInterceptor.java, cwe: CWE-862,
+       why: "/openApi/runJob: OpenApiInterceptor passes everything when open-api auth is disabled (default) and matches its allow-list with endsWith; runJob only checks that the job belongs to the given appId"}
+  neg:
+    - {id: PA-N01, file: powerjob-server/powerjob-server-starter/src/main/java/tech/powerjob/server/web/controller/UserInfoController.java,
+       note: "same file as PA-01; /user/detail and /user/enable|disable check login/permission inside the handler (not scored separately)"}

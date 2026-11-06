@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .agent_loop import run_agent
 from .config import AuditConfig
-from .entrypoints import entries_for
+from .entrypoints import entries_for, global_guards_for
 from .llm import LLM
 from .prompts import authz_prompt, builder_prompt, trace_prompt, triage_prompt
 from .toolbox import Toolbox, tool_schemas
@@ -101,19 +102,57 @@ def inventory(tb: Toolbox, lang: str, extra_fsigs: list[str]) -> list[dict]:
     return list(hits.values())
 
 
+# Lower is reviewed first: engine findings, then residual sinks by how bad the class usually is.
+CLASS_RANK = {"CWE-94": 1, "CWE-78": 1, "CWE-89": 1, "CWE-943": 1, "CWE-502": 1,
+              "CWE-611": 2, "CWE-22": 2, "CWE-918": 2, "CWE-1336": 2, "wrapper": 2,
+              "CWE-79": 3, "CWE-601": 3}
+MIN_UNIT_S = 90  # do not start a unit with less time left than this
+
+
+def _cand_rank(c: dict) -> int:
+    if c["origin"].startswith("engine:"):
+        return 0
+    return min((CLASS_RANK.get(k, 3) for k in c.get("suspected_classes", [])), default=3)
+
+
+def _schedule(units: list, work, workers: int, deadline: float | None) -> tuple[list[dict], list]:
+    """Run work(i, unit) for units in order with a thread pool. Units that would start with less
+    than MIN_UNIT_S left before the deadline are skipped and returned separately."""
+    skipped: list = []
+    lock = threading.Lock()
+
+    def guarded(i_unit: tuple[int, object]) -> dict | None:
+        i, unit = i_unit
+        if deadline is not None and time.time() > deadline - MIN_UNIT_S:
+            with lock:
+                skipped.append(unit)
+            return None
+        try:
+            return work(i, unit)
+        except Exception as e:  # keep the batch going
+            return {"findings": [], "prompt_tokens": 0, "completion_tokens": 0, "steps": 0,
+                    "error": str(e)}
+
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        results = [r for r in ex.map(guarded, enumerate(units)) if r is not None]
+    return results, skipped
+
+
 def _metrics(llm: LLM, extra: dict) -> dict:
     return {"prompt_tokens": llm.usage.prompt, "completion_tokens": llm.usage.completion,
             "llm_calls": llm.usage.calls, **extra}
 
 
-def build(cfg: AuditConfig, root: Path, out: Path, deploy: str = "") -> dict:
+def build(cfg: AuditConfig, root: Path, out: Path, deploy: str = "",
+          deadline: float | None = None) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     tb = Toolbox(cfg, root, out, enable_yasa=True)
+    tb.deadline = deadline
     tools = tool_schemas(enable_yasa=True, with_report=False)
     llm = LLM(cfg)
     res = run_agent(llm, tb, tools, builder_prompt(cfg.builder_budget, cfg.builder_max_yasa_runs, deploy),
                     f"Build engine rules for the project. Top-level listing:\n{tb.list_dir('.', 1)}",
-                    cfg.builder_budget, out / "transcript.jsonl")
+                    cfg.builder_budget, out / "transcript.jsonl", deadline=deadline)
     m = _metrics(llm, {"stage": "build", "yasa_runs": tb.yasa_runs,
                        "engine_findings": len(tb.registry), **res})
     (out / "metrics.json").write_text(json.dumps(m, indent=1))
@@ -134,20 +173,22 @@ def _wrapper_sinks(engine_dir: Path, lang: str) -> list[str]:
     return sorted(found)
 
 
-def _triage_unit(cfg: AuditConfig, root: Path, out: Path, unit: dict, budget: int, deploy: str) -> dict:
+def _triage_unit(cfg: AuditConfig, root: Path, out: Path, unit: dict, budget: int, deploy: str,
+                 deadline: float | None = None) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     tb = Toolbox(cfg, root, out, enable_yasa=False)
     tools = [t for t in tool_schemas(enable_yasa=False) if t["function"]["name"] != "list_dir"]
     llm = LLM(cfg)
     res = run_agent(llm, tb, tools, triage_prompt(budget, deploy),
-                    json.dumps(unit, ensure_ascii=False, indent=1), budget, out / "transcript.jsonl")
+                    json.dumps(unit, ensure_ascii=False, indent=1), budget, out / "transcript.jsonl",
+                    deadline=deadline)
     for f in tb.findings:
         f["_unit"] = unit["origin"]
     return {"findings": tb.findings, **_metrics(llm, res)}
 
 
 def triage(cfg: AuditConfig, root: Path, engine_dir: Path, out: Path, group: str = "file",
-           deploy: str = "") -> dict:
+           deploy: str = "", deadline: float | None = None) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
     lang = detect_lang(root)
@@ -170,35 +211,34 @@ def triage(cfg: AuditConfig, root: Path, engine_dir: Path, out: Path, group: str
                "code": h["code"], "suspected_classes": sorted(h["classes"])} for h in residual]
     (out / "candidates.json").write_text(json.dumps(cands, indent=1, ensure_ascii=False))
 
-    units: list[tuple[dict, int]] = []
+    units: list[tuple[dict, int, int]] = []  # (unit, budget, priority)
     if group == "file":
         by_file: dict[str, list[dict]] = {}
         for c in cands:
             by_file.setdefault(c["sink"].rsplit(":", 1)[0], []).append(c)
         for f, cs in sorted(by_file.items()):
+            rank = min(_cand_rank(c) for c in cs)
             if len(cs) == 1:
-                units.append((cs[0], cfg.triage_budget))
+                units.append((cs[0], cfg.triage_budget, rank))
             else:
                 units.append(({"origin": f"group:{f}", "candidates": cs},
-                              min(cfg.triage_budget + 4 * (len(cs) - 1), cfg.triage_group_budget_cap)))
+                              min(cfg.triage_budget + 4 * (len(cs) - 1), cfg.triage_group_budget_cap),
+                              rank))
     else:
-        units = [(c, cfg.triage_budget) for c in cands]
+        units = [(c, cfg.triage_budget, _cand_rank(c)) for c in cands]
+    units.sort(key=lambda u: u[2])  # stable: engine first, then the worst residual classes
 
-    results: list[dict] = []
-    with ThreadPoolExecutor(max_workers=cfg.workers) as ex:
-        futs = [ex.submit(_triage_unit, cfg, root, out / f"unit-{i:03d}", u, b, deploy)
-                for i, (u, b) in enumerate(units)]
-        for fut in futs:
-            try:
-                results.append(fut.result())
-            except Exception as e:
-                results.append({"findings": [], "prompt_tokens": 0, "completion_tokens": 0,
-                                "steps": 0, "error": str(e)})
+    results, skipped = _schedule(
+        units, lambda i, u: _triage_unit(cfg, root, out / f"unit-{i:03d}", u[0], u[1], deploy, deadline),
+        cfg.workers, deadline)
+    not_reviewed = [c["origin"] for u, _, _ in skipped for c in u.get("candidates", [u])]
 
     findings = [f for r in results for f in r["findings"]]
-    (out / "findings.json").write_text(json.dumps({"findings": findings}, indent=1, ensure_ascii=False))
+    (out / "findings.json").write_text(json.dumps({"findings": findings, "not_reviewed": not_reviewed},
+                                                  indent=1, ensure_ascii=False))
     m = {"stage": "triage", "engine_candidates": len(eng_by_sink), "inventory": len(inv),
          "residual": len(residual), "units": len(units), "group": group,
+         "skipped_units": len(skipped), "not_reviewed": len(not_reviewed),
          "prompt_tokens": sum(r["prompt_tokens"] for r in results),
          "completion_tokens": sum(r["completion_tokens"] for r in results),
          "steps": sum(r["steps"] for r in results), "errors": sum(1 for r in results if r.get("error")),
@@ -208,7 +248,7 @@ def triage(cfg: AuditConfig, root: Path, engine_dir: Path, out: Path, group: str
 
 
 def authz(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", product: str = "",
-          batch: int = 3, budget: int = 16) -> dict:
+          batch: int = 3, budget: int = 16, deadline: float | None = None) -> dict:
     """Access-control stage: deterministic entry inventory, then grouped review in fresh contexts.
 
     Every unit gets the full route table so reviewers can compare peers. No RAG index is needed:
@@ -217,35 +257,39 @@ def authz(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", product: st
     """
     out.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
-    entries = entries_for(root, detect_lang(root))
-    table = [f"{e['method']} {e['route']} -> {e['file']} guards={e['guards']}" for e in entries]
+    lang = detect_lang(root)
+    entries = entries_for(root, lang)
+    global_guards = global_guards_for(root, lang)
+    table = [f"{e['method']} {e['route']} -> {e['file']}:{e['line']} guards={e['guards']}" for e in entries]
     by_file: dict[str, list[dict]] = {}
     for e in entries:
         by_file.setdefault(e["file"], []).append(e)
     files = sorted(by_file)
     units = [{"origin": f"authz:{','.join(files[i:i + batch])}", "batch_files": files[i:i + batch],
-              "entries": [e for f in files[i:i + batch] for e in by_file[f]], "route_table": table}
+              "entries": [e for f in files[i:i + batch] for e in by_file[f]],
+              "global_guards": global_guards, "route_table": table}
              for i in range(0, len(files), batch)]
     (out / "entries.json").write_text(json.dumps(entries, indent=1, ensure_ascii=False))
 
-    def review(i_unit: tuple[int, dict]) -> dict:
-        i, unit = i_unit
+    def review(i: int, unit: dict) -> dict:
         sub = out / f"unit-{i:03d}"
         sub.mkdir(parents=True, exist_ok=True)
         tb = Toolbox(cfg, root, sub, enable_yasa=False)
         tools = [t for t in tool_schemas(enable_yasa=False) if t["function"]["name"] != "list_dir"]
         llm = LLM(cfg)
         res = run_agent(llm, tb, tools, authz_prompt(budget, deploy, product),
-                        json.dumps(unit, ensure_ascii=False, indent=1), budget, sub / "transcript.jsonl")
+                        json.dumps(unit, ensure_ascii=False, indent=1), budget, sub / "transcript.jsonl",
+                        deadline=deadline)
         for f in tb.findings:
             f["_unit"] = unit["origin"]
         return {"findings": tb.findings, **_metrics(llm, res)}
 
-    with ThreadPoolExecutor(max_workers=cfg.workers) as ex:
-        results = list(ex.map(review, enumerate(units)))
+    results, skipped = _schedule(units, review, cfg.workers, deadline)
+    not_reviewed = [f for u in skipped for f in u["batch_files"]]
     findings = [f for r in results for f in r["findings"]]
-    (out / "findings.json").write_text(json.dumps({"findings": findings}, indent=1, ensure_ascii=False))
-    m = {"stage": "authz", "entries": len(entries), "units": len(units),
+    (out / "findings.json").write_text(json.dumps({"findings": findings, "not_reviewed": not_reviewed},
+                                                  indent=1, ensure_ascii=False))
+    m = {"stage": "authz", "entries": len(entries), "units": len(units), "skipped_units": len(skipped),
          "prompt_tokens": sum(r["prompt_tokens"] for r in results),
          "completion_tokens": sum(r["completion_tokens"] for r in results),
          "steps": sum(r["steps"] for r in results), "wall_s": round(time.time() - t0, 1),
@@ -254,14 +298,15 @@ def authz(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", product: st
     return m
 
 
-def trace(cfg: AuditConfig, root: Path, out: Path, deploy: str = "") -> dict:
+def trace(cfg: AuditConfig, root: Path, out: Path, deploy: str = "",
+          deadline: float | None = None) -> dict:
     """Mode A baseline: one agent traces source -> sink with navigation tools only."""
     out.mkdir(parents=True, exist_ok=True)
     tb = Toolbox(cfg, root, out, enable_yasa=False)
     llm = LLM(cfg)
     res = run_agent(llm, tb, tool_schemas(enable_yasa=False), trace_prompt(cfg.trace_budget, deploy),
                     f"Audit the project. Top-level listing:\n{tb.list_dir('.', 1)}",
-                    cfg.trace_budget, out / "transcript.jsonl")
+                    cfg.trace_budget, out / "transcript.jsonl", deadline=deadline)
     (out / "findings.json").write_text(json.dumps({"findings": tb.findings}, indent=1,
                                                   ensure_ascii=False))
     m = _metrics(llm, {"stage": "trace", "n_findings": len(tb.findings), **res})

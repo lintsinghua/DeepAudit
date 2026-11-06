@@ -18,8 +18,91 @@ IMPORT_RE = re.compile(r"import\s+(?:\{([^}]+)\}|\*\s+as\s+(\w+)|(\w+))\s+from\s
 WRAPPERS = {"utils.asyncHandler", "uploadToMemory.single", "uploadToDisk.single"}
 
 
-def java_entries(root: Path) -> list[dict]:
+MAPPING_RE = re.compile(r"@(Get|Post|Put|Delete|Patch|Request)Mapping\b(\((.*)\))?")
+ANNOT_RE = re.compile(r"^\s*@(\w+)(\(.*)?$")
+METHOD_RE = re.compile(r"^\s*(public|protected|private)?\s*[\w<>\[\], ?.]+\s+(\w+)\s*\(")
+
+
+def _mapping_path(args: str | None) -> str:
+    """First path in a mapping annotation: a string literal, or the raw constant expression."""
+    if not args:
+        return ""
+    m = re.search(r'"([^"]*)"', args)
+    if m:
+        return m.group(1)
+    m = re.search(r"(?:value|path)\s*=\s*\{?\s*([\w.]+)", args) or re.match(r"\s*\{?\s*([\w.]+)", args)
+    return "{" + m.group(1) + "}" if m and m.group(1) not in ("method", "produces", "consumes") else ""
+
+
+def _annotation_block(lines: list[str], idx: int) -> list[str]:
+    """Annotation lines directly above line idx (0-based), skipping javadoc and blank lines."""
+    out: list[str] = []
+    j = idx - 1
+    while j >= 0:
+        s = lines[j].strip()
+        if s.startswith("@"):
+            out.insert(0, s)
+        elif s in ("", "*/") or s.startswith(("*", "/*", "//")):
+            pass
+        else:
+            break
+        j -= 1
+    return out
+
+
+def spring_entries(root: Path) -> list[dict]:
+    """@RestController / @Controller handler methods with the non-mapping annotations as guards."""
     out = []
+    for f in sorted(root.rglob("*.java")):
+        if "/test/" in str(f):
+            continue
+        txt = f.read_text(errors="ignore")
+        if not re.search(r"@(Rest)?Controller\b", txt):
+            continue
+        lines = txt.splitlines()
+        cls_idx = next((i for i, ln in enumerate(lines) if re.search(r"\bclass\s+\w+", ln)), None)
+        if cls_idx is None:
+            continue
+        cls_annots = _annotation_block(lines, cls_idx)
+        prefix = next((_mapping_path(m.group(3)) for a in cls_annots if (m := MAPPING_RE.search(a))), "")
+        cls_guards = [a for a in cls_annots if not MAPPING_RE.search(a)
+                      and not re.match(r"@(Rest)?Controller|@Slf4j|@RequiredArgsConstructor|@Api\b|@Tag", a)]
+        for i in range(cls_idx + 1, len(lines)):
+            mm = METHOD_RE.match(lines[i])
+            if not mm or lines[i].strip().startswith(("return", "if", "for", "while", "new ")):
+                continue
+            annots = _annotation_block(lines, i)
+            mapping = next((MAPPING_RE.search(a) for a in annots if MAPPING_RE.search(a)), None)
+            if not mapping:
+                continue
+            verb = mapping.group(1).upper() if mapping.group(1) != "Request" else "ANY"
+            guards = cls_guards + [a for a in annots if not MAPPING_RE.search(a)
+                                   and not a.startswith(("@Override", "@Operation", "@ApiOperation"))]
+            out.append({"route": prefix + _mapping_path(mapping.group(3)), "method": verb,
+                        "file": str(f.relative_to(root)), "line": i + 1, "handler": mm.group(2),
+                        "guards": guards})
+    return out
+
+
+def java_global_guards(root: Path) -> list[str]:
+    """Interceptor registrations and Spring Security path rules, as compact source snippets."""
+    out = []
+    for f in sorted(root.rglob("*.java")):
+        if "/test/" in str(f):
+            continue
+        txt = f.read_text(errors="ignore")
+        rel = str(f.relative_to(root))
+        for m in re.finditer(r"registry\.addInterceptor\([^;]*;", txt, re.S):
+            line = txt[: m.start()].count("\n") + 1
+            out.append(f"{rel}:{line} " + re.sub(r"\s+", " ", m.group(0))[:300])
+        for m in re.finditer(r"\.(antMatchers|requestMatchers|mvcMatchers)\([^)]*\)\s*\.\w+\(\)", txt):
+            line = txt[: m.start()].count("\n") + 1
+            out.append(f"{rel}:{line} " + re.sub(r"\s+", " ", m.group(0))[:200])
+    return out
+
+
+def java_entries(root: Path) -> list[dict]:
+    out = spring_entries(root)
     for f in sorted(root.rglob("*.java")):
         txt = f.read_text(errors="ignore")
         for m in re.finditer(r'@WebServlet\(\s*(?:urlPatterns\s*=\s*)?\{?\s*"([^"]+)"', txt):
@@ -94,3 +177,7 @@ def express_entries(root: Path, boot: Path | None = None) -> list[dict]:
 
 def entries_for(root: Path, lang: str) -> list[dict]:
     return java_entries(root) if lang == "java" else express_entries(root)
+
+
+def global_guards_for(root: Path, lang: str) -> list[str]:
+    return java_global_guards(root) if lang == "java" else []

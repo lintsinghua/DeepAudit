@@ -39,14 +39,16 @@ class AuditConfig:
         default_factory=lambda: os.environ.get("YASA_RG_BIN", str(DEFAULT_TOOLS / "ripgrep" / "rg"))
     )
 
-    # Budgets
-    yasa_timeout_s: int = 1500
+    # Budgets. Wall time is the hard constraint: one audit should finish within time_budget_s.
+    time_budget_s: int = 1800
+    build_share: float = 0.35  # build stage (incl. engine runs) may use this share of the budget
+    yasa_timeout_s: int = 600
     builder_max_yasa_runs: int = 2
     builder_budget: int = 25
     triage_budget: int = 10
     triage_group_budget_cap: int = 24
     trace_budget: int = 80
-    workers: int = 3
+    workers: int = 6
 
     def require_llm(self) -> None:
         missing = [

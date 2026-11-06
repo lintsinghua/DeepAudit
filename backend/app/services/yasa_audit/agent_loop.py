@@ -22,16 +22,28 @@ def _compact(messages: list[dict], keep_last: int = 14, limit_chars: int = 160_0
 
 
 def run_agent(llm: LLM, tb: Toolbox, tools: list[dict], system: str, user: str, budget: int,
-              log_path: Path) -> dict:
+              log_path: Path, deadline: float | None = None) -> dict:
+    """Run until finish, the step budget, or the wall-clock deadline (epoch seconds).
+
+    Near the deadline the agent is told to report and finish; 60 s after it the loop stops.
+    """
     messages: list[dict] = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     t0 = time.time()
     steps = nudges = 0
-    warned = False
+    warned = time_warned = timed_out = False
     counts: dict[str, int] = {}
     allowed = {t["function"]["name"] for t in tools}
     with open(log_path, "w") as log:
         while steps < budget + 6 and not tb.finished:
             _compact(messages)
+            now = time.time()
+            if deadline is not None and now > deadline + 60:
+                timed_out = True
+                break
+            if deadline is not None and not time_warned and now > deadline - 30:
+                messages.append({"role": "user", "content": "Time budget reached. Report what you "
+                                 "have concluded now, then call finish."})
+                time_warned = warned = True
             if not warned and steps >= budget - 3:
                 messages.append({"role": "user", "content": "Budget nearly used. Report what you "
                                  "have concluded, then call finish."})
@@ -66,4 +78,4 @@ def run_agent(llm: LLM, tb: Toolbox, tools: list[dict], system: str, user: str, 
                                       "args": args, "content": str(result)[:3000]},
                                      ensure_ascii=False) + "\n")
     return {"steps": steps, "wall_s": round(time.time() - t0, 1), "tool_counts": counts,
-            "finished": tb.finished}
+            "finished": tb.finished, "timed_out": timed_out}

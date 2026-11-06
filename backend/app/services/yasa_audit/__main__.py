@@ -16,6 +16,7 @@ import argparse
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from .config import AuditConfig
@@ -32,7 +33,9 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--out", type=Path, required=True)
             p.add_argument("--deploy", default="",
                            help="deployment context, e.g. 'Linux container, Node 22'")
-            p.add_argument("--workers", type=int, default=3)
+            p.add_argument("--workers", type=int, default=6)
+            p.add_argument("--time-budget", type=float, default=30.0,
+                           help="wall-clock budget in minutes (default 30); unreviewed candidates are listed")
         if name == "triage":
             p.add_argument("--engine", type=Path, required=True, help="output dir of the build stage")
         if name == "authz":
@@ -50,21 +53,26 @@ def main(argv: list[str] | None = None) -> int:
         return r.returncode
 
     cfg.workers = args.workers
+    cfg.time_budget_s = int(args.time_budget * 60)
+    start = time.time()
+    deadline = start + cfg.time_budget_s
     if args.cmd == "build":
-        result = build(cfg, root, args.out, args.deploy)
+        result = build(cfg, root, args.out, args.deploy, deadline)
     elif args.cmd == "triage":
-        result = triage(cfg, root, args.engine, args.out, args.group, args.deploy)
+        result = triage(cfg, root, args.engine, args.out, args.group, args.deploy, deadline)
     elif args.cmd == "authz":
-        result = authz(cfg, root, args.out, args.deploy, args.product)
+        result = authz(cfg, root, args.out, args.deploy, args.product, deadline=deadline)
     elif args.cmd == "trace":
-        result = trace(cfg, root, args.out, args.deploy)
+        result = trace(cfg, root, args.out, args.deploy, deadline)
     else:
-        b = build(cfg, root, args.out / "build", args.deploy)
-        t = triage(cfg, root, args.out / "build", args.out / "triage", args.group, args.deploy)
+        build_deadline = start + cfg.build_share * cfg.time_budget_s
+        b = build(cfg, root, args.out / "build", args.deploy, build_deadline)
+        t = triage(cfg, root, args.out / "build", args.out / "triage", args.group, args.deploy, deadline)
         result = {"build": b, "triage": t,
                   "total_tokens": b["prompt_tokens"] + b["completion_tokens"]
                   + t["prompt_tokens"] + t["completion_tokens"],
-                  "total_wall_s": round(b["wall_s"] + t["wall_s"], 1)}
+                  "total_wall_s": round(time.time() - start, 1),
+                  "time_budget_s": cfg.time_budget_s}
         (args.out / "metrics.json").write_text(json.dumps(result, indent=1))
     print(json.dumps(result, ensure_ascii=False))
     return 0

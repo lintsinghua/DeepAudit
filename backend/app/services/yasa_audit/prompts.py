@@ -67,9 +67,10 @@ AUTHZ = """You review ACCESS CONTROL of a web application at the project root. C
 For each entry point in your batch decide, by reading the handler and the guards that actually apply:
 1. What it does and how sensitive it is (public by design / reads or writes one user's data / admin or
    destructive function / serves files).
-2. Which authentication it needs for that purpose, and which it actually has (listed middleware guards,
-   session or token checks inside the handler). Guards were computed from the bootstrap file; verify in code
-   what they do.
+2. Which authentication it needs for that purpose, and which it actually has (listed guards such as
+   middleware or annotations, global interceptors/filters in "global_guards", session or token checks inside
+   the handler). Read the code of the guards and interceptors: what happens when an annotation is absent,
+   which paths they cover, and how path matching could be bypassed.
 3. When it loads or changes an object by an id from the request, whether ownership/tenant is enforced.
 4. Compare with similar routes in the route table (peer inconsistency is a strong signal).
 Report ONLY access-control problems with report_finding: cwe one of CWE-306 (missing authentication for a
