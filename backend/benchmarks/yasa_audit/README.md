@@ -94,3 +94,30 @@ Each item in `app/services/yasa_audit/kb/yasa_playbook.md` refers to one of thes
 | V5 | Factory-returned handlers are only analyzed when the route-registering file is scanned | Juice `routes/` only: markedSourceCount 29, findingCount 0; with `server.ts`: findings |
 | V6 | `ONLY_CUSTOM` + bootstrap file (file-level) entrypoint gives the same findings much faster; a bootstrap function does not | Juice full: default 321 entrypoints 975 s; file-level `/server.ts` 88 s, same 13 sinks; `start`/`configureApp` 0 findings |
 | V7 | Generic response/log sinks inflate matchedSinkCount | Juice: default JS rule config matched 1336 sinks |
+
+## Time budget and a 45k LOC project (2026-11-06)
+
+Wall time is the hard constraint (one audit within 30 minutes); tokens are not. Defaults are now a 30-minute
+budget, 6 workers, engine runs capped at 10 minutes, and triage units ordered by priority (engine findings,
+then residual sinks by class) so that anything cut by the budget is the least severe and is listed as
+`not_reviewed`.
+
+| Target | Stage | Result | Wall | Tokens |
+| --- | --- | --- | --- | --- |
+| juice (10k LOC) | `run` with `--deploy` | 16/18 data-flow, 0 negatives hit | 11.3 min | 3.0 M |
+| powerjob v5.1.2 (45k LOC Java/Spring) | `authz` with `--product` | 2/2 known CVEs (CVE-2025-11580, CVE-2025-11581) | 1.1 min | 1.0 M |
+| powerjob v5.1.2 | `run` | 37 reports from residual tracing, not yet reviewed | 20.4 min | 7.7 M |
+
+PowerJob's two stages ran in parallel after a 40 s index build: about 21 minutes in total.
+
+- The access-control stage found both CVEs through peer comparison: `/user/list` lacks the `@ApiPermission`
+  that its neighbours carry, and the global interceptor lets unannotated handlers through without login.
+  It reported 14 further endpoints; these are under manual review and their details are deliberately not
+  recorded here.
+- The engine did not contribute on PowerJob: with default entrypoint collection YASA was killed for memory on
+  an 8 GB machine (whole repository, and `powerjob-server` alone at 24k LOC), and a single custom controller
+  entrypoint was not resolved (entryPointCount 0). The pipeline degraded to residual-sink tracing and still
+  finished in budget. Large Spring projects need either more memory or a working custom-entrypoint recipe;
+  that is open.
+- The builder used to spend its whole budget exploring large repositories; it is now reminded to run the
+  engine once half its budget is used.
