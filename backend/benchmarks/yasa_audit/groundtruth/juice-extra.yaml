@@ -1,0 +1,28 @@
+# Juice Shop server-side ground truth, supplementing the official vuln-code-snippet
+# annotations (juice-annotated.tsv). Every line below was checked in source at commit 717f5ef.
+# negatives = look dangerous but are not exploitable; a good tool should NOT report them.
+project: juice-shop
+vulns:
+  - {id: JS-E01, cwe: CWE-943, sink: routes/trackOrder.ts:18, source: "req.params.id -> $where", detector: taint}
+  - {id: JS-E02, cwe: CWE-943, sink: routes/showProductReviews.ts:36, source: "req.params.id -> $where", detector: taint}
+  - {id: JS-E03, cwe: CWE-94, sink: routes/b2bOrder.ts:23, source: "req.body.orderLinesData -> vm/notevil sandbox", detector: taint}
+  - {id: JS-E04, cwe: CWE-94, sink: routes/userProfile.ts:65, source: "stored username #{...} -> eval", detector: taint, second_order: true}
+  - {id: JS-E05, cwe: CWE-1336, sink: routes/userProfile.ts:90, source: "stored username -> pug template", detector: taint, second_order: true}
+  - {id: JS-E06, cwe: CWE-611, sink: routes/fileUpload.ts:80, source: "uploaded XML -> libxml noent", detector: taint}
+  - {id: JS-E07, cwe: CWE-776, sink: routes/fileUpload.ts:114, source: "uploaded YAML -> yaml.load", detector: taint}
+  - {id: JS-E08, cwe: CWE-918, sink: routes/profileImageUrlUpload.ts:24, source: "req.body.imageUrl -> fetch", detector: taint}
+  - {id: JS-E09, cwe: CWE-22, sink: routes/dataErasure.ts:104, source: "req.body.layout -> res.render", detector: taint}
+  - {id: JS-E10, cwe: CWE-158, sink: routes/fileServer.ts:32, source: "params.file, extension allowlist bypassed by poison null byte", detector: taint}
+  - {id: JS-E11, cwe: CWE-22, sink: routes/fileUpload.ts:30-34, source: "zip entry names -> createWriteStream (zip slip; fileWriteChallenge)", detector: taint, note: "added after juice-A-2 reported it"}
+  - {id: JS-E12, cwe: CWE-79, sink: routes/trackOrder.ts:15-24, source: "req.params.id reflected in JSON, rendered by frontend (reflectedXssChallenge)", detector: taint, note: "added after juice-A-1 reported it"}
+  - {id: JS-E13, cwe: CWE-943, sink: routes/likeProductReviews.ts:25-52, source: "req.body.id used as {_id: id} (operator injection, same pattern as noSqlReviews)", detector: taint, note: "added after engine run jfull reported it"}
+  - {id: JS-E14, cwe: CWE-347, sink: lib/insecurity.ts:188, source: "token cookie/header -> jwt.verify(token, publicKey) without an algorithms list (RS256/HS256 confusion; jwtForgedChallenge)", detector: taint, note: "added after pkg-juice-1 reported it"}
+negatives:
+  - {id: JS-N01, where: routes/captcha.ts:22, why: "eval of server-generated arithmetic, no user input"}
+  - {id: JS-N02, where: routes/keyServer.ts:12, why: "file name rejected if it contains '/', single path segment only"}
+  - {id: JS-N03, where: routes/logfileServer.ts:14, why: "same '/' guard as keyServer"}
+  - {id: JS-N04, where: server.ts:140, why: "yaml.load of a fixed local file"}
+  - {id: JS-N05, where: routes/quarantineServer.ts:14, why: "same '/' guard as keyServer"}
+  - {id: JS-N06, where: routes/chat.ts:149, why: "id is converted with Number() before being concatenated into $where"}
+ambiguous:
+  - {id: JS-A01, where: routes/vulnCodeFixes.ts (whole file), why: "key from body concatenated into path but forced .info.yml suffix; low impact, excluded from scoring"}

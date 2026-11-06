@@ -100,6 +100,7 @@ export default function CreateTaskDialog({
   const [uploading, setUploading] = useState(false);
 
   const [auditMode, setAuditMode] = useState<AuditMode>("agent");
+  const [productContext, setProductContext] = useState("");
 
   const [ruleSets, setRuleSets] = useState<AuditRuleSet[]>([]);
   const [promptTemplates, setPromptTemplates] = useState<PromptTemplate[]>([]);
@@ -213,19 +214,25 @@ export default function CreateTaskDialog({
       setCreating(true);
       let taskId: string;
 
-      if (auditMode === "agent") {
+      if (auditMode === "agent" || auditMode === "yasa") {
+        const isYasa = auditMode === "yasa";
         const agentTask = await createAgentTask({
           project_id: selectedProject.id,
-          name: `Agent审计-${selectedProject.name}`,
+          name: `${isYasa ? "YASA审计" : "Agent审计"}-${selectedProject.name}`,
           branch_name: isRepositoryProject(selectedProject) ? branch : undefined,
           exclude_patterns: excludePatterns,
-          target_files: selectedFiles,
-          verification_level: "sandbox",
+          target_files: isYasa ? undefined : selectedFiles,
+          verification_level: isYasa ? "analysis_only" : "sandbox",
+          ...(isYasa && {
+            audit_mode: "yasa" as const,
+            timeout_seconds: 1800,
+            audit_scope: productContext.trim() ? { product: productContext.trim() } : undefined,
+          }),
         });
 
         onOpenChange(false);
         onTaskCreated();
-        toast.success("Agent 审计任务已创建");
+        toast.success(isYasa ? "YASA 混合审计任务已创建" : "Agent 审计任务已创建");
         navigate(`/agent-audit/${agentTask.id}`);
 
         setSelectedProjectId("");
@@ -433,7 +440,30 @@ export default function CreateTaskDialog({
                 )}
 
                 {/* 规则集和提示词选择 - 仅快速扫描模式显示 */}
-                {auditMode !== "agent" && (
+                {auditMode === "yasa" && (
+                  <div className="p-3 border border-border rounded bg-emerald-50 dark:bg-emerald-950/20 space-y-2">
+                    <label
+                      htmlFor="yasa-product-context"
+                      className="block text-xs font-mono font-bold text-muted-foreground uppercase"
+                    >
+                      产品上下文（可选）
+                    </label>
+                    <textarea
+                      id="yasa-product-context"
+                      value={productContext}
+                      onChange={(e) => setProductContext(e.target.value)}
+                      disabled={creating}
+                      rows={2}
+                      placeholder="例如：公开接口 /login、/search；角色 admin / user；/api/admin/* 仅管理员"
+                      className="w-full text-sm font-mono p-2 rounded border border-border bg-background"
+                    />
+                    <p className="text-xs text-muted-foreground font-mono">
+                      说明哪些入口按设计公开、有哪些角色，可减少权限审计的误报。
+                    </p>
+                  </div>
+                )}
+
+                {auditMode === "fast" && (
                   <div className="p-3 border border-border rounded bg-violet-50 dark:bg-violet-950/20 space-y-3">
                     <div className="flex items-center gap-2 mb-2">
                       <Zap className="w-4 h-4 text-violet-600 dark:text-violet-400" />
@@ -627,6 +657,11 @@ export default function CreateTaskDialog({
                 <>
                   <Bot className="w-4 h-4 mr-2" />
                   启动 Agent 审计
+                </>
+              ) : auditMode === "yasa" ? (
+                <>
+                  <Bot className="w-4 h-4 mr-2" />
+                  启动 YASA 审计
                 </>
               ) : (
                 <>

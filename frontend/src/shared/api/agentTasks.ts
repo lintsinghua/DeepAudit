@@ -117,6 +117,8 @@ export interface CreateAgentTaskRequest {
   max_iterations?: number;
   token_budget?: number;
   timeout_seconds?: number;
+  /** agent = 动态 Agent 树（默认）；yasa = YASA 混合审计 */
+  audit_mode?: "agent" | "yasa";
 }
 
 export interface AgentTaskSummary {

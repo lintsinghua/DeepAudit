@@ -3,10 +3,10 @@
  * Cyberpunk Terminal Aesthetic
  */
 
-import { Bot, Zap, CheckCircle2, Clock, Shield, Code } from "lucide-react";
+import { Bot, Zap, CheckCircle2, Clock, Shield, Code, Microscope } from "lucide-react";
 import { cn } from "@/shared/utils/utils";
 
-export type AuditMode = "fast" | "agent";
+export type AuditMode = "fast" | "agent" | "yasa";
 
 interface AgentModeSelectorProps {
   value: AuditMode;
@@ -28,7 +28,7 @@ export default function AgentModeSelector({
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {/* 快速审计模式 */}
         <label
           className={cn(
@@ -163,6 +163,70 @@ export default function AgentModeSelector({
           <div className="mt-auto pt-2 border-t border-border">
             <span className="text-xs uppercase tracking-wider text-muted-foreground font-bold font-mono">
               适合: 发版前审计、深度安全评估
+            </span>
+          </div>
+        </label>
+        {/* YASA 混合审计模式 */}
+        <label
+          className={cn(
+            "relative flex flex-col p-4 border cursor-pointer transition-all rounded",
+            value === "yasa"
+              ? "border-emerald-500/50 bg-emerald-50 dark:bg-emerald-950/30"
+              : "border-border hover:border-border bg-muted/50",
+            disabled && "opacity-50 cursor-not-allowed"
+          )}
+        >
+          <input
+            type="radio"
+            name="auditMode"
+            value="yasa"
+            checked={value === "yasa"}
+            onChange={() => onChange("yasa")}
+            disabled={disabled}
+            className="sr-only"
+          />
+
+          <div className="flex items-center gap-2 mb-2">
+            <div className={cn(
+              "p-1.5 rounded border",
+              value === "yasa"
+                ? "bg-emerald-500/20 border-emerald-500/50"
+                : "bg-muted border-border"
+            )}>
+              <Microscope className={cn(
+                "w-4 h-4",
+                value === "yasa" ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
+              )} />
+            </div>
+            <span className={cn(
+              "font-bold text-sm font-mono uppercase",
+              value === "yasa" ? "text-emerald-700 dark:text-emerald-300" : "text-muted-foreground"
+            )}>
+              YASA 混合审计
+            </span>
+            {value === "yasa" && (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 ml-auto" />
+            )}
+          </div>
+
+          <ul className="text-xs text-muted-foreground space-y-1 mb-3 font-mono">
+            <li className="flex items-center gap-1">
+              <Code className="w-3 h-3" />
+              Agent 建规则 + YASA 污点引擎
+            </li>
+            <li className="flex items-center gap-1">
+              <Shield className="w-3 h-3" />
+              数据流 + 权限（路由表）审计
+            </li>
+            <li className="flex items-center gap-1">
+              <Clock className="w-3 h-3" />
+              限时 30 分钟，未审项列出
+            </li>
+          </ul>
+
+          <div className="mt-auto pt-2 border-t border-border">
+            <span className="text-xs uppercase tracking-wider text-muted-foreground font-bold font-mono">
+              适合: Java / JS·TS Web 项目
             </span>
           </div>
         </label>

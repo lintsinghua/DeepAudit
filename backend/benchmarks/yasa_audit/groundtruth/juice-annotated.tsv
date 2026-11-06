@@ -1,0 +1,25 @@
+accessLogDisclosureChallenge	server.ts	302	app.use('/support/logs', serveIndexMiddleware, serveIndex('logs', { icons: true, view: 'details' }))
+accessLogDisclosureChallenge	server.ts	304	app.use('/support/logs/:file', serveLogFiles())
+changeProductChallenge	server.ts	398	
+chatbotGreedyInjectionChallenge	routes/chat.ts	179	discount: z.number().describe('The discount percentage for the coupon (maximum 10)')
+chatbotPromptInjectionChallenge	routes/chat.ts	179	discount: z.number().describe('The discount percentage for the coupon (maximum 10)')
+chatbotPromptInjectionChallenge	routes/chat.ts	184	const couponCode = security.generateCoupon(discount)
+dbSchemaChallenge	routes/search.ts	23	models.sequelize.query(`SELECT * FROM Products WHERE ((name LIKE '%${criteria}%' OR description LIKE
+directoryListingChallenge	server.ts	290	app.use('/ftp', serveIndexMiddleware, serveIndex('ftp', { icons: true }))
+directoryListingChallenge	server.ts	291	app.use('/ftp(?!/quarantine)/:file', servePublicFiles())
+exposedMetricsChallenge	server.ts	759	app.get('/metrics', utils.asyncHandler(metrics.serveMetrics()))
+forgedReviewChallenge	routes/updateProductReviews.ts	16	const user = security.authenticatedUsers.from(req)
+forgedReviewChallenge	routes/updateProductReviews.ts	18	{ _id: req.body.id },
+loginAdminChallenge	routes/login.ts	34	models.sequelize.query(`SELECT * FROM Users WHERE email = '${req.body.email || ''}' AND password = '
+loginBenderChallenge	routes/login.ts	34	models.sequelize.query(`SELECT * FROM Users WHERE email = '${req.body.email || ''}' AND password = '
+loginJimChallenge	routes/login.ts	34	models.sequelize.query(`SELECT * FROM Users WHERE email = '${req.body.email || ''}' AND password = '
+noSqlReviewsChallenge	routes/updateProductReviews.ts	18	{ _id: req.body.id },
+noSqlReviewsChallenge	routes/updateProductReviews.ts	20	{ multi: true }
+redirectChallenge	lib/insecurity.ts	136	allowed = allowed || url.includes(allowedUrl)
+redirectCryptoCurrencyChallenge	lib/insecurity.ts	124	'https:
+redirectCryptoCurrencyChallenge	lib/insecurity.ts	125	'https:
+redirectCryptoCurrencyChallenge	lib/insecurity.ts	126	'https:
+registerAdminChallenge	server.ts	539	resource.create.send.before((req: Request, res: Response, context: { instance: { id: any }, continue
+resetPasswordMortyChallenge	server.ts	374	keyGenerator ({ headers, ip }: { headers: any, ip: any }) { return headers['X-Forwarded-For'] ?? ip 
+unionSqlInjectionChallenge	routes/search.ts	23	models.sequelize.query(`SELECT * FROM Products WHERE ((name LIKE '%${criteria}%' OR description LIKE
+weakPasswordChallenge	models/user.ts	73	this.setDataValue('password', security.hash(clearTextPassword))
