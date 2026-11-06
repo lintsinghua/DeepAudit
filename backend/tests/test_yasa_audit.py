@@ -526,3 +526,13 @@ def test_build_skips_engine_for_php(tmp_path):
     _write(tmp_path / "src", {"a.php": "<?php echo 1;\n"})
     m = build(AuditConfig(), tmp_path / "src", tmp_path / "out")
     assert m["yasa_runs"] == 0 and m["prompt_tokens"] == 0 and "php" in m["skipped"]
+
+
+def test_inventory_not_truncated_on_many_hits(tmp_path):
+    from app.services.yasa_audit.pipeline import inventory
+
+    _write(tmp_path, {f"m{i:03d}.php": "<?php\n" + "".join(
+        f"mysqli_query($c, \"SELECT * FROM t{j} WHERE id='$id' AND padding_padding_padding_padding\");\n"
+        for j in range(5)) for i in range(120)})
+    tb = Toolbox(AuditConfig(), tmp_path, tmp_path / "out", enable_yasa=False)
+    assert len(inventory(tb, "php", [])) == 600  # well beyond the agent grep's character clip

@@ -128,7 +128,7 @@ def inventory(tb: Toolbox, lang: str, extra_fsigs: list[str]) -> list[dict]:
     hits: dict[tuple[str, int], dict] = {}
     for pat, cwe in pats:
         for g in GLOBS[lang]:
-            for line in tb.grep(pat, glob=g, max_results=400).splitlines():
+            for line in tb.grep_rows(pat, glob=g):
                 m = re.match(r"^([^:]+):(\d+):(.*)$", line)
                 if (not m or "test" in m.group(1).lower() or is_constant_call(m.group(3), pat)
                         or any(part in SKIP_PARTS for part in Path(m.group(1)).parts)):

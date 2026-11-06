@@ -128,19 +128,23 @@ class Toolbox:
         body = "\n".join(f"{i:5d}| {lines[i - 1]}" for i in range(start, end + 1))
         return clip(f"{path} lines {start}-{end} of {len(lines)}\n{body}")
 
-    def grep(self, pattern: str, glob: str = "", max_results: int = 60) -> str:
-        cmd = [self.cfg.rg_bin, "-n", "--no-heading", "-S", "-M", "300", "--max-count", "20",
+    def grep_rows(self, pattern: str, glob: str = "", per_file: int = 20) -> list[str]:
+        """All matching "file:line:code" rows, uncapped (deterministic inventory; not a model tool)."""
+        cmd = [self.cfg.rg_bin, "-n", "--no-heading", "-S", "-M", "300", "--max-count", str(per_file),
                "--engine", "auto"]  # PCRE2 when a pattern needs look-around
         for d in SKIP_DIRS:
             cmd += ["-g", f"!{d}"]
         if glob:
             cmd += ["-g", glob]
         cmd += ["-e", pattern, str(self.root)]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        return sorted(line.replace(str(self.root) + "/", "") for line in r.stdout.splitlines())
+
+    def grep(self, pattern: str, glob: str = "", max_results: int = 60) -> str:
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            rows = self.grep_rows(pattern, glob)
         except FileNotFoundError:
             return "error: ripgrep not found (set YASA_RG_BIN)"
-        rows = [line.replace(str(self.root) + "/", "") for line in r.stdout.splitlines()]
         more = f"\n...[{len(rows) - max_results} more matches]" if len(rows) > max_results else ""
         return clip("\n".join(rows[: int(max_results)]) + more or "(no matches)")
 

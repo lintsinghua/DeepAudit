@@ -94,6 +94,9 @@ Each item in `app/services/yasa_audit/kb/yasa_playbook.md` refers to one of thes
 | V5 | Factory-returned handlers are only analyzed when the route-registering file is scanned | Juice `routes/` only: markedSourceCount 29, findingCount 0; with `server.ts`: findings |
 | V6 | `ONLY_CUSTOM` + bootstrap file (file-level) entrypoint gives the same findings much faster; a bootstrap function does not | Juice full: default 321 entrypoints 975 s; file-level `/server.ts` 88 s, same 13 sinks; `start`/`configureApp` 0 findings |
 | V7 | Generic response/log sinks inflate matchedSinkCount | Juice: default JS rule config matched 1336 sinks |
+| V8 | Python: Flask routes and request.* self-collected; taint passes %, +, f-string, format; method sinks match the receiver name (`db.execute`), not `execute` or `sqlite3.connect().execute` | 30-line Flask samples, 4 sink spellings x 5 string forms; needs `--uastSDKPath deps/uast4py` because the release embeds a macOS parser |
+| V9 | PHP: no entrypoints for plain scripts or Laravel | 10-line PHP sample: entryPointCount 0 with default, `ONLY_CUSTOM` + file-level entrypoint and `BOTH` |
+| V10 | exit=-9 is the OOM killer; retrying the same scope does not help | Vulnerable-Flask-App on 8 GB: killed at entrypoint 4/29 twice (11 GB heap reserved); PowerJob server likewise |
 
 ## Time budget and a 45k LOC project (2026-11-06)
 
