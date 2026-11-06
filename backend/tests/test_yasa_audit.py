@@ -415,3 +415,22 @@ def test_count_sources_skips_vendor_dirs(tmp_path):
     for p in ("src/A.java", "src/b.jsp", "src/c.ts", "src/readme.md", "node_modules/x/i.js"):
         (tmp_path / p).write_text("")
     assert count_sources(tmp_path) == 3
+
+
+def test_scope_tree_applies_excludes_and_targets(tmp_path):
+    from app.services.yasa_audit.task import scope_tree
+
+    src = tmp_path / "p"
+    for rel in ("src/A.java", "src/B.java", "node_modules/x/i.js", "app.log", "web/c.jsp"):
+        (src / rel).parent.mkdir(parents=True, exist_ok=True)
+        (src / rel).write_text("x")
+    # no pattern matches -> project dir used as is
+    assert scope_tree(src, tmp_path / "s0", ["*.min.js"], None) == (src, 0)
+
+    root, dropped = scope_tree(src, tmp_path / "s1", ["node_modules/**", "*.log"], None)
+    kept = sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
+    assert kept == ["src/A.java", "src/B.java", "web/c.jsp"] and dropped == 2
+
+    root, dropped = scope_tree(src, tmp_path / "s2", ["*.log"], ["src/A.java", "./web/c.jsp"])
+    kept = sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
+    assert kept == ["src/A.java", "web/c.jsp"] and dropped == 3

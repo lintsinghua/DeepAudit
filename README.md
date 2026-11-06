@@ -29,7 +29,7 @@
 | 权限 | 依赖 Agent 自行发现 | 确定性路由表（Servlet/JSP、Spring `@*Mapping` + 注解 + 拦截器、Express 中间件）+ 同类入口对比 |
 | 验证 | Docker 沙箱执行 PoC | 不执行，结论为静态判定（证据：文件:行 路径、引擎结果编号） |
 | 时间 | 不固定 | 硬预算，默认 30 分钟 |
-| 语言 | 不限 | Java（含 JSP）、JavaScript / TypeScript |
+| 语言 | 不限 | 目前 Java（含 JSP）、JavaScript / TypeScript（引擎还支持 Go、Python，流水线尚未适配） |
 | 依赖 | LLM、Embedding（RAG）、Docker（沙箱） | LLM（OpenAI 兼容、支持 tool calling）、YASA 工具，**不需要** RAG 和 Docker |
 
 YASA 混合审计的流程（`backend/app/services/yasa_audit/`）：
@@ -217,11 +217,14 @@ uv run python -m app.services.yasa_audit authz /path/to/project --out out-authz/
 
 ## 已知限制
 
-- 只支持 Java（含 JSP）和 JS/TS 项目；其他语言请用 Agent 模式。
+- 目前只适配了 Java（含 JSP）和 JS/TS。YASA 引擎本身还支持 Go 和 Python，限制在流水线这一层：危险调用清单（L0 sink）、
+  路由表提取（目前是 Servlet/JSP、Spring、Express）、规则编写手册（playbook）都只为这两种语言写过并经过实测验证。
+  要支持 Go/Python，需要补上这三样，再用对应的靶场验证；在此之前，这两种语言请用 Agent 模式。
 - 结论是静态判定，没有执行验证；报告里附带了路径和证据，需要的话请人工复现。
 - 大型 Spring 项目上引擎受内存限制（见上文），而且自定义入口方案还没跑通，这时数据流阶段主要靠残余危险调用复核。
 - 时间预算优先：预算用完时剩下的候选不再复核，任务页会提示数量，清单在运行目录里。
-- YASA 模式会忽略"指定文件"选项，始终审计整个项目。
+- 和 Agent 模式一样遵守项目的排除规则（默认 `node_modules/**`、`.git/**`、`dist/**`、`build/**`、`*.log`）和"指定文件"。
+  只选部分文件时，跨到未选文件的数据流和路由注册（例如 Express 的 `server.ts`）会看不到，召回会下降。
 
 ## 开发与测试
 
