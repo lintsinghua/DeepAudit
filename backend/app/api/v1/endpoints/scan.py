@@ -23,6 +23,7 @@ from app.services.llm.service import LLMService
 from app.services.scanner import task_control, is_text_file, should_exclude, get_language_from_path, get_analysis_config
 from app.services.zip_storage import load_project_zip, save_project_zip, has_project_zip
 from app.core.config import settings
+from app.core.file_types import SERVER_TEMPLATE_EXTENSIONS
 
 router = APIRouter()
 
@@ -40,7 +41,8 @@ def normalize_path(path: str) -> str:
 TEXT_EXTENSIONS = [
     ".js", ".ts", ".tsx", ".jsx", ".py", ".java", ".go", ".rs",
     ".cpp", ".c", ".h", ".cc", ".hh", ".cs", ".php", ".rb",
-    ".kt", ".swift", ".sql", ".sh", ".json", ".yml", ".yaml"
+    ".kt", ".swift", ".sql", ".sh", ".json", ".yml", ".yaml",
+    *SERVER_TEMPLATE_EXTENSIONS,
 ]
 
 

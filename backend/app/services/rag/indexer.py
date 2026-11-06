@@ -21,6 +21,7 @@ import json
 
 from .splitter import CodeSplitter, CodeChunk
 from .embeddings import EmbeddingService
+from app.core.file_types import SERVER_TEMPLATE_EXTENSIONS
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ TEXT_EXTENSIONS = {
     ".cpp", ".c", ".h", ".cc", ".hh", ".cs", ".php", ".rb",
     ".kt", ".swift", ".sql", ".sh", ".json", ".yml", ".yaml",
     ".xml", ".html", ".css", ".vue", ".svelte", ".md",
+    *SERVER_TEMPLATE_EXTENSIONS,
 }
 
 # 排除的目录
