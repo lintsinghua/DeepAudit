@@ -14,6 +14,7 @@ from app.models.audit import AuditTask, AuditIssue
 from app.models.project import Project
 from app.services.llm.service import LLMService
 from app.core.config import settings
+from app.core.file_types import SERVER_TEMPLATE_EXTENSIONS
 
 
 def get_analysis_config(user_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -39,7 +40,8 @@ def get_analysis_config(user_config: Optional[Dict[str, Any]] = None) -> Dict[st
 TEXT_EXTENSIONS = [
     ".js", ".ts", ".tsx", ".jsx", ".py", ".java", ".go", ".rs", 
     ".cpp", ".c", ".h", ".cc", ".hh", ".cs", ".php", ".rb", 
-    ".kt", ".swift", ".sql", ".sh", ".json", ".yml", ".yaml"
+    ".kt", ".swift", ".sql", ".sh", ".json", ".yml", ".yaml",
+    *SERVER_TEMPLATE_EXTENSIONS,
 ]
 
 # 排除的目录和文件模式
