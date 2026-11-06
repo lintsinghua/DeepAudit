@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from .llm import LLM, parse_args
@@ -21,12 +22,19 @@ def _compact(messages: list[dict], keep_last: int = 14, limit_chars: int = 160_0
             messages[i]["content"] = c[:400] + "\n...[older tool output elided]"
 
 
+Reminder = tuple[Callable[[int, Toolbox], bool], str]
+
+
 def run_agent(llm: LLM, tb: Toolbox, tools: list[dict], system: str, user: str, budget: int,
-              log_path: Path, deadline: float | None = None) -> dict:
+              log_path: Path, deadline: float | None = None,
+              reminders: list[Reminder] | None = None) -> dict:
     """Run until finish, the step budget, or the wall-clock deadline (epoch seconds).
 
     Near the deadline the agent is told to report and finish; 60 s after it the loop stops.
+    `reminders` are (condition(steps, toolbox), message) pairs; each message is sent once, the first
+    time its condition holds.
     """
+    pending = list(reminders or [])
     messages: list[dict] = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     t0 = time.time()
     steps = nudges = 0
@@ -44,6 +52,9 @@ def run_agent(llm: LLM, tb: Toolbox, tools: list[dict], system: str, user: str, 
                 messages.append({"role": "user", "content": "Time budget reached. Report what you "
                                  "have concluded now, then call finish."})
                 time_warned = warned = True
+            for rem in [r for r in pending if r[0](steps, tb)]:
+                messages.append({"role": "user", "content": rem[1]})
+                pending.remove(rem)
             if not warned and steps >= budget - 3:
                 messages.append({"role": "user", "content": "Budget nearly used. Report what you "
                                  "have concluded, then call finish."})

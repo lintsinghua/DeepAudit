@@ -152,7 +152,10 @@ def build(cfg: AuditConfig, root: Path, out: Path, deploy: str = "",
     llm = LLM(cfg)
     res = run_agent(llm, tb, tools, builder_prompt(cfg.builder_budget, cfg.builder_max_yasa_runs, deploy),
                     f"Build engine rules for the project. Top-level listing:\n{tb.list_dir('.', 1)}",
-                    cfg.builder_budget, out / "transcript.jsonl", deadline=deadline)
+                    cfg.builder_budget, out / "transcript.jsonl", deadline=deadline,
+                    reminders=[(lambda steps, t: steps >= cfg.builder_budget // 2 and t.yasa_runs == 0,
+                                "You have used half of your budget without running the engine. Stop "
+                                "exploring: write the ruleConfig now from what you know and call yasa_run.")])
     m = _metrics(llm, {"stage": "build", "yasa_runs": tb.yasa_runs,
                        "engine_findings": len(tb.registry), **res})
     (out / "metrics.json").write_text(json.dumps(m, indent=1))

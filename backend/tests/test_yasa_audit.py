@@ -261,3 +261,23 @@ def test_spring_entries_and_global_guards(tmp_path):
     assert routes["/user/query"]["method"] == "POST"
     guards = java_global_guards(tmp_path)
     assert len(guards) == 1 and 'addPathPatterns("/**")' in guards[0]
+
+
+def test_agent_loop_sends_reminder_once(tmp_path):
+    from types import SimpleNamespace
+
+    from app.services.yasa_audit.agent_loop import run_agent
+
+    seen_msgs = []
+
+    class FakeLLM:
+        def chat(self, messages, tools=None):
+            seen_msgs.append([m["content"] for m in messages if m["role"] == "user"])
+            call = SimpleNamespace(id="c", function=SimpleNamespace(name="grep", arguments='{"pattern": "x"}'))
+            return SimpleNamespace(content="", tool_calls=[call])
+
+    tb = Toolbox(AuditConfig(), tmp_path, tmp_path, enable_yasa=False)
+    run_agent(FakeLLM(), tb, tool_schemas(enable_yasa=False), "sys", "user", budget=6,
+              log_path=tmp_path / "t.jsonl", reminders=[(lambda steps, t: steps >= 2, "RUN THE ENGINE")])
+    assert sum(m.count("RUN THE ENGINE") for m in seen_msgs[-1:]) == 1
+    assert not any("RUN THE ENGINE" in m for m in seen_msgs[1])  # not before step 2
