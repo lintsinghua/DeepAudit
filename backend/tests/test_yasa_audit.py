@@ -134,3 +134,45 @@ def test_benchmark_scoring():
     assert r["wrongly_rejected"] == ["JS-E01"]
     assert r["unmatched"] == []  # vulnCodeFixes is ambiguous, not counted
     assert json.dumps(r)
+
+
+EXPRESS_BOOT = """import express from 'express'
+import * as security from './lib/insecurity'
+import { retrieveBasket } from './routes/basket'
+import dataErasure from './routes/dataErasure'
+import * as address from './routes/address'
+const app = express()
+app.use(security.updateAuthenticatedUsers())
+app.use('/rest/basket', security.isAuthorized(), security.appendUserId())
+app.use('/ftp', serveIndex('ftp', { icons: true }))
+app.get('/rest/basket/:id', utils.asyncHandler(retrieveBasket()))
+app.get('/api/Addresss/:id', security.appendUserId(), utils.asyncHandler(address.getAddressById()))
+app.use('/dataerasure', dataErasure)
+"""
+
+
+def test_express_entries_effective_guards(tmp_path):
+    from app.services.yasa_audit.entrypoints import express_entries
+
+    (tmp_path / "server.ts").write_text(EXPRESS_BOOT)
+    routes = {r["route"]: r for r in express_entries(tmp_path)}
+    assert set(routes) == {"/ftp", "/rest/basket/:id", "/api/Addresss/:id", "/dataerasure"}
+    basket = routes["/rest/basket/:id"]
+    assert basket["file"] == "routes/basket.ts"
+    assert basket["guards"] == ["security.updateAuthenticatedUsers", "security.isAuthorized",
+                                "security.appendUserId"]  # inherited from the /rest/basket prefix
+    assert routes["/api/Addresss/:id"]["guards"] == ["security.updateAuthenticatedUsers",
+                                                     "security.appendUserId"]
+    assert routes["/dataerasure"]["file"] == "routes/dataErasure.ts"  # bare identifier handler
+    assert routes["/ftp"]["file"] == "server.ts" and "directory listing" in routes["/ftp"]["handler"]
+
+
+def test_java_entries(tmp_path):
+    from app.services.yasa_audit.entrypoints import java_entries
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "Login.java").write_text('@WebServlet(urlPatterns="/Plogin")\nclass Login {}\n')
+    (tmp_path / "WebContent").mkdir()
+    (tmp_path / "WebContent" / "delptnt.jsp").write_text("<% %>")
+    got = {(e["route"], e["file"]) for e in java_entries(tmp_path)}
+    assert got == {("/Plogin", "src/Login.java"), ("/delptnt.jsp", "WebContent/delptnt.jsp")}

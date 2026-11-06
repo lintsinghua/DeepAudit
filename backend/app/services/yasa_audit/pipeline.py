@@ -17,8 +17,9 @@ from pathlib import Path
 
 from .agent_loop import run_agent
 from .config import AuditConfig
+from .entrypoints import entries_for
 from .llm import LLM
-from .prompts import builder_prompt, trace_prompt, triage_prompt
+from .prompts import authz_prompt, builder_prompt, trace_prompt, triage_prompt
 from .toolbox import Toolbox, tool_schemas
 
 L0_SINKS: dict[str, list[tuple[str, str]]] = {
@@ -202,6 +203,53 @@ def triage(cfg: AuditConfig, root: Path, engine_dir: Path, out: Path, group: str
          "completion_tokens": sum(r["completion_tokens"] for r in results),
          "steps": sum(r["steps"] for r in results), "errors": sum(1 for r in results if r.get("error")),
          "wall_s": round(time.time() - t0, 1), "n_findings": len(findings)}
+    (out / "metrics.json").write_text(json.dumps(m, indent=1))
+    return m
+
+
+def authz(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", product: str = "",
+          batch: int = 3, budget: int = 16) -> dict:
+    """Access-control stage: deterministic entry inventory, then grouped review in fresh contexts.
+
+    Every unit gets the full route table so reviewers can compare peers. No RAG index is needed:
+    with the route table in hand, reviewers given a semantic search tool used it 0-1 times per run
+    (see benchmarks/yasa_audit/README.md).
+    """
+    out.mkdir(parents=True, exist_ok=True)
+    t0 = time.time()
+    entries = entries_for(root, detect_lang(root))
+    table = [f"{e['method']} {e['route']} -> {e['file']} guards={e['guards']}" for e in entries]
+    by_file: dict[str, list[dict]] = {}
+    for e in entries:
+        by_file.setdefault(e["file"], []).append(e)
+    files = sorted(by_file)
+    units = [{"origin": f"authz:{','.join(files[i:i + batch])}", "batch_files": files[i:i + batch],
+              "entries": [e for f in files[i:i + batch] for e in by_file[f]], "route_table": table}
+             for i in range(0, len(files), batch)]
+    (out / "entries.json").write_text(json.dumps(entries, indent=1, ensure_ascii=False))
+
+    def review(i_unit: tuple[int, dict]) -> dict:
+        i, unit = i_unit
+        sub = out / f"unit-{i:03d}"
+        sub.mkdir(parents=True, exist_ok=True)
+        tb = Toolbox(cfg, root, sub, enable_yasa=False)
+        tools = [t for t in tool_schemas(enable_yasa=False) if t["function"]["name"] != "list_dir"]
+        llm = LLM(cfg)
+        res = run_agent(llm, tb, tools, authz_prompt(budget, deploy, product),
+                        json.dumps(unit, ensure_ascii=False, indent=1), budget, sub / "transcript.jsonl")
+        for f in tb.findings:
+            f["_unit"] = unit["origin"]
+        return {"findings": tb.findings, **_metrics(llm, res)}
+
+    with ThreadPoolExecutor(max_workers=cfg.workers) as ex:
+        results = list(ex.map(review, enumerate(units)))
+    findings = [f for r in results for f in r["findings"]]
+    (out / "findings.json").write_text(json.dumps({"findings": findings}, indent=1, ensure_ascii=False))
+    m = {"stage": "authz", "entries": len(entries), "units": len(units),
+         "prompt_tokens": sum(r["prompt_tokens"] for r in results),
+         "completion_tokens": sum(r["completion_tokens"] for r in results),
+         "steps": sum(r["steps"] for r in results), "wall_s": round(time.time() - t0, 1),
+         "n_findings": len(findings)}
     (out / "metrics.json").write_text(json.dumps(m, indent=1))
     return m
 

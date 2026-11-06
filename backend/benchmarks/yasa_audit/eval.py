@@ -1,6 +1,7 @@
 """Score findings against the benchmark ground truth (data-flow scope).
 
     python benchmarks/yasa_audit/eval.py --project juice-mini OUT/triage/findings.json [more.json ...]
+    python benchmarks/yasa_audit/eval.py --kind authz --project hms OUT/findings.json   # access control
 
 A finding matches a ground-truth item when its sink file matches, its sink line is within the item's
 line range +-3, and its CWE is in the same family. Negatives are look-dangerous-but-safe sites.
@@ -127,14 +128,68 @@ def score(project: str, findings: list[dict]) -> dict:
     }
 
 
+# Access control, entry (file) level; mirrors groundtruth/authz.yaml.
+# (id, file, alt file or None, keyword that must appear in the finding for bootstrap-file items)
+GT_AUTHZ: dict[str, dict] = {
+    "hms": {
+        "pos": [("HA-01", "WebContent/delptnt.jsp", None, ""), ("HA-02", "WebContent/adminpage.jsp", None, ""),
+                ("HA-03", "WebContent/mangptnts.jsp", None, ""), ("HA-04", "WebContent/viewptnts.jsp", None, ""),
+                ("HA-05", "WebContent/mngdoc.jsp", None, ""), ("HA-06", "WebContent/apn-his.jsp", None, ""),
+                ("HA-07", "WebContent/successupdate.jsp", None, ""),
+                ("HA-08", "WebContent/successbapn.jsp", None, "")],
+        "neg": ["WebContent/updateprofile.jsp", "WebContent/success.jsp", "WebContent/index.jsp",
+                "WebContent/contactus.jsp"],
+    },
+    "juice-mini": {
+        "pos": [("JA-01", "routes/basket.ts", None, ""), ("JA-02", "routes/updateProductReviews.ts", None, ""),
+                ("JA-03", "server.ts", "routes/fileServer.ts", "ftp"),
+                ("JA-04", "server.ts", "routes/logfileServer.ts", "log"),
+                ("JA-05", "server.ts", "routes/keyServer.ts", "encryptionkey")],
+        "neg": ["routes/address.ts", "routes/dataErasure.ts", "routes/likeProductReviews.ts",
+                "routes/b2bOrder.ts", "routes/search.ts"],
+    },
+}
+AUTHZ_CWES = {"CWE-306", "CWE-862", "CWE-863", "CWE-639", "CWE-284", "CWE-285", "CWE-552", "CWE-548",
+              "CWE-538", "CWE-200", "CWE-425", "CWE-287", "CWE-668"}
+
+
+def same_file(a: str | None, b: str) -> bool:
+    x, y = norm(a), norm(b)
+    return x == y or x.endswith("/" + y) or y.endswith("/" + x)
+
+
+def score_authz(project: str, findings: list[dict]) -> dict:
+    gt = GT_AUTHZ[project]
+    reported = [f for f in findings if f.get("verdict") in ("confirmed", "likely")]
+    found: set[str] = set()
+    neg_hits, unmatched = [], []
+    for f in reported:
+        cwe = (f.get("cwe") or "").upper().replace(" ", "")
+        text = json.dumps(f).lower()
+        ids = [gid for gid, gf, alt, kw in gt["pos"]
+               if (same_file(f.get("sink_file"), gf) or (alt and same_file(f.get("sink_file"), alt)))
+               and (not kw or kw in text) and (not cwe or cwe in AUTHZ_CWES)]
+        if ids:
+            found.update(ids)
+            continue
+        loc = f"{norm(f.get('sink_file'))}:{f.get('sink_line')}"
+        is_neg = any(same_file(f.get("sink_file"), n) for n in gt["neg"])
+        (neg_hits if is_neg else unmatched).append({"at": loc, "cwe": cwe, "entry": (f.get("entry") or "")[:80]})
+    return {"recall": f"{len(found)}/{len(gt['pos'])}", "reported": len(reported),
+            "negative_hits": neg_hits, "unmatched": unmatched,
+            "missed": sorted({g[0] for g in gt["pos"]} - found)}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--project", required=True, choices=sorted(GT))
+    ap.add_argument("--project", required=True, choices=sorted(set(GT) | set(GT_AUTHZ)))
+    ap.add_argument("--kind", choices=["dataflow", "authz"], default="dataflow")
     ap.add_argument("findings", nargs="+", type=Path)
     args = ap.parse_args()
     for path in args.findings:
-        data = json.loads(path.read_text())
-        print(path, json.dumps(score(args.project, data.get("findings", [])), ensure_ascii=False))
+        data = json.loads(path.read_text()).get("findings", [])
+        r = score_authz(args.project, data) if args.kind == "authz" else score(args.project, data)
+        print(path, json.dumps(r, ensure_ascii=False))
 
 
 if __name__ == "__main__":

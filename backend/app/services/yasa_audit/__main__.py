@@ -5,6 +5,7 @@
     python -m app.services.yasa_audit build <project> --out DIR     # stage 1 only
     python -m app.services.yasa_audit triage <project> --engine DIR --out DIR
     python -m app.services.yasa_audit trace <project> --out DIR     # mode A baseline (no engine)
+    python -m app.services.yasa_audit authz <project> --out DIR [--product "public: /login, /search"]
 
 LLM settings come from DeepAudit's LLM_BASE_URL / LLM_API_KEY / LLM_MODEL environment variables.
 """
@@ -18,13 +19,13 @@ import sys
 from pathlib import Path
 
 from .config import AuditConfig
-from .pipeline import build, trace, triage
+from .pipeline import authz, build, trace, triage
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m app.services.yasa_audit")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("init", "run", "build", "triage", "trace"):
+    for name in ("init", "run", "build", "triage", "trace", "authz"):
         p = sub.add_parser(name)
         p.add_argument("project", type=Path)
         if name != "init":
@@ -34,6 +35,9 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--workers", type=int, default=3)
         if name == "triage":
             p.add_argument("--engine", type=Path, required=True, help="output dir of the build stage")
+        if name == "authz":
+            p.add_argument("--product", default="",
+                           help="product context, e.g. which routes are public by design and the roles")
         if name in ("run", "triage"):
             p.add_argument("--group", choices=["file", "none"], default="file")
     args = ap.parse_args(argv)
@@ -50,6 +54,8 @@ def main(argv: list[str] | None = None) -> int:
         result = build(cfg, root, args.out, args.deploy)
     elif args.cmd == "triage":
         result = triage(cfg, root, args.engine, args.out, args.group, args.deploy)
+    elif args.cmd == "authz":
+        result = authz(cfg, root, args.out, args.deploy, args.product)
     elif args.cmd == "trace":
         result = trace(cfg, root, args.out, args.deploy)
     else:

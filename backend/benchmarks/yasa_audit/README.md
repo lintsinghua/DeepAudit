@@ -57,8 +57,29 @@ Findings that shaped the design:
 - Remaining false positives are sanitizer judgements: single-segment path checks (fixed by passing
   `--deploy`) and a `Number()` conversion the triage ignored.
 
-Open: the 1 M tokens per 10k LOC target is not met yet (residual sinks dominate triage cost); access
-control is not covered.
+Open: the 1 M tokens per 10k LOC target is not met yet (residual sinks dominate triage cost).
+
+## Access control and RAG (2026-11-06)
+
+Ground truth: `groundtruth/authz.yaml` (HMS 8 items, juice-mini 5 items; entry level). The juice-mini
+`server.ts` carries the original auth middleware and directory listings for this purpose.
+
+| Target | Condition | Recall | Extra reports | Tokens | Semantic-search calls |
+| --- | --- | --- | --- | --- | --- |
+| hms | authz stage, no RAG | 8/8 | 3 | 0.45 M | - |
+| hms | authz stage + semantic search (DeepAudit RAG) | 8/8 | 5 | 0.46 M | 0 |
+| hms | authz stage, no RAG, with `--product` | 8/8 | 5 (no public-by-design FPs) | 0.43 M | - |
+| juice-mini | authz stage, no RAG | 4/5 | 5 | 0.56 M | - |
+| juice-mini | authz stage + semantic search | 5/5 | 3 | 0.62 M | 1 |
+
+- A full-repo RAG index is not needed by this pipeline: with the deterministic route table in the prompt,
+  reviewers almost never used semantic search, and the recall difference (4/5 vs 5/5) came from one judgement
+  on `/ftp` (rejected as "public by design" in one run, reported in the other), not from retrieval.
+- Building the index is cheap (DeepAudit RAG: ~31 s and ~70k embedding tokens for 6.5k LOC), but DeepAudit's
+  indexer skipped `.jsp` files, so HMS business logic was invisible to it until `.jsp` was added.
+- Without product context the main false positives are public-by-design pages (login, registration). With
+  `--product` they disappear; what remains are pages that violate the declared policy but expose no data,
+  which should be ranked by severity rather than dropped.
 
 ## Playbook verification log
 

@@ -1,0 +1,31 @@
+# Access-control ground truth (entry level). Scope: missing authentication on sensitive functions (CWE-306/862),
+# missing object-level authorization / IDOR (CWE-639), sensitive files exposed without auth (CWE-552/548).
+# CSRF is out of scope. Verified by reading code at the commits used by prepare_targets.sh.
+hms:
+  pos:
+    - {id: HA-01, file: WebContent/delptnt.jsp, cwe: CWE-306, why: "deletes any patient; no session check"}
+    - {id: HA-02, file: WebContent/adminpage.jsp, cwe: CWE-862, why: "admin dashboard; no session check"}
+    - {id: HA-03, file: WebContent/mangptnts.jsp, cwe: CWE-862, why: "lists all patients incl. aadhar ids; no session check"}
+    - {id: HA-04, file: WebContent/viewptnts.jsp, cwe: CWE-862, why: "lists all patients; no session check"}
+    - {id: HA-05, file: WebContent/mngdoc.jsp, cwe: CWE-862, why: "doctor management list; no session check"}
+    - {id: HA-06, file: WebContent/apn-his.jsp, cwe: CWE-639, why: "id=1 returns every appointment; scope chosen by request param, no role check"}
+    - {id: HA-07, file: WebContent/successupdate.jsp, cwe: CWE-639, why: "account to update taken from Name query param, not session"}
+    - {id: HA-08, file: WebContent/successbapn.jsp, cwe: CWE-639, why: "books an appointment for any pname from the form; no session check"}
+  neg:
+    - {id: HA-N01, file: WebContent/updateprofile.jsp, why: "reads the profile of the session user only"}
+    - {id: HA-N02, file: WebContent/success.jsp, why: "patient self-registration, public by design"}
+    - {id: HA-N03, file: WebContent/index.jsp, why: "public landing page"}
+    - {id: HA-N04, file: WebContent/contactus.jsp, why: "public page"}
+juice-mini:
+  pos:
+    - {id: JA-01, file: routes/basket.ts, cwe: CWE-639, why: "retrieveBasket loads any basket by :id; only isAuthorized, no owner check (basketAccessChallenge)"}
+    - {id: JA-02, file: routes/updateProductReviews.ts, cwe: CWE-639, why: "updates any review by body.id; author not compared to the token user (forgedReviewChallenge)"}
+    - {id: JA-03, file: server.ts, alt: routes/fileServer.ts, cwe: CWE-548, why: "/ftp directory listing without auth exposes confidential documents (directoryListingChallenge)"}
+    - {id: JA-04, file: server.ts, alt: routes/logfileServer.ts, cwe: CWE-552, why: "/support/logs listing and access logs without auth (accessLogDisclosureChallenge)"}
+    - {id: JA-05, file: server.ts, alt: routes/keyServer.ts, cwe: CWE-552, why: "/encryptionkeys listing serves premium.key without auth"}
+  neg:
+    - {id: JA-N01, file: routes/address.ts, why: "queries include UserId taken from the token by appendUserId"}
+    - {id: JA-N02, file: routes/dataErasure.ts, why: "requires a logged-in user from the token cookie"}
+    - {id: JA-N03, file: routes/likeProductReviews.ts, why: "isAuthorized; liking another user's review is intended"}
+    - {id: JA-N04, file: routes/b2bOrder.ts, why: "/b2b/v2 behind isAuthorized"}
+    - {id: JA-N05, file: routes/search.ts, why: "public product search by design"}

@@ -1,7 +1,8 @@
 # yasa_audit: agent-built YASA rules + bounded triage
 
 A command-line audit pipeline for data-flow vulnerabilities (injection, code/template execution, path
-traversal, SSRF, XXE, deserialization, XSS, open redirect). It is independent of the existing
+traversal, SSRF, XXE, deserialization, XSS, open redirect) and access control (missing authentication,
+missing object-level authorization, exposed files). It is independent of the existing
 Orchestrator/agents and is not wired into the web UI yet.
 
 ## How it works
@@ -13,6 +14,11 @@ Orchestrator/agents and is not wired into the web UI yet.
    sinks named in the builder's rules, minus calls whose arguments are all constants) adds *residual*
    candidates the engine did not report. Candidates are grouped by file; each group is reviewed in a fresh,
    bounded LLM context (10 tool calls, +4 per extra candidate, cap 24) and every candidate gets a verdict.
+3. **authz** (separate command): a deterministic entry inventory (servlets and JSPs; Express routes with the
+   guards that actually apply, from global, prefix and inline middleware) is reviewed in batches of three
+   handler files, each batch seeing the full route table for peer comparison. `--product` declares which
+   routes are public by design and the roles; without it most false positives are "public by design" pages.
+   No RAG index is used: reviewers given a semantic-search tool called it 0-1 times per run.
 
 Knowledge given to the agents lives in `kb/`: `l0_spec.md` (sources, sinks, class-specific sanitizers),
 `yasa_reference.md` (official engine reference), `yasa_playbook.md` (engine know-how; each item verified,
@@ -36,6 +42,8 @@ python -m app.services.yasa_audit init  /path/to/project                 # navig
 python -m app.services.yasa_audit run   /path/to/project --out out/ \
        --deploy "Linux container, Node 22"                               # build + triage
 python -m app.services.yasa_audit trace /path/to/project --out out-a/    # baseline: agent tracing only
+python -m app.services.yasa_audit authz /path/to/project --out out-z/ \
+       --product "Roles: user, admin. Public by design: /login, /search"  # access control
 ```
 
 Outputs: `out/build/yasa-*/` (rule configs, SARIF), `out/build/yasa_registry.json` (engine findings by id),
@@ -50,5 +58,6 @@ and a `transcript.jsonl` per agent.
 | --- | --- | --- | --- | --- |
 | HMS (Java Servlet + JSP, 1.9k LOC) | 13/13 | 0 | 0.71 M | 3.3 min |
 | Juice Shop backend (TypeScript, 10k LOC) | 14/17 | 2 | 1.67 M | 9.5 min |
+| HMS, access control (`authz --product ...`) | 8/8 | 1 (+4 low-impact pages that violate the declared policy) | 0.43 M | 2.2 min |
 
 Details, baselines and the experiments behind the design are in `backend/benchmarks/yasa_audit/README.md`.
