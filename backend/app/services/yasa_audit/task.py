@@ -13,8 +13,10 @@ agent_tasks passes its helpers in (save_findings, score, is_cancelled) to avoid 
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import logging
 import os
+import shutil
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -32,17 +34,61 @@ from .runner import (
 )
 
 logger = logging.getLogger(__name__)
-SOURCE_EXT = {".java", ".jsp", ".jspx", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
-SKIP_DIRS = {"node_modules", ".git", "dist", "build", "target", "vendor"}
+SOURCE_EXT = {".java", ".jsp", ".jspx", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".py", ".php",
+              ".phtml"}
+SKIP_DIRS = {"node_modules", ".git", "dist", "build", "target", "vendor", "venv", ".venv", "__pycache__"}
 
 
 def count_sources(root: Path) -> int:
-    """Files the pipeline can analyse (Java/JSP, JS/TS), for the task's file counter."""
+    """Files the pipeline can analyse (Java/JSP, JS/TS, Python, PHP), for the task's file counter."""
     n = 0
     for _dir, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         n += sum(1 for f in files if os.path.splitext(f)[1] in SOURCE_EXT)
     return n
+
+
+def _excluded(rel: str, patterns: list[str]) -> bool:
+    """Same matching as DeepAudit's file tools: full relative path or basename, fnmatch."""
+    name = os.path.basename(rel)
+    return any(fnmatch.fnmatch(rel, p) or fnmatch.fnmatch(name, p) for p in patterns)
+
+
+def scope_tree(root: Path, dest: Path, exclude_patterns: list[str] | None,
+               target_files: list[str] | None) -> tuple[Path, int]:
+    """Apply the task's exclude patterns and target files.
+
+    Returns (directory to audit, number of files left out). When nothing is left out the project
+    directory is used as is; otherwise the kept files are copied (same relative paths) into dest,
+    so engine, navigation cache and agents all see the same scope.
+    """
+    patterns = [p.strip() for p in (exclude_patterns or []) if p and p.strip()]
+    targets = {t.strip().lstrip("./") for t in (target_files or []) if t and t.strip()}
+    dir_patterns = [p[:-3] if p.endswith("/**") else p for p in patterns]
+    keep: list[str] = []
+    dropped = 0
+    for d, dirs, files in os.walk(root):
+        rel_dir = os.path.relpath(d, root)
+        rel_dir = "" if rel_dir == "." else rel_dir
+        pruned = [x for x in dirs if _excluded(os.path.join(rel_dir, x), dir_patterns)]
+        for x in pruned:
+            dropped += sum(len(f) for _, _, f in os.walk(os.path.join(d, x)))
+        dirs[:] = [x for x in dirs if x not in pruned]
+        for f in files:
+            rel = os.path.join(rel_dir, f)
+            if _excluded(rel, patterns) or (targets and rel not in targets):
+                dropped += 1
+            else:
+                keep.append(rel)
+    if not dropped:
+        return root, 0
+    if dest.exists():
+        shutil.rmtree(dest)
+    for rel in keep:
+        (dest / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / rel, dest / rel)
+    dest.mkdir(parents=True, exist_ok=True)
+    return dest, dropped
 
 
 RUNS_DIR = Path(os.environ.get("YASA_AUDIT_RUNS_DIR", "/tmp/deepaudit-yasa-runs"))
@@ -87,13 +133,17 @@ async def execute_yasa_task(
     if not (cfg.llm_base_url and cfg.llm_api_key and cfg.llm_model):
         raise RuntimeError("YASA mode needs an OpenAI-compatible LLM (base URL, API key, model)")
 
-    root = Path(project_root).resolve()
-    task.total_files = count_sources(root)
+    project_dir = Path(project_root).resolve()
     out = RUNS_DIR / task.id
     out.mkdir(parents=True, exist_ok=True)
+    root, dropped = scope_tree(project_dir, out / "src", getattr(task, "exclude_patterns", None),
+                               getattr(task, "target_files", None))
+    task.total_files = count_sources(root)
     start = time.time()
     deadline = start + budget_s
 
+    if dropped:
+        await emitter.emit_info(f"YASA scope: {dropped} files left out by exclude patterns / target files")
     await emitter.emit_phase_start("indexing", "🧭 YASA: building navigation cache")
     task.current_phase = AgentTaskPhase.INDEXING
     await db.commit()
@@ -141,7 +191,7 @@ async def execute_yasa_task(
                                    f"reviewed (listed in {out})")
 
     await db.refresh(task)
-    saved = await save_findings(db, task.id, findings, project_root=str(root))
+    saved = await save_findings(db, task.id, findings, project_root=str(project_dir))
     task.status = AgentTaskStatus.COMPLETED
     task.completed_at = datetime.now(UTC)
     task.current_phase = AgentTaskPhase.REPORTING

@@ -206,7 +206,7 @@ export default function CreateAgentTaskDialog({
         name: `${isYasa ? "YASA审计" : "Agent审计"}-${selectedProject.name}`,
         branch_name: isRepositoryProject(selectedProject) ? branch : undefined,
         exclude_patterns: excludePatterns,
-        target_files: isYasa ? undefined : selectedFiles,
+        target_files: selectedFiles,
         verification_level: isYasa ? "analysis_only" : "sandbox",
         ...(isYasa && {
           audit_mode: "yasa" as const,

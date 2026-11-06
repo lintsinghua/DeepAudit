@@ -128,18 +128,23 @@ class Toolbox:
         body = "\n".join(f"{i:5d}| {lines[i - 1]}" for i in range(start, end + 1))
         return clip(f"{path} lines {start}-{end} of {len(lines)}\n{body}")
 
-    def grep(self, pattern: str, glob: str = "", max_results: int = 60) -> str:
-        cmd = [self.cfg.rg_bin, "-n", "--no-heading", "-S", "-M", "300", "--max-count", "20"]
+    def grep_rows(self, pattern: str, glob: str = "", per_file: int = 20) -> list[str]:
+        """All matching "file:line:code" rows, uncapped (deterministic inventory; not a model tool)."""
+        cmd = [self.cfg.rg_bin, "-n", "--no-heading", "-S", "-M", "300", "--max-count", str(per_file),
+               "--engine", "auto"]  # PCRE2 when a pattern needs look-around
         for d in SKIP_DIRS:
             cmd += ["-g", f"!{d}"]
         if glob:
             cmd += ["-g", glob]
         cmd += ["-e", pattern, str(self.root)]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        return sorted(line.replace(str(self.root) + "/", "") for line in r.stdout.splitlines())
+
+    def grep(self, pattern: str, glob: str = "", max_results: int = 60) -> str:
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            rows = self.grep_rows(pattern, glob)
         except FileNotFoundError:
             return "error: ripgrep not found (set YASA_RG_BIN)"
-        rows = [line.replace(str(self.root) + "/", "") for line in r.stdout.splitlines()]
         more = f"\n...[{len(rows) - max_results} more matches]" if len(rows) > max_results else ""
         return clip("\n".join(rows[: int(max_results)]) + more or "(no matches)")
 
@@ -213,6 +218,9 @@ class Toolbox:
     ) -> str:
         if not self.enable_yasa:
             return "error: yasa_run is not available in this stage"
+        if language == "php":
+            return ("error: the YASA release collects no entrypoints for plain PHP or Laravel, so it finds "
+                    "nothing; PHP is covered by residual-sink triage. Call finish.")
         if self.yasa_runs >= self.max_yasa_runs:
             return f"error: yasa_run budget ({self.max_yasa_runs} runs) exhausted"
         timeout = self.cfg.yasa_timeout_s
@@ -245,6 +253,12 @@ class Toolbox:
 
         cmd = [self.cfg.yasa_bin, "--sourcePath", str(source_path), "--language", language,
                "--ruleConfigFile", str(rc_path), "--report", str(out_dir / "report")]
+        if language == "python":
+            # The released package embeds a uast4py for the wrong platform; the one shipped next to
+            # the engine works, so point the engine at it explicitly.
+            uast = Path(self.cfg.yasa_bin).parent / "deps" / "uast4py"
+            if uast.exists():
+                cmd += ["--uastSDKPath", str(uast)]
 
         def as_csv(v: Any) -> str:
             return ",".join(v) if isinstance(v, list) else str(v)

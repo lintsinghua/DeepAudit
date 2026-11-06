@@ -21,5 +21,18 @@ Diagnose with the counters after every run:
     file-level (no functionName): "entrypoints": [{"filePath": "/server.ts", "attribute": "HTTP"}]. [V6]
     A bootstrap *function* (start / configureApp) as entrypoint found nothing when routes are registered inside a
     promise callback. [V6]
+- Python (language="python", checker taint_flow_python_input; the yasa_run tool passes the parser path itself):
+  * Flask routes are self-collected as entrypoints and request.args / request.form as sources; no entrypoints
+    needed. [V8]
+  * Taint passes through %-formatting, +, f-strings and str.format into the sink argument. [V8]
+  * Method sinks match by the receiver name written at the call site: "db.execute", "cur.execute",
+    "subprocess.check_output". A bare "execute" or a chained "sqlite3.connect().execute" matches nothing,
+    so list one fsig per receiver name you see in the code (grep "\.execute(" first). [V8]
+  * The default config has no SQL or template sinks; add them (execute, render_template_string, ...). [V8]
+- PHP: the engine release finds no entrypoints for plain scripts or Laravel (entryPointCount=0 in every
+  mode), so the pipeline does not run it for PHP. [V9]
+- exit=-9 with empty stats means the engine was killed for memory (it reserves an 11 GB heap; seen on an
+  8 GB machine with a 420-line Flask app and with 24k LOC of Spring). Rerunning the same scope fails the same
+  way: narrow source_subdir to the web layer once, or call finish; the triage stage covers residual sinks. [V10]
 - matchedSinkCount very large -> generic sinks like res.send/console.log/JSON.stringify are in the config; drop them. [V7]
 - findingCount counts one result per source; the tool output already groups them per sink (R<run>-F<i>).

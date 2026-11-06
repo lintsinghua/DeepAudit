@@ -60,6 +60,8 @@ creates a normal agent task (`POST /api/v1/agent-tasks/` with `audit_mode: "yasa
 optional `product` / `deploy` / `stages` / `workers` settings are kept in `audit_scope`, so no DB migration
 is needed. `task.py` then runs, within `timeout_seconds` (default 1800):
 
+0. the task's exclude patterns and target files are applied (kept files copied to `<run dir>/src` when
+   anything is left out)
 1. `yasa-mcp init` (navigation cache; on failure the run continues with grep/read only)
 2. dataflow (build + triage) and access control (authz) side by side, workers split about 2:1
 3. findings saved through `_save_findings`, so the task page, finding status workflow and reports work as
