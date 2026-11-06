@@ -58,6 +58,7 @@ GT: dict[str, dict] = {
             ("JS-E11", "routes/fileUpload.ts", 29, 34, "CWE-22"),  # added
             ("JS-E12", "routes/trackOrder.ts", 15, 24, "CWE-79"),  # added
             ("JS-E13", "routes/likeProductReviews.ts", 25, 52, "CWE-943"),  # added
+            ("JS-E14", "lib/insecurity.ts", 186, 192, "CWE-347"),  # added: jwt.verify without algorithms
         ],
         "neg": [
             ("JS-N01", "routes/captcha.ts", 22, 22),
@@ -74,7 +75,7 @@ GT["juice-mini"] = {"pos": GT["juice"]["pos"],
                     "neg": [n for n in GT["juice"]["neg"] if n[0] not in ("JS-N04", "JS-N06")],
                     "ambiguous": GT["juice"]["ambiguous"]}
 ALIASES = {"JS-redirect": [("lib/insecurity.ts", 120, 140)], "JS-E06": [("lib/xml.ts", 33, 40)]}
-FAMILIES = [{"CWE-89", "CWE-943"}, {"CWE-94", "CWE-95", "CWE-1336", "CWE-78"},
+FAMILIES = [{"CWE-347", "CWE-327", "CWE-287"}, {"CWE-89", "CWE-943"}, {"CWE-94", "CWE-95", "CWE-1336", "CWE-78"},
             {"CWE-22", "CWE-73", "CWE-158", "CWE-23"}, {"CWE-611", "CWE-776", "CWE-827"},
             {"CWE-776", "CWE-400", "CWE-502"}]
 SLACK = 3

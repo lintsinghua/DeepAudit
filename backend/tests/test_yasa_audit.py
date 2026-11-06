@@ -129,7 +129,7 @@ def test_benchmark_scoring():
         {"sink_file": "routes/vulnCodeFixes.ts", "sink_line": 83, "cwe": "CWE-22", "verdict": "likely"},
     ]
     r = ev.score("juice-mini", findings)
-    assert r["recall"] == "1/17"
+    assert r["recall"] == "1/18"
     assert [n["id"] for n in r["negative_hits"]] == ["JS-N02"]
     assert r["wrongly_rejected"] == ["JS-E01"]
     assert r["unmatched"] == []  # vulnCodeFixes is ambiguous, not counted

@@ -16,6 +16,7 @@ vulns:
   - {id: JS-E11, cwe: CWE-22, sink: routes/fileUpload.ts:30-34, source: "zip entry names -> createWriteStream (zip slip; fileWriteChallenge)", detector: taint, note: "added after juice-A-2 reported it"}
   - {id: JS-E12, cwe: CWE-79, sink: routes/trackOrder.ts:15-24, source: "req.params.id reflected in JSON, rendered by frontend (reflectedXssChallenge)", detector: taint, note: "added after juice-A-1 reported it"}
   - {id: JS-E13, cwe: CWE-943, sink: routes/likeProductReviews.ts:25-52, source: "req.body.id used as {_id: id} (operator injection, same pattern as noSqlReviews)", detector: taint, note: "added after engine run jfull reported it"}
+  - {id: JS-E14, cwe: CWE-347, sink: lib/insecurity.ts:188, source: "token cookie/header -> jwt.verify(token, publicKey) without an algorithms list (RS256/HS256 confusion; jwtForgedChallenge)", detector: taint, note: "added after pkg-juice-1 reported it"}
 negatives:
   - {id: JS-N01, where: routes/captcha.ts:22, why: "eval of server-generated arithmetic, no user input"}
   - {id: JS-N02, where: routes/keyServer.ts:12, why: "file name rejected if it contains '/', single path segment only"}
