@@ -1,0 +1,42 @@
+# Ground truth for Hospital-Management-System (projectworlds, HospDBMS)
+# Built by manual review of all 3 servlets + 18 JSPs (1829 lines). Paths relative to HospDBMS/.
+# detector: which mode can be expected to find it
+#   taint  = source->sink data flow (YASA mode B, or agent mode A)
+#   authz  = permission model rules (section 2 of the design)
+#   config = pattern / secret scanning
+project: hms
+vulns:
+  # ---- SQL injection, direct (CWE-89) ----
+  - {id: HMS-01, cwe: CWE-89, sink: src/com/hospdbms/pkg/Plogin.java:53, source: "uname param", entry: "POST /Plogin", auth: none, detector: taint}
+  - {id: HMS-02, cwe: CWE-89, sink: src/com/hospdbms/pkg/Doclogin.java:53, source: "uname param", entry: "POST /Doclogin", auth: none, detector: taint}
+  - {id: HMS-03, cwe: CWE-89, sink: WebContent/delptnt.jsp:20, source: "uname param (unquoted)", entry: "GET /delptnt.jsp", auth: none, detector: taint}
+  - {id: HMS-04, cwe: CWE-89, sink: WebContent/success.jsp:25, source: "9 registration params", entry: "POST /success.jsp", auth: none, detector: taint}
+  - {id: HMS-05, cwe: CWE-89, sink: WebContent/successbapn.jsp:20, source: "5 booking params", entry: "POST /successbapn.jsp", auth: none, detector: taint}
+  - {id: HMS-06, cwe: CWE-89, sink: WebContent/successupdate.jsp:27, source: "profile params", entry: "POST /successupdate.jsp", auth: none, detector: taint}
+  - {id: HMS-07, cwe: CWE-89, sink: WebContent/successupdate.jsp:29, source: "Name + name params", entry: "POST /successupdate.jsp", auth: none, detector: taint}
+  # ---- SQL injection, second order via session "Name" (set at login from attacker-registered name) ----
+  - {id: HMS-08, cwe: CWE-89, sink: WebContent/updateprofile.jsp:53, source: "session Name <- registered name", entry: "GET /updateprofile.jsp", auth: user, detector: taint, second_order: true}
+  - {id: HMS-09, cwe: CWE-89, sink: WebContent/apn-his.jsp:105, source: "session Name <- registered name", entry: "GET /apn-his.jsp?id=2|3", auth: user, detector: taint, second_order: true}
+  # ---- Broken access control (CWE-862 / CWE-639) ----
+  - {id: HMS-10, cwe: CWE-862, where: WebContent/delptnt.jsp, desc: "unauthenticated delete of any patient (no session check); combined with HMS-03", auth: none, detector: authz}
+  - {id: HMS-11, cwe: CWE-862, where: WebContent/adminpage.jsp, desc: "admin dashboard reachable without login", auth: none, detector: authz}
+  - {id: HMS-12, cwe: CWE-862, where: WebContent/mangptnts.jsp, desc: "lists all patients incl. aadhar ids without login", auth: none, detector: authz}
+  - {id: HMS-13, cwe: CWE-862, where: WebContent/viewptnts.jsp, desc: "lists all patients without login", auth: none, detector: authz}
+  - {id: HMS-14, cwe: CWE-862, where: WebContent/mngdoc.jsp, desc: "lists doctors without login", auth: none, detector: authz}
+  - {id: HMS-15, cwe: CWE-639, where: WebContent/apn-his.jsp:50, desc: "id=1 returns every appointment; no role check", auth: none, detector: authz}
+  - {id: HMS-16, cwe: CWE-639, where: WebContent/successupdate.jsp:21, desc: "target account taken from Name query param, not session -> edit any patient", auth: none, detector: authz}
+  # ---- XSS (CWE-79), stored: values written via success.jsp, printed unescaped ----
+  - {id: HMS-17, cwe: CWE-79, sink: WebContent/mangptnts.jsp:102-110, source: "patients_info (registration)", detector: taint, second_order: true}
+  - {id: HMS-18, cwe: CWE-79, sink: WebContent/viewptnts.jsp:58-65, source: "patients_info (registration)", detector: taint, second_order: true}
+  - {id: HMS-19, cwe: CWE-79, sink: WebContent/apn-his.jsp:112-116, source: "apn_info (booking)", detector: taint, second_order: true}
+  - {id: HMS-24, cwe: CWE-79, sink: WebContent/updateprofile.jsp:40-157, source: "own patients_info row / session Name printed into attributes", detector: taint, second_order: true, note: "added after run hms-A-1/B-1 reported it; missed in first manual pass"}
+  # ---- Credentials / data protection ----
+  - {id: HMS-20, cwe: CWE-798, where: src/com/hospdbms/pkg/Admnlogin.java:30, desc: "hard-coded admin/1234", detector: config}
+  - {id: HMS-21, cwe: CWE-798, where: "all DB connections", desc: "MySQL root with empty password", detector: config}
+  - {id: HMS-22, cwe: CWE-256, where: "patients_info.password, doc_info.psswd", desc: "plaintext passwords; echoed back in updateprofile.jsp:63", detector: config}
+  - {id: HMS-23, cwe: CWE-352, where: WebContent/mangptnts.jsp:110, desc: "state-changing GET (delete) without CSRF token", detector: authz}
+negatives:
+  - {id: HMS-N01, where: WebContent/include/header.php:35, why: "leftover PHP template from another project; never included by the JSP app (dead code)"}
+  - {id: HMS-N02, where: WebContent/adminpage.jsp:40, why: "constant SQL string, no user input"}
+  - {id: HMS-N03, where: WebContent/apn-his.jsp:46, why: "id parsed with Integer.parseInt; only selects a branch"}
+  - {id: HMS-N04, where: WebContent/mngdoc.jsp:87-94, why: "doc_info is only written by the seed SQL; no in-app write path, so printed values are not attacker-controlled"}

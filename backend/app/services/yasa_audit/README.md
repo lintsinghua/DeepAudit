@@ -1,0 +1,54 @@
+# yasa_audit: agent-built YASA rules + bounded triage
+
+A command-line audit pipeline for data-flow vulnerabilities (injection, code/template execution, path
+traversal, SSRF, XXE, deserialization, XSS, open redirect). It is independent of the existing
+Orchestrator/agents and is not wired into the web UI yet.
+
+## How it works
+
+1. **build**: an agent orients in the project (framework, bootstrap file, wrappers, unparsable code such as
+   JSP), writes one YASA `ruleConfig`, runs the engine and fixes configuration problems it can see in the
+   scan counters. Limits: 25 tool calls, 2 engine runs. It does not triage.
+2. **triage**: every engine finding becomes a candidate. A deterministic sink inventory (L0 patterns + wrapper
+   sinks named in the builder's rules, minus calls whose arguments are all constants) adds *residual*
+   candidates the engine did not report. Candidates are grouped by file; each group is reviewed in a fresh,
+   bounded LLM context (10 tool calls, +4 per extra candidate, cap 24) and every candidate gets a verdict.
+
+Knowledge given to the agents lives in `kb/`: `l0_spec.md` (sources, sinks, class-specific sanitizers),
+`yasa_reference.md` (official engine reference), `yasa_playbook.md` (engine know-how; each item verified,
+see `backend/benchmarks/yasa_audit/README.md`).
+
+## Setup
+
+```bash
+bash backend/scripts/setup_yasa.sh        # YASA engines + yasa-mcp into ~/.yasamcp (Linux x86_64)
+export YASA_BIN=~/.yasamcp/tools/linux-x86-64/yasa/yasa
+export YASA_RG_BIN=~/.yasamcp/tools/linux-x86-64/ripgrep/rg
+export YASAMCP_TOOLS_DIR=~/.yasamcp/tools
+export LLM_BASE_URL=... LLM_API_KEY=... LLM_MODEL=...   # same variables as DeepAudit; OpenAI-compatible, tool calling
+```
+
+## Usage
+
+```bash
+cd backend
+python -m app.services.yasa_audit init  /path/to/project                 # navigation cache (once per version)
+python -m app.services.yasa_audit run   /path/to/project --out out/ \
+       --deploy "Linux container, Node 22"                               # build + triage
+python -m app.services.yasa_audit trace /path/to/project --out out-a/    # baseline: agent tracing only
+```
+
+Outputs: `out/build/yasa-*/` (rule configs, SARIF), `out/build/yasa_registry.json` (engine findings by id),
+`out/triage/findings.json` (verdicts with file:line hops), `out/metrics.json` (tokens, wall time),
+and a `transcript.jsonl` per agent.
+
+`--deploy` matters: whether a path check can be bypassed with a backslash depends on the OS, for example.
+
+## Measured (deepseek-flash, 2026-11-05/06)
+
+| Target | Recall | Negatives hit | Tokens | Wall time |
+| --- | --- | --- | --- | --- |
+| HMS (Java Servlet + JSP, 1.9k LOC) | 13/13 | 0 | 0.71 M | 3.3 min |
+| Juice Shop backend (TypeScript, 10k LOC) | 14/17 | 2 | 1.67 M | 9.5 min |
+
+Details, baselines and the experiments behind the design are in `backend/benchmarks/yasa_audit/README.md`.
