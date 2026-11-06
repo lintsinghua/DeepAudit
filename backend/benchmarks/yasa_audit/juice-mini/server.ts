@@ -8,6 +8,7 @@
  */
 import express from 'express'
 import multer from 'multer'
+import serveIndex from 'serve-index'
 import * as utils from './lib/utils'
 import * as security from './lib/insecurity'
 import { login } from './routes/login'
@@ -38,9 +39,23 @@ const uploadToMemory = multer({ storage: multer.memoryStorage(), limits: { fileS
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 
+/* Authorization (copied from the original server.ts for the routes kept here) */
+app.use(security.updateAuthenticatedUsers())
+app.use('/rest/basket', security.isAuthorized(), security.appendUserId())
+app.use('/rest/basket/:id', security.isAuthorized())
+app.use('/b2b/v2', security.isAuthorized())
+
+/* /ftp directory browsing and file download */
+app.use('/ftp', serveIndex('ftp', { icons: true }))
 app.use('/ftp(?!/quarantine)/:file', servePublicFiles())
 app.use('/ftp/quarantine/:file', serveQuarantineFiles())
+
+/* /encryptionkeys directory browsing */
+app.use('/encryptionkeys', serveIndex('encryptionkeys', { icons: true, view: 'details' }))
 app.use('/encryptionkeys/:file', serveKeyFiles())
+
+/* /logs directory browsing */
+app.use('/support/logs', serveIndex('logs', { icons: true, view: 'details' }))
 app.use('/support/logs/:file', serveLogFiles())
 app.post('/file-upload', uploadToMemory.single('file'), ensureFileIsPassed, checkUploadSize, checkFileType, handleZipFileUpload, handleXmlUpload, handleYamlUpload)
 app.post('/profile/image/url', uploadToMemory.single('file'), utils.asyncHandler(profileImageUrlUpload()))

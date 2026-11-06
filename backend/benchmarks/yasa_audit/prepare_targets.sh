@@ -35,6 +35,9 @@ for r in login search updateProductReviews likeProductReviews showProductReviews
   cp "$DEST/juice/routes/$r.ts" "$DEST/juice-mini/routes/"
 done
 cp "$HERE/juice-mini/server.ts" "$DEST/juice-mini/server.ts"
+# directories served by /ftp, /encryptionkeys and /support/logs (access-control benchmark)
+for d in ftp encryptionkeys; do cp -r "$J/$d" "$DEST/juice/$d"; cp -r "$J/$d" "$DEST/juice-mini/$d"; done
+mkdir -p "$DEST/juice/logs" "$DEST/juice-mini/logs"
 
 # ---- HMS ----
 curl -fsSL -o "$WORK/hms.zip" https://projectworlds.com/wp-content/uploads/2021/05/Hospital-Management-System.zip
