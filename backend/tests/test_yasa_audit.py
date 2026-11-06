@@ -536,3 +536,14 @@ def test_inventory_not_truncated_on_many_hits(tmp_path):
         for j in range(5)) for i in range(120)})
     tb = Toolbox(AuditConfig(), tmp_path, tmp_path / "out", enable_yasa=False)
     assert len(inventory(tb, "php", [])) == 600  # well beyond the agent grep's character clip
+
+
+def test_php_xss_and_redirect_patterns(tmp_path):
+    from app.services.yasa_audit.pipeline import inventory
+
+    _write(tmp_path, {"a.php": "<?php\n$html .= '<pre>Hello ' . $_GET['name'] . '</pre>';\n"
+                               "$html .= \"<pre>Hello {$name}</pre>\";\n"
+                               "header (\"location: \" . $_GET['redirect']);\n$html .= '<p>static</p>';\n"})
+    tb = Toolbox(AuditConfig(), tmp_path, tmp_path / "out", enable_yasa=False)
+    got = {(h["line"], c) for h in inventory(tb, "php", []) for c in h["classes"]}
+    assert {(2, "CWE-79"), (3, "CWE-79"), (4, "CWE-601")} <= got and not any(ln == 5 for ln, _ in got)

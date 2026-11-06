@@ -68,7 +68,9 @@ L0_SINKS: dict[str, list[tuple[str, str]]] = {
         (r"(?<![\w>])unserialize\s*\(", "CWE-502"),
         (r"simplexml_load_string\(|->loadXML\(|LIBXML_NOENT", "CWE-611"),
         (r"(echo|print)\s+[^;]*\$_(GET|POST|REQUEST|COOKIE|SERVER)|<\?=\s*\$|\{!!", "CWE-79"),
-        (r"header\s*\(\s*['\"]Location:[^;]*\$", "CWE-601"),
+        # HTML assembled in a string with a variable: '<pre>' . $x, "<pre>{$x}", "<b>$x"
+        (r"['\"][^'\"]*<[a-zA-Z][^'\"]*(['\"]\s*\.\s*\$\w|\{\$\w|\$\w)", "CWE-79"),
+        (r"header\s*\(\s*['\"](?i:location)\s*:[^;]*\$", "CWE-601"),
     ],
 }
 GLOBS = {"ts": ["*.ts", "*.js"], "java": ["*.java", "*.jsp"], "py": ["*.py"],

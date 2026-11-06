@@ -54,6 +54,8 @@ YASA 混合审计的流程（`backend/app/services/yasa_audit/`）：
 | Hospital-Management-System（Java Servlet + JSP） | ~1.9k LOC | 13/13，负样本 0 命中 | 8/8 | 3.8 min | 1.2 M |
 | OWASP Juice Shop 后端（TypeScript / Express） | ~10k LOC | 16/18，负样本 0 命中 | — | 11.3 min | 3.0 M |
 | PowerJob v5.1.2（Java / Spring） | ~45k LOC | 见下 | 2/2 已知 CVE | ~21 min | 8.7 M |
+| Vulnerable-Flask-App（Python / Flask） | 420 LOC | 5/5 | — | 3.6 min | 0.2 M |
+| DVWA（PHP，无引擎） | ~13k LOC | SQLi、盲注、命令注入 9/9，`impossible` 级 0 误报 | — | 6 min | 3.3 M |
 
 - HMS 一行经 DeepAudit 任务入口实测（数据流和权限两个阶段并行）。
 - PowerJob：权限阶段复现了 CVE-2025-11580 / CVE-2025-11581；数据流阶段的报告经人工复核后有若干确认问题，

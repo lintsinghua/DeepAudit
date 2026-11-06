@@ -124,3 +124,18 @@ PowerJob's two stages ran in parallel after a 40 s index build: about 21 minutes
   that is open.
 - The builder used to spend its whole budget exploring large repositories; it is now reminded to run the
   engine once half its budget is used.
+
+## Python and PHP (2026-11-06)
+
+| Target | Code | Result | Wall | Tokens |
+| --- | --- | --- | --- | --- |
+| Vulnerable-Flask-App (we45, `b6a4f97`), Flask | 420 LOC | 5/5: SQLi `/search`, SSTI in the 404 handler (`request.url`) and in the `/search` error page, `yaml.load` on an upload, XXE via python-docx (likely); `secure_filename` saves not reported | 3.6 min | 0.2 M |
+| DVWA (`a1978a2`), plain PHP | 13k LOC | SQLi, blind SQLi, command injection: 9/9 (low/medium/high), none of the 3 `impossible` levels; file inclusion at the shared `include($file)`; stored XSS at its output sink (`dvwaGuestbook`); upload low; also brute-force login SQLi, `authbypass`/`bac` SQLi, `view_source.php` traversal | 6 min | 3.3 M |
+
+- Flask: both engine runs were OOM-killed on the 8 GB machine (V10); the result is from residual-sink triage.
+- DVWA first missed `sqli/source/*`: the sink inventory reused the agent grep, which clips output, so
+  sinks were dropped on larger projects. Fixed (`grep_rows`); the table shows the rerun.
+- Still missed on DVWA in that run: reflected XSS (HTML built in a string, `$html .= '<pre>' . $_GET[..]`), open
+  redirect (lower-case `location:`), upload medium/high. The two patterns were fixed afterwards and the
+  inventory now contains all `xss_r` and `open_redirect` levels (201 candidates instead of 149); the LLM stage
+  was not rerun.
