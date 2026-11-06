@@ -129,7 +129,8 @@ class Toolbox:
         return clip(f"{path} lines {start}-{end} of {len(lines)}\n{body}")
 
     def grep(self, pattern: str, glob: str = "", max_results: int = 60) -> str:
-        cmd = [self.cfg.rg_bin, "-n", "--no-heading", "-S", "-M", "300", "--max-count", "20"]
+        cmd = [self.cfg.rg_bin, "-n", "--no-heading", "-S", "-M", "300", "--max-count", "20",
+               "--engine", "auto"]  # PCRE2 when a pattern needs look-around
         for d in SKIP_DIRS:
             cmd += ["-g", f"!{d}"]
         if glob:
@@ -213,6 +214,9 @@ class Toolbox:
     ) -> str:
         if not self.enable_yasa:
             return "error: yasa_run is not available in this stage"
+        if language == "php":
+            return ("error: the YASA release collects no entrypoints for plain PHP or Laravel, so it finds "
+                    "nothing; PHP is covered by residual-sink triage. Call finish.")
         if self.yasa_runs >= self.max_yasa_runs:
             return f"error: yasa_run budget ({self.max_yasa_runs} runs) exhausted"
         timeout = self.cfg.yasa_timeout_s
@@ -245,6 +249,12 @@ class Toolbox:
 
         cmd = [self.cfg.yasa_bin, "--sourcePath", str(source_path), "--language", language,
                "--ruleConfigFile", str(rc_path), "--report", str(out_dir / "report")]
+        if language == "python":
+            # The released package embeds a uast4py for the wrong platform; the one shipped next to
+            # the engine works, so point the engine at it explicitly.
+            uast = Path(self.cfg.yasa_bin).parent / "deps" / "uast4py"
+            if uast.exists():
+                cmd += ["--uastSDKPath", str(uast)]
 
         def as_csv(v: Any) -> str:
             return ",".join(v) if isinstance(v, list) else str(v)

@@ -226,7 +226,7 @@ export default function AgentModeSelector({
 
           <div className="mt-auto pt-2 border-t border-border">
             <span className="text-xs uppercase tracking-wider text-muted-foreground font-bold font-mono">
-              适合: Java / JS·TS Web 项目
+              适合: Java / JS·TS / Python / PHP Web 项目
             </span>
           </div>
         </label>

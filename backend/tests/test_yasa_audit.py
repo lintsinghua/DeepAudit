@@ -434,3 +434,95 @@ def test_scope_tree_applies_excludes_and_targets(tmp_path):
     root, dropped = scope_tree(src, tmp_path / "s2", ["*.log"], ["src/A.java", "./web/c.jsp"])
     kept = sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
     assert kept == ["src/A.java", "web/c.jsp"] and dropped == 3
+
+
+# ---------------------------------------------------------------- Python / PHP
+
+
+def _write(root, files):
+    for rel, txt in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(txt)
+
+
+def test_detect_lang_python_and_php(tmp_path):
+    from app.services.yasa_audit.pipeline import detect_lang
+
+    _write(tmp_path / "py", {"a.py": "", "b.py": "", "static/x.js": "", "venv/lib/c.js": "", "venv/lib/d.js": ""})
+    _write(tmp_path / "php", {"index.php": "", "vendor/a/x.php": "", "assets/app.js": ""})
+    _write(tmp_path / "php2", {"a.php": "", "b.php": "", "assets/app.js": ""})
+    assert detect_lang(tmp_path / "py") == "py"
+    assert detect_lang(tmp_path / "php2") == "php"
+
+
+def test_python_entries_flask_fastapi_django(tmp_path):
+    from app.services.yasa_audit.entrypoints import entries_for, global_guards_for
+
+    _write(tmp_path, {
+        "app.py": "bp = Blueprint('admin', __name__, url_prefix='/admin')\n"
+                  "@bp.route('/users', methods=['GET', 'POST'])\n@login_required\ndef users():\n    pass\n"
+                  "@app.before_request\ndef check():\n    pass\n",
+        "api.py": "router = APIRouter(prefix='/api')\n"
+                  "@router.get('/items/{id}')\nasync def item(id: int, user=Depends(current_user)):\n    pass\n",
+        "shop/urls.py": "urlpatterns = [path('orders/<int:pk>/', views.OrderView.as_view())]\n",
+        "shop/views.py": "class OrderView(LoginRequiredMixin, DetailView):\n    pass\n",
+    })
+    es = {e["route"]: e for e in entries_for(tmp_path, "py")}
+    assert es["/admin/users"]["method"] == "GET,POST" and es["/admin/users"]["guards"] == ["@login_required"]
+    assert es["/api/items/{id}"]["guards"] == ["Depends(current_user)"]
+    assert es["/orders/<int:pk>/"]["file"] == "shop/views.py"
+    assert es["/orders/<int:pk>/"]["guards"] == ["LoginRequiredMixin"]
+    assert any("before_request" in g for g in global_guards_for(tmp_path, "py"))
+
+
+def test_php_entries_plain_and_laravel(tmp_path):
+    from app.services.yasa_audit.entrypoints import entries_for
+
+    plain = tmp_path / "plain"
+    _write(plain, {
+        "admin.php": "<?php\nsession_start();\nrequire_once 'auth.php';\n"
+                     "if (!isset($_SESSION['u'])) { header('Location: login.php'); exit; }\n",
+        "view.php": "<?php include($_GET['p']);\n",
+        "vendor/lib/x.php": "<?php\n",
+    })
+    es = {e["route"]: e for e in entries_for(plain, "php")}
+    assert set(es) == {"/admin.php", "/view.php"}
+    assert len(es["/admin.php"]["guards"]) == 3 and es["/view.php"]["guards"] == []
+
+    lv = tmp_path / "lv"
+    _write(lv, {
+        "routes/web.php": "<?php\nRoute::get('/users/{id}', [UserController::class, 'show'])->middleware('auth');\n"
+                          "Route::post('login', [UserController::class, 'login']);\n",
+        "app/Http/Controllers/UserController.php": "<?php\nclass UserController {\n"
+                                                   "  public function show($id) {}\n  public function login() {}\n}\n",
+    })
+    es = {e["route"]: e for e in entries_for(lv, "php")}
+    assert es["/users/{id}"]["guards"] == ["'auth'"] and es["/users/{id}"]["line"] == 3
+    assert es["/login"]["method"] == "POST" and es["/login"]["guards"] == []
+
+
+def test_l0_inventory_python_php(tmp_path):
+    from app.services.yasa_audit.pipeline import inventory
+
+    _write(tmp_path, {
+        "app.py": "db.execute('SELECT * FROM t WHERE id=%s' % uid)\nopen('config.yaml')\n"
+                  "subprocess.check_output(cmd, shell=True)\nrender_template_string(tpl)\n",
+        "x.php": "<?php\nmysqli_query($c, \"SELECT * FROM t WHERE id='$id'\");\nsystem('ls ' . $d);\n"
+                 "include($_GET['p']);\necho $_GET['q'];\n",
+        "vendor/lib.php": "<?php system($x);\n",
+    })
+    tb = Toolbox(AuditConfig(), tmp_path, tmp_path / "out", enable_yasa=False)
+    py = {(h["line"], c) for h in inventory(tb, "py", []) for c in h["classes"]}
+    assert {(1, "CWE-89"), (3, "CWE-78"), (4, "CWE-1336")} <= py and not any(ln == 2 for ln, _ in py)
+    php = {(h["file"], h["line"], c) for h in inventory(tb, "php", []) for c in h["classes"]}
+    assert {("x.php", 2, "CWE-89"), ("x.php", 3, "CWE-78"), ("x.php", 4, "CWE-98"),
+            ("x.php", 5, "CWE-79")} <= php
+    assert not any(f.startswith("vendor/") for f, _, _ in php)
+
+
+def test_build_skips_engine_for_php(tmp_path):
+    from app.services.yasa_audit.pipeline import build
+
+    _write(tmp_path / "src", {"a.php": "<?php echo 1;\n"})
+    m = build(AuditConfig(), tmp_path / "src", tmp_path / "out")
+    assert m["yasa_runs"] == 0 and m["prompt_tokens"] == 0 and "php" in m["skipped"]

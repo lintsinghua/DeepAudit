@@ -26,10 +26,10 @@
 |---|---|---|
 | 思路 | Orchestrator 调度 Recon / Analysis / Verification Agent 自主审计 | 固定流水线：建规则 → 引擎 → 分组复核；并行做权限审计 |
 | 数据流 | Agent 自己沿 source → sink 追踪 | YASA 引擎找污点路径，Agent 只负责"写规则"和"判定" |
-| 权限 | 依赖 Agent 自行发现 | 确定性路由表（Servlet/JSP、Spring `@*Mapping` + 注解 + 拦截器、Express 中间件）+ 同类入口对比 |
+| 权限 | 依赖 Agent 自行发现 | 确定性路由表（Servlet/JSP、Spring、Express、Flask/FastAPI/Django、Laravel/普通 PHP 脚本）+ 同类入口对比 |
 | 验证 | Docker 沙箱执行 PoC | 不执行，结论为静态判定（证据：文件:行 路径、引擎结果编号） |
 | 时间 | 不固定 | 硬预算，默认 30 分钟 |
-| 语言 | 不限 | 目前 Java（含 JSP）、JavaScript / TypeScript（引擎还支持 Go、Python，流水线尚未适配） |
+| 语言 | 不限 | Java（含 JSP）、JavaScript / TypeScript、Python、PHP（PHP 不用引擎，见下） |
 | 依赖 | LLM、Embedding（RAG）、Docker（沙箱） | LLM（OpenAI 兼容、支持 tool calling）、YASA 工具，**不需要** RAG 和 Docker |
 
 YASA 混合审计的流程（`backend/app/services/yasa_audit/`）：
@@ -217,9 +217,18 @@ uv run python -m app.services.yasa_audit authz /path/to/project --out out-authz/
 
 ## 已知限制
 
-- 目前只适配了 Java（含 JSP）和 JS/TS。YASA 引擎本身还支持 Go 和 Python，限制在流水线这一层：危险调用清单（L0 sink）、
-  路由表提取（目前是 Servlet/JSP、Spring、Express）、规则编写手册（playbook）都只为这两种语言写过并经过实测验证。
-  要支持 Go/Python，需要补上这三样，再用对应的靶场验证；在此之前，这两种语言请用 Agent 模式。
+- 各语言的支持程度不同：
+
+  | 语言 | 数据流 | 权限路由表 |
+  |---|---|---|
+  | Java（含 JSP） | 引擎 + 复核 | Servlet、JSP、Spring（注解 + 拦截器 + Security 规则） |
+  | JS / TS | 引擎 + 复核 | Express（全局、前缀、内联中间件） |
+  | Python | 引擎 + 复核 | Flask / FastAPI 装饰器（含 Blueprint/APIRouter 前缀、`Depends`）、Django `urls.py`（视图装饰器、Mixin、`MIDDLEWARE`） |
+  | PHP | **只做危险调用复核**，不跑引擎 | Laravel `routes/*.php`（`->middleware`）；没有 Laravel 时每个脚本都是入口，开头的 include/session 检查作为守卫 |
+
+  PHP 不跑引擎的原因：YASA 当前发布版对普通 PHP 脚本和 Laravel 收集不到任何入口（各种入口模式下入口数都是 0），
+  只支持它内部的几个框架。PHP 的数据流因此只靠危险调用清单 + Agent 复核，跨文件的长链路比其他语言更容易漏。
+- Go：YASA 引擎支持，但流水线还没有为 Go 写危险调用清单、路由提取和规则手册，请先用 Agent 模式。
 - 结论是静态判定，没有执行验证；报告里附带了路径和证据，需要的话请人工复现。
 - 大型 Spring 项目上引擎受内存限制（见上文），而且自定义入口方案还没跑通，这时数据流阶段主要靠残余危险调用复核。
 - 时间预算优先：预算用完时剩下的候选不再复核，任务页会提示数量，清单在运行目录里。

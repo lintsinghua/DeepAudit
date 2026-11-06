@@ -44,10 +44,45 @@ L0_SINKS: dict[str, list[tuple[str, str]]] = {
         (r"openConnection\(|HttpClient", "CWE-918"),
         (r"<%=", "CWE-79"), (r"sendRedirect\(", "CWE-601"), (r"readObject\(", "CWE-502"),
     ],
+    "py": [
+        (r"\.execute(many)?\s*\(|\.raw\s*\(|\bextra\s*\(|text\s*\(\s*f?[\"']", "CWE-89"),
+        (r"os\.system\(|os\.popen\(|subprocess\.\w+\(|commands\.getoutput\(", "CWE-78"),
+        (r"(?<![\w.])(eval|exec)\s*\(", "CWE-94"),
+        (r"render_template_string\(|Template\s*\(|from_string\(|mark_safe\(|Markup\(|\|\s*safe", "CWE-1336"),
+        (r"(?<![\w.])open\s*\(|send_file\(|send_from_directory\(|FileResponse\(|os\.remove\(|shutil\.",
+         "CWE-22"),
+        (r"requests\.(get|post|put|request)\(|urlopen\(|httpx\.|aiohttp\.ClientSession", "CWE-918"),
+        (r"pickle\.loads?\(|yaml\.load\(|marshal\.loads\(|jsonpickle\.decode\(", "CWE-502"),
+        (r"etree\.(parse|fromstring)\(|xml\.dom\.minidom|XMLParser\(", "CWE-611"),
+        (r"(?<![\w.])redirect\s*\(|HttpResponseRedirect\(", "CWE-601"),
+    ],
+    "php": [
+        (r"mysqli?_query\s*\(|->query\s*\(|->exec\s*\(|pg_query\s*\(|DB::(raw|select|statement)\(|"
+         r"whereRaw\(|selectRaw\(|orderByRaw\(", "CWE-89"),
+        (r"(?<![\w>])(system|exec|shell_exec|passthru|popen|proc_open|pcntl_exec)\s*\(|`[^`]*\$", "CWE-78"),
+        (r"(?<![\w>])(eval|assert|create_function)\s*\(|preg_replace\s*\(\s*['\"].*/e", "CWE-94"),
+        (r"(include|require)(_once)?\s*\(?\s*[^;]*\$", "CWE-98"),
+        (r"(?<![\w>])(file_get_contents|file_put_contents|fopen|readfile|unlink|move_uploaded_file|copy|"
+         r"file)\s*\(", "CWE-22"),
+        (r"curl_exec\s*\(|curl_setopt\s*\([^,]+,\s*CURLOPT_URL", "CWE-918"),
+        (r"(?<![\w>])unserialize\s*\(", "CWE-502"),
+        (r"simplexml_load_string\(|->loadXML\(|LIBXML_NOENT", "CWE-611"),
+        (r"(echo|print)\s+[^;]*\$_(GET|POST|REQUEST|COOKIE|SERVER)|<\?=\s*\$|\{!!", "CWE-79"),
+        (r"header\s*\(\s*['\"]Location:[^;]*\$", "CWE-601"),
+    ],
 }
-GLOBS = {"ts": ["*.ts", "*.js"], "java": ["*.java", "*.jsp"]}
+GLOBS = {"ts": ["*.ts", "*.js"], "java": ["*.java", "*.jsp"], "py": ["*.py"],
+         "php": ["*.php", "*.phtml", "*.inc"]}
+# Languages the YASA engine is used for. The released engine collects no entrypoints for plain PHP
+# scripts or Laravel (only for in-house frameworks), so PHP goes engine-less: residual sinks + authz.
+ENGINE_LANGS = {"ts", "java", "py"}
+EXT_LANG = {".ts": "ts", ".js": "ts", ".java": "java", ".jsp": "java", ".py": "py", ".php": "php",
+            ".phtml": "php"}
+SKIP_PARTS = {"node_modules", ".git", ".yasa", ".codegraph", "vendor", "venv", ".venv", "site-packages",
+              "__pycache__"}
 
-MODULE_NAMES = {"path", "fs", "os", "JSON", "Math", "console", "process", "Buffer", "Object", "Array",
+MODULE_NAMES = {"path", "fs", "os", "JSON", "subprocess", "shutil", "json", "yaml", "pickle", "None", "True",
+                "False", "settings", "BASE_DIR", "__file__", "__DIR__", "__FILE__", "Math", "console", "process", "Buffer", "Object", "Array",
                 "String", "Number", "Date", "Promise", "require", "true", "false", "null", "undefined",
                 "this", "new", "await"}
 STR_RE = re.compile(r"'(?:\\.|[^'\\])*'|\"(?:\\.|[^\"\\])*\"|`(?:\\.|[^`\\$]|\$(?!\{))*`")
@@ -55,14 +90,14 @@ ID_RE = re.compile(r"(?<![\w$.])([A-Za-z_$][\w$]*)(?=\s*(\(|\.|))")
 
 
 def detect_lang(root: Path) -> str:
-    counts = {"ts": 0, "java": 0}
+    """Majority language among analysable source files: ts (JS/TS), java (incl. JSP), py, php."""
+    counts = dict.fromkeys(GLOBS, 0)
     for p in root.rglob("*"):
-        if any(part in {"node_modules", ".git", ".yasa", ".codegraph"} for part in p.parts):
+        if any(part in SKIP_PARTS for part in p.parts):
             continue
-        if p.suffix in (".ts", ".js"):
-            counts["ts"] += 1
-        elif p.suffix in (".java", ".jsp"):
-            counts["java"] += 1
+        lang = EXT_LANG.get(p.suffix)
+        if lang:
+            counts[lang] += 1
     return max(counts, key=lambda k: counts[k])
 
 
@@ -71,6 +106,8 @@ def is_constant_call(code: str, pat: str) -> bool:
     function names only), e.g. res.sendFile(path.resolve('frontend/index.html'))."""
     m = re.search(pat, code)
     if not m:
+        return False
+    if re.search(r"\$\w", m.group(0)):  # the match itself contains a variable (PHP echo $_GET[...])
         return False
     rest = code[m.end():]
     if "(" not in code[m.start():m.end()] and "(" in rest:
@@ -93,7 +130,8 @@ def inventory(tb: Toolbox, lang: str, extra_fsigs: list[str]) -> list[dict]:
         for g in GLOBS[lang]:
             for line in tb.grep(pat, glob=g, max_results=400).splitlines():
                 m = re.match(r"^([^:]+):(\d+):(.*)$", line)
-                if not m or "test" in m.group(1).lower() or is_constant_call(m.group(3), pat):
+                if (not m or "test" in m.group(1).lower() or is_constant_call(m.group(3), pat)
+                        or any(part in SKIP_PARTS for part in Path(m.group(1)).parts)):
                     continue
                 key = (m.group(1), int(m.group(2)))
                 hits.setdefault(key, {"file": key[0], "line": key[1], "code": m.group(3).strip()[:200],
@@ -147,6 +185,13 @@ def _metrics(llm: LLM, extra: dict) -> dict:
 def build(cfg: AuditConfig, root: Path, out: Path, deploy: str = "",
           deadline: float | None = None) -> dict:
     out.mkdir(parents=True, exist_ok=True)
+    lang = detect_lang(root)
+    if lang not in ENGINE_LANGS:  # no engine for this language: triage covers residual sinks only
+        m = {"stage": "build", "skipped": f"no engine support for {lang}", "language": lang,
+             "prompt_tokens": 0, "completion_tokens": 0, "llm_calls": 0, "yasa_runs": 0,
+             "engine_findings": 0, "steps": 0, "wall_s": 0.0, "finished": True, "timed_out": False}
+        (out / "metrics.json").write_text(json.dumps(m, indent=1))
+        return m
     tb = Toolbox(cfg, root, out, enable_yasa=True)
     tb.deadline = deadline
     tools = tool_schemas(enable_yasa=True, with_report=False)

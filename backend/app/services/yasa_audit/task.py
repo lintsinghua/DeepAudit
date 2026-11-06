@@ -34,12 +34,13 @@ from .runner import (
 )
 
 logger = logging.getLogger(__name__)
-SOURCE_EXT = {".java", ".jsp", ".jspx", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
-SKIP_DIRS = {"node_modules", ".git", "dist", "build", "target", "vendor"}
+SOURCE_EXT = {".java", ".jsp", ".jspx", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".py", ".php",
+              ".phtml"}
+SKIP_DIRS = {"node_modules", ".git", "dist", "build", "target", "vendor", "venv", ".venv", "__pycache__"}
 
 
 def count_sources(root: Path) -> int:
-    """Files the pipeline can analyse (Java/JSP, JS/TS), for the task's file counter."""
+    """Files the pipeline can analyse (Java/JSP, JS/TS, Python, PHP), for the task's file counter."""
     n = 0
     for _dir, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]

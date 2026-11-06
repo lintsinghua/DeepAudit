@@ -4,6 +4,10 @@
 - Express apps: route registrations in the bootstrap file (server.ts / app.ts). For each route the
   *effective* guards are computed: global app.use(guard) + app.use('/prefix', guard...) whose prefix
   matches + inline middleware. Handlers are resolved to files through the bootstrap's imports.
+- Python: Flask / FastAPI route decorators (other decorators and Depends(...) as guards, blueprint /
+  router prefixes from the same file) and Django urls.py patterns (view decorators and mixins as guards).
+- PHP: Laravel Route:: registrations (->middleware as guards); otherwise every script outside
+  vendor/ is an entry, with its early include/require and session/redirect checks as guards.
 
 The result is a route table that the reviewer agents get in full, so they can compare peers.
 """
@@ -175,9 +179,184 @@ def express_entries(root: Path, boot: Path | None = None) -> list[dict]:
     return routes
 
 
+SKIP_PARTS = {"vendor", "node_modules", ".git", "venv", ".venv", "site-packages", "__pycache__", "tests",
+              "test", "migrations"}
+
+
+def _sources(root: Path, pattern: str):
+    for f in sorted(root.rglob(pattern)):
+        rel = f.relative_to(root)
+        if not any(p in SKIP_PARTS for p in rel.parts):
+            yield f, str(rel)
+
+
+def _line(txt: str, pos: int) -> int:
+    return txt[:pos].count("\n") + 1
+
+
+# ---------------------------------------------------------------- Python
+
+PY_ROUTE_RE = re.compile(r"^\s*@(\w+)\.(route|get|post|put|delete|patch|api_route|websocket)\(\s*"
+                         r"(?:rule\s*=\s*|path\s*=\s*)?[rf]?['\"]([^'\"]*)['\"](.*)$")
+PY_DEF_RE = re.compile(r"^\s*(?:async\s+)?def\s+(\w+)\s*\(")
+PY_PREFIX_RE = re.compile(r"(\w+)\s*=\s*(?:\w+\.)?(Blueprint|APIRouter)\((.*)")
+DJANGO_URL_RE = re.compile(r"\b(path|re_path|url)\(\s*r?['\"]([^'\"]*)['\"]\s*,\s*([\w.]+)")
+
+
+def _py_decorators(lines: list[str], idx: int) -> list[str]:
+    out, j = [], idx - 1
+    while j >= 0 and lines[j].strip().startswith("@"):
+        out.insert(0, lines[j].strip())
+        j -= 1
+    return out
+
+
+def python_entries(root: Path) -> list[dict]:
+    out: list[dict] = []
+    for f, rel in _sources(root, "*.py"):
+        txt = f.read_text(errors="ignore")
+        lines = txt.splitlines()
+        prefixes = {}
+        for m in PY_PREFIX_RE.finditer(txt):
+            pm = re.search(r"(?:url_prefix|prefix)\s*=\s*['\"]([^'\"]*)", m.group(3))
+            prefixes[m.group(1)] = pm.group(1) if pm else ""
+        for i, ln in enumerate(lines):
+            m = PY_ROUTE_RE.match(ln)
+            if not m:
+                continue
+            obj, verb, path, rest = m.groups()
+            j = i + 1
+            while j < len(lines) and lines[j].strip().startswith("@"):
+                j += 1
+            dm = PY_DEF_RE.match(lines[j]) if j < len(lines) else None
+            if not dm:
+                continue
+            sig = " ".join(lines[j:j + 4])
+            methods = re.search(r"methods\s*=\s*\[([^\]]*)\]", rest)
+            guards = [d for d in _py_decorators(lines, j) if not PY_ROUTE_RE.match(d)]
+            guards += [f"Depends({d})" for d in re.findall(r"Depends\(\s*([\w.]+)", sig + rest)]
+            out.append({"route": prefixes.get(obj, "") + path,
+                        "method": (re.sub(r"[\s'\"]", "", methods.group(1)) if methods else
+                                   ("GET" if verb == "route" else verb.upper())),
+                        "file": rel, "line": j + 1, "handler": dm.group(1), "guards": guards})
+    out += django_entries(root)
+    return out
+
+
+def django_entries(root: Path) -> list[dict]:
+    out: list[dict] = []
+    for f, rel in _sources(root, "urls.py"):
+        txt = f.read_text(errors="ignore")
+        for m in DJANGO_URL_RE.finditer(txt):
+            route, view = m.group(2), m.group(3)
+            parts = view.split(".")
+            if parts[-1] == "as_view" and len(parts) > 1:
+                parts = parts[:-1]
+            name = parts[-1]
+            if name == "include":
+                continue
+            target, line, guards = rel, _line(txt, m.start()), []
+            for vf, vrel in _sources(f.parent, "*.py"):
+                vt = vf.read_text(errors="ignore")
+                dm = re.search(rf"^(\s*)(?:async\s+)?(def|class)\s+{re.escape(name)}\b(.*)$", vt, re.M)
+                if dm:
+                    vlines = vt.splitlines()
+                    idx = _line(vt, dm.start()) - 1
+                    guards = _py_decorators(vlines, idx)
+                    bases = re.match(r"\s*\(([^)]*)\)", dm.group(3)) if dm.group(2) == "class" else None
+                    if bases:
+                        guards += [b.strip() for b in bases.group(1).split(",")
+                                   if "Mixin" in b or "Permission" in b]
+                    target, line = str((f.parent / vrel).relative_to(root)), idx + 1
+                    break
+            out.append({"route": "/" + route.lstrip("^/"), "method": "ANY", "file": target, "line": line,
+                        "handler": view, "registered_at": f"{rel}:{_line(txt, m.start())}",
+                        "guards": guards})
+    return out
+
+
+def python_global_guards(root: Path) -> list[str]:
+    out = []
+    for f, rel in _sources(root, "*.py"):
+        txt = f.read_text(errors="ignore")
+        for m in re.finditer(r"@\w+\.before_(app_)?request[^\n]*\n(?:\s*@[^\n]*\n)*\s*def\s+\w+", txt):
+            out.append(f"{rel}:{_line(txt, m.start())} " + re.sub(r"\s+", " ", m.group(0))[:200])
+        for m in re.finditer(r"MIDDLEWARE\s*=\s*\[[^\]]*\]", txt):
+            out.append(f"{rel}:{_line(txt, m.start())} " + re.sub(r"\s+", " ", m.group(0))[:600])
+        for m in re.finditer(r"(FastAPI|APIRouter|include_router)\([^)]*dependencies\s*=[^)]*\)", txt):
+            out.append(f"{rel}:{_line(txt, m.start())} " + re.sub(r"\s+", " ", m.group(0))[:300])
+    return out
+
+
+# ---------------------------------------------------------------- PHP
+
+LARAVEL_RE = re.compile(r"Route::(get|post|put|patch|delete|any|match|resource|apiResource)\(\s*"
+                        r"(?:\[[^\]]*\]\s*,\s*)?['\"]([^'\"]+)['\"]\s*,\s*([^;]*);")
+PHP_GUARD_RE = re.compile(r"(include|require)(_once)?\b[^;]*;|session_start\(\)|"
+                          r"if\s*\([^)]*(\$_SESSION|isset|empty|is_admin|auth|login|logged)[^)]*\)[^;]*"
+                          r"(header\s*\(|die|exit|redirect)[^;]*;?", re.I)
+
+
+def php_entries(root: Path) -> list[dict]:
+    routes = laravel_entries(root)
+    if routes:
+        return routes
+    out = []
+    for f, rel in _sources(root, "*.php"):
+        head = "\n".join(f.read_text(errors="ignore").splitlines()[:40])
+        guards = [re.sub(r"\s+", " ", m.group(0))[:120] for m in PHP_GUARD_RE.finditer(head)
+                  if not (m.group(1) and "$" in m.group(0))]  # dynamic include is a sink, not a guard
+        out.append({"route": "/" + rel, "method": "GET/POST", "file": rel, "line": 1, "guards": guards})
+    return out
+
+
+def laravel_entries(root: Path) -> list[dict]:
+    out: list[dict] = []
+    if not (root / "routes").is_dir():
+        return out
+    for f, _ in _sources(root / "routes", "*.php"):
+        rel = str(f.relative_to(root))
+        txt = f.read_text(errors="ignore")
+        for m in LARAVEL_RE.finditer(txt):
+            verb, path, rest = m.groups()
+            guards = re.findall(r"->middleware\(([^)]*)\)", rest)
+            target, line = rel, _line(txt, m.start())
+            cm = re.search(r"(\w+)::class(?:\s*,\s*['\"](\w+))?", rest) or re.search(r"['\"](\w+)@(\w+)", rest)
+            if cm:
+                for cf, crel in _sources(root, f"{cm.group(1)}.php"):
+                    target, line = crel, 1
+                    ct = cf.read_text(errors="ignore")
+                    if cm.group(2):
+                        mm = re.search(rf"function\s+{re.escape(cm.group(2))}\s*\(", ct)
+                        line = _line(ct, mm.start()) if mm else 1
+                    guards += [f"controller: {g}" for g in re.findall(r"\$this->middleware\(([^)]*)\)", ct)]
+                    break
+            out.append({"route": path if path.startswith("/") else "/" + path, "method": verb.upper(),
+                        "file": target, "line": line, "handler": re.sub(r"\s+", " ", rest)[:120],
+                        "registered_at": f"{rel}:{_line(txt, m.start())}",
+                        "guards": [re.sub(r"\s+", " ", g) for g in guards]})
+    return out
+
+
+def php_global_guards(root: Path) -> list[str]:
+    out = []
+    for f, rel in _sources(root, "*.php"):
+        txt = f.read_text(errors="ignore")
+        for m in re.finditer(r"(protected\s+\$middleware(Groups|Aliases)?\s*=\s*\[|->withMiddleware\(|"
+                             r"Route::middleware\([^)]*\)\s*->\s*group|Route::group\(\s*\[[^\]]*middleware)",
+                             txt):
+            out.append(f"{rel}:{_line(txt, m.start())} " + re.sub(r"\s+", " ", txt[m.start():m.start() + 300]))
+    return out[:40]
+
+
+ENTRIES = {"java": java_entries, "ts": express_entries, "py": python_entries, "php": php_entries}
+GUARDS = {"java": java_global_guards, "py": python_global_guards, "php": php_global_guards}
+
+
 def entries_for(root: Path, lang: str) -> list[dict]:
-    return java_entries(root) if lang == "java" else express_entries(root)
+    return ENTRIES.get(lang, express_entries)(root)
 
 
 def global_guards_for(root: Path, lang: str) -> list[str]:
-    return java_global_guards(root) if lang == "java" else []
+    fn = GUARDS.get(lang)
+    return fn(root) if fn else []
