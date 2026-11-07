@@ -267,6 +267,28 @@ def auto_engine_plan(lang: str, entries: list[dict]) -> dict:
                 "entrypoint_mode": "ONLY_CUSTOM" if eps else "SELF_COLLECT", "entrypoints": len(eps)}
     language = YASA_LANG.get(lang, "java")
     rules = json.loads((RULE_DEFAULTS / f"{language}.json").read_text())
+    # Config-routed projects (recon model with handlers): the engine's own collection (Spring, etc.)
+    # misses handlers wired through config, so start from the model's resolved handlers. For Java the
+    # checker keys entrypoints by package + function; scripts start at their file.
+    eps, seen = [], set()
+    for e in entries:
+        for h in (e.get("handlers") or []):
+            path, invoke = (h.get("path") or ""), (h.get("invoke") or "")
+            if language == "java" and path and invoke and "/" not in path and "." in path:
+                key = ("pkg", path, invoke)
+                if key not in seen:
+                    seen.add(key)
+                    eps.append({"packageName": path, "functionName": invoke, "attribute": "HTTP"})
+        if e.get("resolved") and str(e.get("file", "")).endswith((".groovy", ".py")):
+            key = ("file", e["file"])
+            if key not in seen:
+                seen.add(key)
+                eps.append({"filePath": "/" + e["file"], "attribute": "HTTP"})
+    if eps:
+        for block in rules:
+            block["entrypoints"] = eps[:MAX_AUTO_ENTRYPOINTS]
+        return {"language": language, "rule_config": rules, "checker_ids": rules[0]["checkerIds"],
+                "entrypoint_mode": "BOTH", "entrypoints": len(eps)}
     return {"language": language, "rule_config": rules, "checker_ids": rules[0]["checkerIds"],
             "entrypoint_mode": "SELF_COLLECT", "entrypoints": 0}
 
