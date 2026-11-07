@@ -106,6 +106,26 @@ class Toolbox:
         out = (r.stdout or "") + ("\n" + r.stderr[-1500:] if r.returncode and r.stderr else "")
         return clip(out.strip() or "(no result)")
 
+    def _yasa_index_ready(self) -> bool:
+        """yasa-mcp's func/callers/callgraph need the YASA call graph written by init."""
+        d = self.root / ".yasa" / "yasamcp"
+        # fingerprint_cache.json is written after the call graph has been imported
+        return (d / "yasa.db").exists() and (d / "fingerprint_cache.json").exists()
+
+    def _codegraph(self, args: list[str], timeout: int = 60) -> str:
+        """Same questions answered from codegraph's index (built in seconds even for large projects)."""
+        if not (self.root / ".codegraph" / "codegraph.db").exists():
+            return "error: no navigation index for this project (use grep / read_file)"
+        cmd = [self.cfg.codegraph_bin, *args, "-p", str(self.root)]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return "error: navigation query timed out"
+        except FileNotFoundError:
+            return "error: codegraph is not installed (see backend/scripts/setup_yasa.sh)"
+        out = (r.stdout or "") + ("\n" + r.stderr[-1500:] if r.returncode and r.stderr else "")
+        return clip("[codegraph]\n" + (out.strip() or "(no result)"))
+
     # ---------- navigation ----------
     def list_dir(self, path: str = ".", depth: int = 2) -> str:
         base = self._safe(path)
@@ -149,12 +169,16 @@ class Toolbox:
         return clip("\n".join(rows[: int(max_results)]) + more or "(no matches)")
 
     def find_function(self, name: str, file_path: str = "", detail: str = "summary") -> str:
+        if not self._yasa_index_ready():
+            return self._codegraph(["node", name])
         args = ["func", "--name", name, "--detail", detail, "--max-results", "10"]
         if file_path:
             args += ["--file-path", file_path]
         return self._mcp(args)
 
     def find_callers(self, name: str, file_path: str = "", line: int = 0) -> str:
+        if not self._yasa_index_ready():
+            return self._codegraph(["callers", name, "-l", "30"])
         args = ["callers", name, "--max-results", "30"]
         if file_path:
             args += ["--file-path", file_path]
@@ -163,15 +187,21 @@ class Toolbox:
         return self._mcp(args)
 
     def call_graph(self, name: str, depth: int = 2, file_path: str = "") -> str:
+        if not self._yasa_index_ready():
+            return self._codegraph(["callees", name, "-l", "30"])
         args = ["callgraph", name, "--depth", str(depth), "--maxcallees", "8"]
         if file_path:
             args += ["--file-path", file_path]
         return self._mcp(args)
 
     def find_api(self, api_name: str) -> str:
+        if not self._yasa_index_ready():
+            return self._codegraph(["query", api_name, "-l", "20"])
         return self._mcp(["api", api_name, "--max-results", "20"])
 
     def search_symbol(self, query: str) -> str:
+        if not self._yasa_index_ready():
+            return self._codegraph(["query", query, "-l", "20"])
         return self._mcp(["search", query, "--max-results", "20"])
 
     # ---------- output ----------

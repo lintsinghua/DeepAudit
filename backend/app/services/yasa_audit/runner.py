@@ -67,25 +67,37 @@ def check_tools(cfg: AuditConfig) -> list[str]:
     return missing
 
 
-def init_navigation(cfg: AuditConfig, root: Path, timeout_s: int = 600) -> None:
-    """Bound the whole navigation process tree, including native engine children."""
+def init_navigation(cfg: AuditConfig, root: Path, timeout_s: int = 600, stop=None) -> None:
+    """Bound the whole navigation process tree, including native engine children.
+
+    `stop` (a callable) ends init early without error: the task starts its stages as soon as
+    codegraph's index is written and stops the slower YASA call-graph step when the stages finish.
+    """
     command = [cfg.yasamcp_bin, "init", str(root), "--no-progress", "-b", cfg.yasamcp_tools_dir]
     log_path = root / ".yasa" / "navigation-init.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    t_end = time.time() + timeout_s
     with log_path.open("w") as log:
         with subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT,
                               start_new_session=True) as process:
-            try:
-                code = process.wait(timeout=timeout_s)
-            except subprocess.TimeoutExpired as exc:
-                # Killing only the CLI leaves its YASA/codegraph children running indefinitely.
+            code = None
+            while code is None:
                 try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                process.wait()
-                raise RuntimeError(f"yasa-mcp init timed out after {timeout_s}s; navigation process "
-                                   f"group stopped; log: {log_path}") from exc
+                    code = process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    stopped = bool(stop and stop())
+                    if not stopped and time.time() < t_end:
+                        continue
+                    # Killing only the CLI leaves its YASA/codegraph children running indefinitely.
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait()
+                    if stopped:
+                        return
+                    raise RuntimeError(f"yasa-mcp init timed out after {timeout_s}s; navigation process "
+                                       f"group stopped; log: {log_path}") from None
     if code:
         raise RuntimeError(f"yasa-mcp init exited with code {code}; log: {log_path}")
 

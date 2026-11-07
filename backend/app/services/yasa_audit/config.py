@@ -62,6 +62,8 @@ class AuditConfig:
     rg_bin: str = field(
         default_factory=lambda: os.environ.get("YASA_RG_BIN", str(DEFAULT_TOOLS / "ripgrep" / "rg"))
     )
+    codegraph_bin: str = field(default_factory=lambda: os.environ.get(
+        "YASA_CODEGRAPH_BIN", str(DEFAULT_TOOLS / "codegraph" / "bin" / "codegraph")))
 
     # Budgets. Wall time is the hard constraint: one audit should finish within time_budget_s.
     time_budget_s: int = 1800

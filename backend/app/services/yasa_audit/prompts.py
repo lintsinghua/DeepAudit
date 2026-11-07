@@ -73,6 +73,11 @@ For each entry point in your batch decide, by reading the handler and the guards
    which paths they cover, and how path matching could be bypassed.
 3. When it loads or changes an object by an id from the request, whether ownership/tenant is enforced.
 4. Compare with similar routes in the route table (peer inconsistency is a strong signal).
+5. An entry marked "dispatcher" (or a script entry every other file depends on, such as a front controller)
+   selects the code to run from request data. Find that rule once (which parameters choose which
+   file / class / method, e.g. module+action -> modules/<m>/controller.php action_<a>()), check where the
+   authentication and per-target permission checks sit in that path, and report target families that skip
+   them. The navigation tools find callers/callees; grep finds the targets of the rule.
 Report ONLY access-control problems with report_finding: cwe one of CWE-306 (missing authentication for a
 sensitive function), CWE-862 (missing authorization), CWE-639 (object-level authorization / IDOR),
 CWE-552 / CWE-548 (sensitive files or directory listing exposed). sink_file = where the missing check belongs
