@@ -82,6 +82,8 @@ class Toolbox:
         self.max_yasa_runs = cfg.builder_max_yasa_runs
         self.compact_engine_output = True
         self.yasa_runs = 0
+        # Scoped, line-preserving engine copy (engine_scope.build_engine_src); same relative paths.
+        self.engine_root: Path | None = None
         self.deadline: float | None = None  # epoch seconds; engine runs never exceed it
         self.registry: dict[str, dict] = {}
         self.findings: list[dict] = []
@@ -248,9 +250,6 @@ class Toolbox:
     ) -> str:
         if not self.enable_yasa:
             return "error: yasa_run is not available in this stage"
-        if language == "php":
-            return ("error: the YASA release collects no entrypoints for plain PHP or Laravel, so it finds "
-                    "nothing; PHP is covered by residual-sink triage. Call finish.")
         if self.yasa_runs >= self.max_yasa_runs:
             return f"error: yasa_run budget ({self.max_yasa_runs} runs) exhausted"
         timeout = self.cfg.yasa_timeout_s
@@ -272,14 +271,21 @@ class Toolbox:
         rc_path = out_dir / "rule_config.json"
         rc_path.write_text(json.dumps(rule_config, indent=1, ensure_ascii=False))
 
-        src_root = self._safe(source_subdir) if source_subdir else self.root
+        base = self.engine_root or self.root
+        if source_subdir:
+            self._safe(source_subdir)  # path check against the project
+            src_root = (base / source_subdir).resolve()
+            if not src_root.is_relative_to(base.resolve()) or not src_root.exists():
+                return f"error: {source_subdir} is not in the engine scope"
+        else:
+            src_root = base
         jsp_map: dict[str, str] = {}
         if preprocess_jsp:
             source_path, jsp_map = self._prepare_jsp(src_root, out_dir)
             prefix_rel = None
         else:
             source_path = src_root
-            prefix_rel = src_root.relative_to(self.root)
+            prefix_rel = src_root.relative_to(base.resolve()) if src_root != base else Path(".")
 
         cmd = [self.cfg.yasa_bin, "--sourcePath", str(source_path), "--language", language,
                "--ruleConfigFile", str(rc_path), "--report", str(out_dir / "report")]
@@ -408,7 +414,7 @@ def tool_schemas(enable_yasa: bool, with_report: bool = True) -> list[dict]:
             {"rule_config": {"type": "array", "items": {"type": "object"},
                              "description": "YASA ruleConfig JSON array"},
              "language": {"type": "string",
-                          "enum": ["java", "javascript", "typescript", "python", "golang"]},
+                          "enum": ["java", "javascript", "typescript", "python", "golang", "php"]},
              "checker_ids": {"type": "array", "items": s},
              "checker_pack_ids": {"type": "array", "items": s},
              "analyzer": s,
