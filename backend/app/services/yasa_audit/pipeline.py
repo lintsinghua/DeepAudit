@@ -338,7 +338,9 @@ def authz(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", product: st
     entries, discovery = discover(root, lang, cfg.yasamcp_bin, cfg.codegraph_bin)
     global_guards = global_guards_for(root, lang)
     table = [f"{e['method']} {e['route']} -> {e['file']}:{e['line']} guards={e['guards']}"
-             + (f" dispatcher={e['dispatcher']!r}" if e.get("dispatcher") else "") for e in entries]
+             + (f" dispatcher={e['dispatcher']!r}" if e.get("dispatcher") else "")
+             + (f" web_server_denied={e['web_server_denied']!r}" if e.get("web_server_denied") else "")
+             for e in entries]
     (out / "discovery.json").write_text(json.dumps(discovery, indent=1))
     by_file: dict[str, list[dict]] = {}
     for e in entries:

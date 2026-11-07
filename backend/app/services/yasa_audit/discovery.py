@@ -210,6 +210,52 @@ def script_entries(root: Path, db: Path | None = None) -> tuple[list[dict], dict
     return out, rule
 
 
+# Web-server access rules, wherever they are written: .htaccess / web.config / nginx or Apache
+# configs in the repo, or rule templates that an installer writes from code.
+DENY_RES = [
+    re.compile(r"RedirectMatch\s+(?:403|404)\s+(?:\{\$\w+\}|\(\?i\))?\s*(\S+)"),
+    re.compile(r"RewriteRule\s+(\S+)\s+-\s+\[[^\]]*\b(F|forbidden|G|gone)\b", re.I),
+    re.compile(r"location\s+~\*?\s+(\S+)\s*\{[^}]*\bdeny\s+all", re.S),
+]
+CONF_NAMES = (".htaccess", "web.config", "nginx.conf", "httpd.conf", "apache.conf")
+
+
+def web_server_denies(root: Path, lang_files: list[str] | None = None) -> list[dict]:
+    """Deny rules found in server config files, and in code that writes them (installer templates)."""
+    out: list[dict] = []
+    sources: list[str] = []
+    for d, ds, fs in os.walk(root):
+        ds[:] = [x for x in ds if not x.startswith(".") and x not in ("node_modules", "vendor")]
+        for f in fs:
+            if f in CONF_NAMES or f.endswith((".conf", ".htaccess")):
+                sources.append(os.path.relpath(os.path.join(d, f), root))
+    sources += [f for f in (lang_files or []) if "htaccess" in f.lower() or "install" in f.lower()]
+    for rel in dict.fromkeys(sources):
+        p = root / rel
+        txt = p.read_text(errors="ignore") if p.is_file() else ""
+        if not re.search(r"RedirectMatch|RewriteRule|deny\s+all|Require all denied", txt):
+            continue
+        for rx in DENY_RES:
+            for m in rx.finditer(txt):
+                pat = m.group(1).strip("\"'")
+                try:
+                    out.append({"pattern": pat, "re": re.compile(pat, re.I),
+                                "where": f"{rel}:{txt[:m.start()].count(chr(10)) + 1}"})
+                except re.error:
+                    continue
+    return out
+
+
+def mark_server_denies(entries: list[dict], denies: list[dict]) -> None:
+    for e in entries:
+        url = e.get("route") if e.get("via") == "script" else None
+        if not url:
+            continue
+        hits = [d for d in denies if d["re"].search(url)]
+        if hits:
+            e["web_server_denied"] = f"{hits[0]['pattern']} ({hits[0]['where']})"
+
+
 def mark_dispatchers(root: Path, entries: list[dict]) -> None:
     cache: dict[str, str] = {}
     for e in entries:
@@ -269,9 +315,14 @@ def discover(root: Path, lang: str, yasamcp_bin: str = "", codegraph_bin: str = 
             entries.append(r)
             added += 1
     mark_dispatchers(root, entries)
+    php_like = [e["file"] for e in scripts]
+    denies = web_server_denies(root, [f for f in _script_files(root) if f not in php_like] if scripts else [])
+    mark_server_denies(entries, denies)
     summary = {"codegraph_index": bool(db), "codegraph_routes": len(layers["codegraph"]),
                "yasamcp_apis": len(layers["yasa-mcp"]), "script": rule, "regex_added": added,
-               "total": len(entries), "dispatchers": sum(1 for e in entries if e.get("dispatcher"))}
+               "total": len(entries), "dispatchers": sum(1 for e in entries if e.get("dispatcher")),
+               "web_server_deny_rules": [{"pattern": d["pattern"], "where": d["where"]} for d in denies][:30],
+               "denied_entries": sum(1 for e in entries if e.get("web_server_denied"))}
     return entries, summary
 
 

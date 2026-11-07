@@ -2,8 +2,13 @@
 
 import sqlite3
 
-from app.services.yasa_audit.discovery import (codegraph_ready, codegraph_routes, discover, reachable_files,
-                                               script_entries)
+from app.services.yasa_audit.discovery import (
+    codegraph_ready,
+    codegraph_routes,
+    discover,
+    reachable_files,
+    script_entries,
+)
 
 
 def _write(root, files):
@@ -95,3 +100,21 @@ def test_reachable_files(tmp_path):
                [("a", "b", "calls"), ("b", "c", "instantiates"), ("d", "a", "calls")])
     assert reachable_files(tmp_path, ["index.php"]) == {"index.php", "lib/b.php", "lib/c.php"}
     assert reachable_files(tmp_path, ["index.php"], depth=1) == {"index.php", "lib/b.php"}
+
+
+def test_web_server_deny_rules_from_config_and_installer_code(tmp_path):
+    guard = "<?php\nif (!defined('appEntry')) die('no');\n"
+    files = {f"modules/M{i}/a.php": guard for i in range(12)}
+    files.update({
+        "index.php": "<?php\ndefine('appEntry', true);\n$x = $_GET['a'];\n",
+        "modules/Contacts/tool.php": "<?php\ndefine('appEntry', true);\n$id = $_REQUEST['record'];\n",
+        "cron.php": "<?php\ndefine('appEntry', true);\n",
+        "install/install_utils.php": "<?php\n$rules = <<<EOQ\nRedirectMatch 403 {$ignoreCase}/+(include|modules)/+.*\\.(php|tpl)\n"
+                                     "RedirectMatch 403 {$ignoreCase}/+cron\\.php\nEOQ;\n",
+    })
+    _write(tmp_path, files)
+    entries, summary = discover(tmp_path, "php")
+    denied = {e["file"]: e.get("web_server_denied", "") for e in entries}
+    assert denied["index.php"] == ""
+    assert "install/install_utils.php:3" in denied["modules/Contacts/tool.php"]
+    assert "cron" in denied["cron.php"] and summary["denied_entries"] == 2
