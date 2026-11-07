@@ -149,11 +149,68 @@ def _neutralise_service_classes(dest: Path) -> list[str]:
     return names
 
 
+MANIFESTS = ("package.json", "pom.xml", "build.gradle", "build.gradle.kts", "composer.json", "pyproject.toml",
+             "setup.py", "go.mod", "Gemfile", "Cargo.toml")
+SKIP_DIRS = {"node_modules", ".git", ".yasa", ".codegraph", "vendor", "venv", ".venv", "dist", "build",
+             "target", "__pycache__"}
+MAX_PACKAGE_FILES = 2500
+
+
+def _package_root(root: Path, rel: str) -> str:
+    """Nearest directory above rel (inside root) with a build manifest; "" for the repository root."""
+    parts = Path(rel).parts[:-1]
+    for i in range(len(parts), 0, -1):
+        d = root.joinpath(*parts[:i])
+        if any((d / m).exists() for m in MANIFESTS):
+            return "/".join(parts[:i])
+    return ""
+
+
+def _package_files(root: Path, pkg: str) -> list[str]:
+    from .discovery import NOISE_RE
+    base = root / pkg if pkg else root
+    out = []
+    for d, ds, fs in os.walk(base):
+        ds[:] = [x for x in ds if x not in SKIP_DIRS and not x.startswith(".")]
+        for f in fs:
+            if os.path.splitext(f)[1] in KEEP_EXT:
+                rel = os.path.relpath(os.path.join(d, f), root)
+                if not NOISE_RE.search(rel):
+                    out.append(rel)
+    return out
+
+
+def scope_files(root: Path, entries: list[dict], depth: int = 6) -> tuple[set[str], dict]:
+    """Files the engine gets: the entries' packages when they are small enough, else the files
+    codegraph links to the entries.
+
+    Static edges miss what dynamic languages reach through object properties and computed requires
+    (Ghost: controllers via `api.posts.browse`; the 719-file reachable slice gave 12 sources, the
+    1,838-file package 449). Whole packages keep that code; projects that are one huge package
+    (SuiteCRM, 4,654 PHP files) fall back to the reachable slice.
+    """
+    from .discovery import NOISE_RE, is_client_package
+    entry_files = sorted({e["file"] for e in entries if e.get("file")})
+    reach = reachable_files(root, entry_files, depth=depth) or set(entry_files)
+    # Name-based edges also reach UI packages and tests; the engine needs neither.
+    reach = {f for f in reach if f in entry_files or not (NOISE_RE.search(f) or is_client_package(root, f))}
+    pkgs = sorted({_package_root(root, f) for f in entry_files})
+    pkg_files: set[str] = set()
+    for pkg in pkgs:
+        if not pkg:
+            continue  # the repository root is not a package boundary worth copying whole
+        files = _package_files(root, pkg)
+        if len(pkg_files) + len(files) <= MAX_PACKAGE_FILES:
+            pkg_files.update(files)
+    return reach | pkg_files, {"packages": [p for p in pkgs if p], "package_files": len(pkg_files),
+                               "reachable": len(reach)}
+
+
 def build_engine_src(root: Path, dest: Path, entries: list[dict], max_files: int = 3000,
                      depth: int = 6) -> dict:
     """Write the scoped shadow copy to dest. Returns a summary (files, wrapped entries, skipped)."""
     entry_files = sorted({e["file"] for e in entries if e.get("file")})
-    reach = reachable_files(root, entry_files, depth=depth) or set(entry_files)
+    reach, how = scope_files(root, entries, depth)
     # Keep the closest files first if the slice is still too large for the budget.
     files = sorted(reach, key=lambda f: (f not in entry_files, f))[:max_files]
     if dest.exists():
@@ -175,7 +232,8 @@ def build_engine_src(root: Path, dest: Path, entries: list[dict], max_files: int
             not_wrapped.append(rel)
         shutil.copy2(src, out)
     renamed = _neutralise_service_classes(dest) if wrapped else []
-    return {"files": len(files), "reachable": len(reach), "entry_files": len(entry_files),
+    return {"files": len(files), "reachable": how["reachable"], "packages": how["packages"],
+            "package_files": how["package_files"], "entry_files": len(entry_files),
             "service_classes_renamed": len(renamed),
             "php_wrapped": len(wrapped), "php_not_wrapped": not_wrapped[:20],
             "truncated": len(reach) > max_files}

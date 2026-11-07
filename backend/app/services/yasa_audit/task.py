@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .config import AuditConfig
-from .discovery import codegraph_ready
+from .discovery import codegraph_ready, snapshot_codegraph
 from .runner import (
     check_tools,
     init_navigation,
@@ -166,6 +166,10 @@ async def execute_yasa_task(
     elif not init_job.done():
         await emitter.emit_info(f"🧭 codegraph index ready after {waited}s; YASA call graph continues "
                                 "in the background")
+    try:  # one consistent copy for all stages; the live index stays open by the background init
+        await asyncio.to_thread(snapshot_codegraph, root, out)
+    except Exception as e:
+        logger.warning("codegraph snapshot failed: %s", e)
 
     if is_cancelled():
         raise asyncio.CancelledError("任务已取消")

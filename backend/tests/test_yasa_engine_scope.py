@@ -77,3 +77,38 @@ def test_build_engine_src_scopes_wraps_and_renames_services(tmp_path):
     eng = (tmp_path / "eng" / "index.php").read_text()
     assert "YasaEntry0_1Service" in eng and "UserServic_" in eng and "UserService" not in eng
     assert eng.splitlines()[1:3] == (root / "index.php").read_text().replace("UserService", "UserServic_").splitlines()[1:3]
+
+
+def test_scope_takes_small_packages_whole_and_skips_ui_packages(tmp_path):
+    from app.services.yasa_audit.engine_scope import scope_files
+
+    root = tmp_path / "repo"
+    files = {
+        "server/package.json": '{"dependencies": {"express": "4"}}',
+        "server/routes.js": "x", "server/api/posts.js": "x", "server/api/posts.test.js": "x",
+        "admin/package.json": '{"dependencies": {"react": "18"}}', "admin/src/App.js": "x",
+    }
+    for rel, txt in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(txt)
+    got, how = scope_files(root, [{"file": "server/routes.js"}])
+    # no codegraph edges reach api/posts.js (dynamic property access); the package brings it in
+    assert got == {"server/routes.js", "server/api/posts.js", "server/package.json"} and how["packages"] == ["server"]
+
+
+def test_auto_plan_uses_registration_functions_for_js():
+    from app.services.yasa_audit.pipeline import auto_engine_plan
+
+    entries = [
+        {"file": "server/api/posts.js", "registered_at": "server/routes.js:3", "registration_fn": "apiRoutes"},
+        {"file": "server/api/tags.js", "registered_at": "server/routes.js:4", "registration_fn": "apiRoutes"},
+        {"file": "app.js", "registered_at": "app.js:10", "registration_fn": ""},
+        {"file": "x.ts", "registered_at": "svc.ts:5", "registration_fn": "#createApp"},
+    ]
+    plan = auto_engine_plan("ts", entries)
+    eps = plan["rule_config"][0]["entrypoints"]
+    assert plan["entrypoint_mode"] == "ONLY_CUSTOM" and plan["language"] == "javascript"
+    assert eps == [{"filePath": "/server/routes.js", "attribute": "HTTP", "functionName": "apiRoutes"},
+                   {"filePath": "/app.js", "attribute": "HTTP"}]
+    php = auto_engine_plan("php", [])
+    assert php["entrypoint_mode"] == "SELF_COLLECT" and php["checker_ids"] == ["taint_flow_php_input"]

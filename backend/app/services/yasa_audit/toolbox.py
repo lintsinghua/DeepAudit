@@ -255,7 +255,7 @@ class Toolbox:
         timeout = self.cfg.yasa_timeout_s
         if self.deadline is not None:
             timeout = int(min(timeout, self.deadline - time.time()))
-            if timeout < 60:
+            if timeout < 120:  # a shorter run only times out (Ghost: 69 s) and wastes the slot
                 return "error: not enough time left for another engine run; call finish"
         self.yasa_runs += 1
         n = self.yasa_runs

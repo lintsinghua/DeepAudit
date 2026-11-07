@@ -51,6 +51,19 @@ classes are renamed to `*Servic_`. The reason: YASA's PHP checker self-collects 
 ignores ruleConfig entrypoints (the analyzer never runs the list the checker builds). SuiteCRM: 647 of 4,654
 files, 71 entrypoints, 2.5 min, 14 findings with the stock PHP rules. DVWA: 83 entrypoints, 59 findings, 9 s.
 
+Automatic first engine run: the build stage runs the engine once before the agent, with the default
+sources/sinks of the language (`kb/rule_defaults`, from YASA's example configs) and entrypoints derived from
+discovery: for JS/TS the function that registers each route (codegraph: smallest function around the
+registration line), for the other languages the engine's own collection. It gets at most half of the build
+window; the agent starts from its findings (R1-*) and refines the rules. Engine runs with less than two
+minutes left are refused instead of timing out.
+
+Scope: whole packages (nearest manifest) of the entries when they total at most 2,500 files, plus files
+codegraph links to the entries; UI packages (React/Vue/... without a server framework) and tests are
+excluded, as are client-side routes and test routes in discovery. Every stage reads a snapshot of
+codegraph's index (WAL file, still open by the background init) and treats index errors as "no ordering
+information", never as a stage failure.
+
 Large projects: codegraph indexes SuiteCRM (760k LOC PHP) in 37 s, while YASA's call graph took more than
 15 min. Stages start when codegraph's index is complete; YASA's call graph keeps building in the background
 and is stopped at the end; until it exists, the navigation tools (find_function, find_callers, call_graph,

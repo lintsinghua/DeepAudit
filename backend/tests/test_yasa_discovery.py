@@ -21,10 +21,11 @@ def _codegraph(root, nodes, edges, complete=True):
     """Minimal codegraph.db: the columns discovery reads."""
     (root / ".codegraph").mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(root / ".codegraph" / "codegraph.db")
-    con.execute("create table nodes (id text, kind text, name text, file_path text, start_line int)")
+    con.execute("create table nodes (id text, kind text, name text, file_path text, start_line int, "
+                "end_line int, is_exported int)")
     con.execute("create table edges (source text, target text, kind text)")
     con.execute("create table project_metadata (key text, value text)")
-    con.executemany("insert into nodes values (?,?,?,?,?)", nodes)
+    con.executemany("insert into nodes values (?,?,?,?,?,?,?)", [(*n, None, 0) for n in nodes])
     con.executemany("insert into edges values (?,?,?)", edges)
     con.execute("insert into project_metadata values ('index_state', ?)", ("complete" if complete else "running",))
     con.commit()
@@ -118,3 +119,50 @@ def test_web_server_deny_rules_from_config_and_installer_code(tmp_path):
     assert denied["index.php"] == ""
     assert "install/install_utils.php:3" in denied["modules/Contacts/tool.php"]
     assert "cron" in denied["cron.php"] and summary["denied_entries"] == 2
+
+
+def test_codegraph_routes_skip_client_tests_and_record_registration_fn(tmp_path):
+    from app.services.yasa_audit.discovery import codegraph_routes
+
+    _write(tmp_path, {
+        "server/package.json": '{"dependencies": {"express": "4"}}',
+        "server/routes.js": "module.exports = function apiRoutes() {\n  const r = express.Router();\n"
+                            "  r.get('/posts', auth, http(api.posts.browse));\n};\n",
+        "web/package.json": '{"dependencies": {"react": "18"}}',
+        "web/src/api.js": "fetch('/x')\n",
+        "web/src/App.tsx": "<Route path='/a' element={<A/>} />\n",
+        "server/routes.test.js": "r.get('/t', h)\n",
+    })
+    _codegraph(tmp_path, [
+        ("r1", "route", "GET /posts", "server/routes.js", 3),
+        ("r2", "route", "GET /x", "web/src/api.js", 1),          # client fetch in a UI package
+        ("r3", "route", "/a", "web/src/App.tsx", 1),              # client router
+        ("r4", "route", "GET /t", "server/routes.test.js", 1),    # test
+        ("fn", "function", "apiRoutes", "server/routes.js", 1),
+        ("h", "function", "http", "server/http.js", 1),
+    ], [("r1", "h", "calls")])
+    con = sqlite3.connect(tmp_path / ".codegraph" / "codegraph.db")
+    con.execute("update nodes set end_line = 4 where id = 'fn'")
+    con.commit()
+    con.close()
+    routes = codegraph_routes(tmp_path / ".codegraph" / "codegraph.db", tmp_path)
+    assert [(r["route"], r["registration_fn"]) for r in routes] == [("/posts", "apiRoutes")]
+
+
+def test_snapshot_is_used_and_survives_live_index_changes(tmp_path):
+    from app.services.yasa_audit.discovery import codegraph_db, snapshot_codegraph
+
+    _codegraph(tmp_path, [("r1", "route", "GET /a", "a.js", 1)], [])
+    snap = snapshot_codegraph(tmp_path, tmp_path / "run")
+    assert snap is not None and codegraph_db(tmp_path) == snap
+    (tmp_path / ".codegraph" / "codegraph.db").write_bytes(b"garbage")   # live index rewritten / locked
+    con = sqlite3.connect(snap)
+    assert con.execute("select count(*) from nodes where kind='route'").fetchone()[0] == 1
+    con.close()
+
+
+def test_snapshot_skipped_when_index_incomplete(tmp_path):
+    from app.services.yasa_audit.discovery import snapshot_codegraph
+
+    _codegraph(tmp_path, [], [], complete=False)
+    assert snapshot_codegraph(tmp_path, tmp_path / "run") is None

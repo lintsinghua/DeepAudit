@@ -177,3 +177,19 @@ Before: the whole-tree call graph did not finish in 15 min; with the project's o
 also collected as entries, the run was OOM-killed (5.7 GB) at entry 13 of 156; `YASA_EP_MEM_LIMIT_DELTA_MB`
 did not stop it. Limit: targets selected by dynamic dispatch (SuiteCRM `index.php?module=&action=`) are not
 linked by static edges, so they are outside the slice unless the builder adds them.
+
+## Ghost (2026-11-07)
+
+TryGhost/Ghost `f2846cd` (monorepo, 1,907 JS + 5,272 TS files, most of them UI apps). Reported problem: engine run #1
+analysed 1,399 files, 7 entrypoints, 0 sources ("An Error Occurred in custom entrypoint"); run #2 timed out
+after 69 s; triage then failed reading codegraph's database and the data-flow stage stopped.
+
+| Cause | Fix |
+| --- | --- |
+| Discovery returned 378 routes including React Router routes, `*.test.tsx`, e2e helpers and demos | test/fixture/demo files, client routers and UI packages (UI framework, no server framework) dropped: 283 routes, all in `ghost/core/server` |
+| File-level entrypoints for routes registered inside `module.exports = function apiRoutes()` start only the definition | entrypoint = registration function from codegraph (V11): 0 -> 449 sources on `ghost/core` |
+| Reachable-file slice misses controllers reached through `api.posts.browse` | scope keeps the entries' package: 12 -> 463 sources |
+| The agent explored for most of the 10.5-min build window, leaving 69 s for its second run | automatic run #1 before the agent; runs with < 120 s left refused; time-based reminder at 60% |
+| codegraph.db (WAL) still open by the background init | stages read a snapshot; index errors only disable ordering |
+
+Automatic run #1 now, no LLM: 2,098 files (of the slice), 7 entrypoints, 463 sources, 864 sinks, 7 findings, 135 s.

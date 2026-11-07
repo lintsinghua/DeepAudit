@@ -1,0 +1,875 @@
+[
+ {
+  "checkerIds": [
+   "taint_flow_python_input"
+  ],
+  "sources": {
+   "FuncCallReturnValueTaintSource": [
+    {
+     "fsig": "read",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "urlopen",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "parse_qs",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "load",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "get_json",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "body",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "receive_text",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "receive_json",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "get_argument",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "get_arguments",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "json",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "decode_message",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "invocation_metadata",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "read",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "parse_args",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "getenv",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "dotenv_values",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "loads",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "load",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "read_string",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    }
+   ],
+   "FuncCallArgTaintSource": [
+    {
+     "fsig": "request",
+     "args": [
+      "*"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "on_message",
+     "args": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "on_event",
+     "args": [
+      "1"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "on_message",
+     "args": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "handle_request",
+     "args": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "call",
+     "args": [
+      "*"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "insecure_channel",
+     "args": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "execute",
+     "args": [
+      "*"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "raw",
+     "args": [
+      "*"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "get",
+     "args": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "set",
+     "args": [
+      "0",
+      "1"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    }
+   ],
+   "TaintSource": [
+    {
+     "path": "debug_port",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "path",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "headers",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "args",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "form",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "values",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "json",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "data",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "headers",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "cookies",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "view_args",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "query_params",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "path_params",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "cookies",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "GET",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "POST",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "FILES",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "body",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "COOKIES",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "kwargs",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "body",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "args",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "form",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "files",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "query_params",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "path_params",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "headers",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "value",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "body",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "filename",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "argv",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "environ",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "path": "flask.request",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    }
+   ]
+  },
+  "sinks": {
+   "FuncCallTaintSink": [
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PythonSSRF",
+     "fregex": "httpx\\.AsyncClient\\s*\\([^)]*\\)\\.get"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PythonCodeExec",
+     "fsig": "eval"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PythonCodeExec",
+     "fsig": "exec"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PythonDeserialization",
+     "fsig": "pickle.loads"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PythonDeserialization",
+     "fsig": "yaml.load"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PythonSSRF",
+     "fsig": "requests.get"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PythonSSRF",
+     "fsig": "requests.post"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PythonSSRF",
+     "fsig": "http.client.HTTPConnection.request"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PythonSSRF",
+     "fsig": "request.urlopen"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PythonCommandExec",
+     "fsig": "os.system"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PythonCommandExec",
+     "fsig": "os.popen"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PythonCommandExec",
+     "fsig": "subprocess.call"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PythonCommandExec",
+     "fsig": "subprocess.run"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PythonCommandExec",
+     "fsig": "os.execl"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PythonCommandExec",
+     "fsig": "os.execle"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PythonCommandExec",
+     "fsig": "os.execlp"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PythonCommandExec",
+     "fsig": "os.execlpe"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PythonCommandExec",
+     "fsig": "os.execv"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PythonCommandExec",
+     "fsig": "os.execve"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PythonCommandExec",
+     "fsig": "os.execvp"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PythonCommandExec",
+     "fsig": "os.execvpe"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PythonTemplateInjection",
+     "fsig": "flask.render_template"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "Chromium",
+     "fsig": "Chromium"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonSqlInjection",
+     "fsig": "session.execute"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonSqlInjection",
+     "fsig": "engine.execute"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonSqlInjection",
+     "fsig": "MyModel.objects.raw"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonSqlInjection",
+     "fsig": "cursor.execute"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonSqlInjection",
+     "fsig": "db.execute_sql"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonSqlInjection",
+     "fsig": "MyModel.raw"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonCommandInjection",
+     "fsig": "os.system"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonCommandInjection",
+     "fsig": "os.popen"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonCommandInjection",
+     "fsig": "subprocess.run"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonCommandInjection",
+     "fsig": "subprocess.Popen"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonCommandInjection",
+     "fsig": "asyncio.create_subprocess_shell"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonPathTraversal",
+     "fsig": "open"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonPathTraversal",
+     "fsig": "pathlib.Path.write_text"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonPathTraversal",
+     "fsig": "shutil.move"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonPathTraversal",
+     "fsig": "os.rename"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonPathTraversal",
+     "fsig": "os.remove"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonPathTraversal",
+     "fsig": "Flask.send_from_directory"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonPathTraversal",
+     "fsig": "aiofiles.open"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonSSRF",
+     "fsig": "requests.get"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonSSRF",
+     "fsig": "requests.post"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonSSRF",
+     "fsig": "urllib.request.urlopen"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonSSRF",
+     "fsig": "httpx.AsyncClient.get"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonSSRF",
+     "fsig": "smtplib.SMTP.sendmail"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonTemplateInjection",
+     "fsig": "Template.render"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonTemplateInjection",
+     "fsig": "django.shortcuts.render"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonTemplateInjection",
+     "fsig": "Template.render"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonXSS",
+     "fsig": "fastapi.responses.HTMLResponse"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonLogInjection",
+     "fsig": "logging.Logger.info"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonLogInjection",
+     "fsig": "logging.Logger.error"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonLogInjection",
+     "fsig": "structlog.get_logger().msg"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonDeserializationGadget",
+     "fsig": "pickle.dump"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonDeserializationGadget",
+     "fsig": "pickle.dumps"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonDeserializationGadget",
+     "fsig": "yaml.dump"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonDeserializationGadget",
+     "fsig": "json.xxdumps"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonResponseWrite",
+     "fsig": "flask.Response"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonResponseWrite",
+     "fsig": "fastapi.Response"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonResponseWrite",
+     "fsig": "django.http.HttpResponse"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonInfoLeak",
+     "fsig": "traceback.print_exc"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonInfoLeak",
+     "fsig": "logging.exception"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PythonInfoLeak",
+     "fsig": "django.settings.SECRET_KEY"
+    }
+   ]
+  },
+  "sanitizers": []
+ }
+]

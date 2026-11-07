@@ -21,6 +21,13 @@ Diagnose with the counters after every run:
     file-level (no functionName): "entrypoints": [{"filePath": "/server.ts", "attribute": "HTTP"}]. [V6]
     A bootstrap *function* (start / configureApp) as entrypoint found nothing when routes are registered inside a
     promise callback. [V6]
+  * When routes are registered inside a function (module.exports = function apiRoutes() { router.get(...) }), a
+    file-level entrypoint only defines that function: entryPointCount=1, markedSourceCount=0. List the function:
+    {"filePath": "/<file>", "functionName": "apiRoutes"}; it is found through the module's exports. Ghost: 0 ->
+    449 sources. The pipeline's automatic run #1 already does this from codegraph's route table. [V11]
+  * Statically reachable files are not enough for dynamic JS: controllers reached through object properties
+    (api.posts.browse) drop out. The scoped copy keeps whole packages (nearest package.json) up to 2,500
+    files. Ghost: 719-file slice 12 sources, package 463. [V11]
 - Python (language="python", checker taint_flow_python_input; the yasa_run tool passes the parser path itself):
   * Flask routes are self-collected as entrypoints and request.args / request.form as sources; no entrypoints
     needed. [V8]

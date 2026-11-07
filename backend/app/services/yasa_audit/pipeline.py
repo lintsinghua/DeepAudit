@@ -18,7 +18,7 @@ from pathlib import Path
 
 from .agent_loop import run_agent
 from .config import AuditConfig
-from .discovery import discover, reachable_files
+from .discovery import discover, reachable_files, snapshot_codegraph
 from .engine_scope import build_engine_src
 from .entrypoints import global_guards_for
 from .llm import LLM
@@ -188,6 +188,63 @@ def _metrics(llm: LLM, extra: dict) -> dict:
             "llm_calls": llm.usage.calls, **extra}
 
 
+RULE_DEFAULTS = Path(__file__).parent / "kb" / "rule_defaults"
+YASA_LANG = {"java": "java", "py": "python", "php": "php"}
+MAX_AUTO_ENTRYPOINTS = 60
+
+
+def auto_engine_plan(lang: str, entries: list[dict]) -> dict:
+    """Deterministic first engine run: default rules for the language plus the discovered entries.
+
+    JS/TS: the engine only starts from listed entrypoints, and must start in the function whose body
+    registers the routes (a file-level start only defines that function: 0 sources on Ghost). Other
+    languages: the engine collects framework entries itself (Spring, Flask/Django, PHP *Service
+    wrappers from engine_scope).
+    """
+    if lang == "ts":
+        ts = sum(1 for e in entries if str(e.get("registered_at") or e["file"]).split(":")[0].endswith((".ts", ".tsx")))
+        language = "typescript" if ts * 2 > len(entries) else "javascript"
+        eps, seen = [], set()
+        for e in entries:
+            site = str(e.get("registered_at") or "").split(":")[0] or e["file"]
+            fn = e.get("registration_fn") or ""
+            if fn.startswith("#") or not site:
+                continue  # private class members cannot be looked up through module exports
+            key = (site, fn)
+            if key in seen:
+                continue
+            seen.add(key)
+            ep = {"filePath": "/" + site, "attribute": "HTTP"}
+            if fn:
+                ep["functionName"] = fn
+            eps.append(ep)
+        rules = json.loads((RULE_DEFAULTS / "javascript.json").read_text())
+        for block in rules:
+            block["entrypoints"] = eps[:MAX_AUTO_ENTRYPOINTS]
+        return {"language": language, "rule_config": rules, "checker_ids": rules[0]["checkerIds"],
+                "entrypoint_mode": "ONLY_CUSTOM" if eps else "SELF_COLLECT", "entrypoints": len(eps)}
+    language = YASA_LANG.get(lang, "java")
+    rules = json.loads((RULE_DEFAULTS / f"{language}.json").read_text())
+    return {"language": language, "rule_config": rules, "checker_ids": rules[0]["checkerIds"],
+            "entrypoint_mode": "SELF_COLLECT", "entrypoints": 0}
+
+
+def _auto_engine_run(tb: Toolbox, plan: dict, window_end: float | None) -> str:
+    """Run the plan with at most half of the remaining build window, as one extra engine run."""
+    saved = tb.deadline
+    if window_end is not None:
+        tb.deadline = time.time() + max(0.0, (window_end - time.time()) / 2)
+    tb.max_yasa_runs += 1
+    try:
+        return tb.yasa_run(plan["rule_config"], plan["language"], checker_ids=plan["checker_ids"],
+                           entrypoint_mode=plan["entrypoint_mode"],
+                           preprocess_jsp=plan["language"] == "java" and any((tb.engine_root or tb.root).rglob("*.jsp")))
+    except Exception as e:  # the agent still gets its own runs
+        return f"error: automatic engine run failed: {type(e).__name__}: {e}"
+    finally:
+        tb.deadline = saved
+
+
 def build(cfg: AuditConfig, root: Path, out: Path, deploy: str = "",
           deadline: float | None = None) -> dict:
     out.mkdir(parents=True, exist_ok=True)
@@ -200,7 +257,15 @@ def build(cfg: AuditConfig, root: Path, out: Path, deploy: str = "",
         return m
     tb = Toolbox(cfg, root, out, enable_yasa=True)
     tb.deadline = deadline
-    entries, disc = discover(root, lang, cfg.yasamcp_bin, cfg.codegraph_bin)
+    try:
+        snapshot_codegraph(root, out)
+    except Exception:  # discovery falls back to the live index
+        pass
+    try:
+        entries, disc = discover(root, lang, cfg.yasamcp_bin, cfg.codegraph_bin)
+    except Exception as e:  # never lose the stage over entry discovery
+        entries, disc = [], {"error": f"{type(e).__name__}: {e}", "codegraph_routes": 0, "yasamcp_apis": 0,
+                             "dispatchers": 0}
     scope_note = ""
     n_src = sum(1 for p in root.rglob("*") if p.suffix in EXT_LANG and not any(x in SKIP_PARTS for x in p.parts))
     if entries and (lang == "php" or n_src > ENGINE_SCOPE_MIN_FILES):
@@ -217,17 +282,34 @@ def build(cfg: AuditConfig, root: Path, out: Path, deploy: str = "",
     (out / "discovery.json").write_text(json.dumps(disc, indent=1))
     sample = "\n".join(f"  {e['method']} {e['route']} -> {e['file']}:{e['line']} ({e['via']})"
                        for e in entries[:40])
+    plan = auto_engine_plan(lang, entries)
+    auto = _auto_engine_run(tb, plan, deadline)
+    (out / "auto_run.txt").write_text(auto)
+    t_start = time.time()
     tools = tool_schemas(enable_yasa=True, with_report=False)
     llm = LLM(cfg)
+
+    def _late_without_own_run(steps: int, t: Toolbox) -> bool:
+        if deadline is None or t.yasa_runs > 1:
+            return False
+        return time.time() > t_start + 0.6 * max(0.0, deadline - t_start)
+
     res = run_agent(llm, tb, tools, builder_prompt(cfg.builder_budget, cfg.builder_max_yasa_runs, deploy),
                     f"Build engine rules for the project. Top-level listing:\n{tb.list_dir('.', 1)}\n"
                     f"Discovered entries ({len(entries)}; {json.dumps({k: disc[k] for k in ('codegraph_routes', 'yasamcp_apis', 'dispatchers')})}):\n"
-                    f"{sample}{scope_note}",
+                    f"{sample}{scope_note}\n\nEngine run #1 was made automatically with the default "
+                    f"{plan['language']} rules and {plan['entrypoints'] or 'self-collected'} entrypoints "
+                    f"(mode {plan['entrypoint_mode']}); its output, findings registered as R1-F*:\n{auto[:6000]}\n"
+                    "Improve on it: add the project's sources, sinks and sanitizers, fix entrypoints that "
+                    "were not found, then run again.",
                     cfg.builder_budget, out / "transcript.jsonl", deadline=deadline,
-                    reminders=[(lambda steps, t: steps >= cfg.builder_budget // 2 and t.yasa_runs == 0,
+                    reminders=[(lambda steps, t: steps >= cfg.builder_budget // 2 and t.yasa_runs <= 1,
                                 "You have used half of your budget without running the engine. Stop "
-                                "exploring: write the ruleConfig now from what you know and call yasa_run.")])
-    m = _metrics(llm, {"stage": "build", "yasa_runs": tb.yasa_runs,
+                                "exploring: write the ruleConfig now from what you know and call yasa_run."),
+                               (_late_without_own_run,
+                                "60% of the build time is gone and you have not run the engine yourself. Call "
+                                "yasa_run now; a run started with less than two minutes left is refused.")])
+    m = _metrics(llm, {"stage": "build", "yasa_runs": tb.yasa_runs, "auto_run": plan | {"rule_config": None},
                        "engine_findings": len(tb.registry), **res})
     (out / "metrics.json").write_text(json.dumps(m, indent=1))
     return m
@@ -302,7 +384,11 @@ def triage(cfg: AuditConfig, root: Path, engine_dir: Path, out: Path, group: str
         units = [(c, cfg.triage_budget, _cand_rank(c)) for c in cands]
     # Engine first, then the worst residual classes; within a class, sinks in files that codegraph
     # links to a discovered entry come first (a tie-breaker only: dynamic dispatch hides edges).
-    reach = reachable_files(root, [e["file"] for e in discover(root, lang, "", "")[0]])
+    try:  # ordering aid only: any index problem must not stop the stage
+        snapshot_codegraph(root, out)
+        reach = reachable_files(root, [e["file"] for e in discover(root, lang, "", "")[0]])
+    except Exception:
+        reach = set()
     if reach:
         def _file(u: dict) -> str:
             return (u.get("candidates") or [u])[0]["sink"].rsplit(":", 1)[0]
@@ -357,7 +443,12 @@ def authz(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", product: st
     out.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
     lang = detect_lang(root)
-    entries, discovery = discover(root, lang, cfg.yasamcp_bin, cfg.codegraph_bin)
+    try:
+        snapshot_codegraph(root, out)
+        entries, discovery = discover(root, lang, cfg.yasamcp_bin, cfg.codegraph_bin)
+    except Exception as e:  # fall back to the regex extractors
+        from .entrypoints import entries_for
+        entries, discovery = entries_for(root, lang), {"error": f"{type(e).__name__}: {e}"}
     global_guards = global_guards_for(root, lang)
     table = [f"{e['method']} {e['route']} -> {e['file']}:{e['line']} guards={e['guards']}"
              + (f" dispatcher={e['dispatcher']!r}" if e.get("dispatcher") else "")

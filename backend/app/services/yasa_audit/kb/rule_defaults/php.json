@@ -1,0 +1,842 @@
+[
+ {
+  "checkerIds": [
+   "taint_flow_php_input"
+  ],
+  "sources": {
+   "TaintSource": [
+    {
+     "className": "",
+     "path": "_GET",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "className": "",
+     "path": "_POST",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "className": "",
+     "path": "_REQUEST",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "className": "",
+     "path": "_COOKIE",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "className": "",
+     "path": "_SERVER",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "className": "",
+     "path": "_FILES",
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    }
+   ],
+   "FuncCallReturnValueTaintSource": [
+    {
+     "fsig": "readline",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "getRequest",
+     "calleeType": "*",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "getPost",
+     "calleeType": "*",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "getQuery",
+     "calleeType": "*",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "getCookie",
+     "calleeType": "*",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "getHeader",
+     "calleeType": "*",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "getEnv",
+     "calleeType": "*",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "getUnSafeData",
+     "calleeType": "*",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "getAllRequest",
+     "calleeType": "*",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "getAllGetAndPost",
+     "calleeType": "*",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "input",
+     "calleeType": "*",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    },
+    {
+     "fsig": "param",
+     "calleeType": "*",
+     "values": [
+      "0"
+     ],
+     "scopeFile": "all",
+     "scopeFunc": "all"
+    }
+   ]
+  },
+  "sinks": {
+   "FuncCallTaintSink": [
+    {
+     "args": [
+      "1"
+     ],
+     "attribute": "PhpSqlInjection",
+     "fsig": "mysqli_query"
+    },
+    {
+     "args": [
+      "1"
+     ],
+     "attribute": "PhpSqlInjection",
+     "fsig": "mysqli_multi_query"
+    },
+    {
+     "args": [
+      "1"
+     ],
+     "attribute": "PhpSqlInjection",
+     "fsig": "mysqli_prepare"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PhpSqlInjection",
+     "calleeType": "mysqli",
+     "fsig": "query"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PhpSqlInjection",
+     "calleeType": "mysqli",
+     "fsig": "multi_query"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PhpSqlInjection",
+     "calleeType": "mysqli",
+     "fsig": "prepare"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PhpSqlInjection",
+     "calleeType": "PDO",
+     "fsig": "query"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PhpSqlInjection",
+     "calleeType": "PDO",
+     "fsig": "exec"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PhpSqlInjection",
+     "calleeType": "PDO",
+     "fsig": "prepare"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PhpSqlInjection",
+     "fsig": "mysql_query"
+    },
+    {
+     "args": [
+      "1"
+     ],
+     "attribute": "PhpSqlInjection",
+     "fsig": "pg_query"
+    },
+    {
+     "args": [
+      "1"
+     ],
+     "attribute": "PhpSqlInjection",
+     "fsig": "pg_query_params"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpCommandInjection",
+     "fsig": "exec"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpCommandInjection",
+     "fsig": "system"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpCommandInjection",
+     "fsig": "passthru"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpCommandInjection",
+     "fsig": "shell_exec"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpCommandInjection",
+     "fsig": "popen"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpCommandInjection",
+     "fsig": "proc_open"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpCommandInjection",
+     "fsig": "pcntl_exec"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpCodeInjection",
+     "fsig": "eval"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpCodeInjection",
+     "fsig": "assert"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpCodeInjection",
+     "fsig": "preg_replace"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpCodeInjection",
+     "fsig": "create_function"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpCodeInjection",
+     "fsig": "call_user_func"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpCodeInjection",
+     "fsig": "call_user_func_array"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpDeserialization",
+     "fsig": "unserialize"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpXSS",
+     "fsig": "echo"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpXSS",
+     "fsig": "print"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpXSS",
+     "fsig": "printf"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpXSS",
+     "fsig": "vprintf"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpPathTraversal",
+     "fsig": "file_get_contents"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpPathTraversal",
+     "fsig": "file_put_contents"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpPathTraversal",
+     "fsig": "fopen"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpPathTraversal",
+     "fsig": "readfile"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpPathTraversal",
+     "fsig": "include"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpPathTraversal",
+     "fsig": "include_once"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpPathTraversal",
+     "fsig": "require"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpPathTraversal",
+     "fsig": "require_once"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpPathTraversal",
+     "fsig": "copy"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpPathTraversal",
+     "fsig": "rename"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpPathTraversal",
+     "fsig": "unlink"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpPathTraversal",
+     "fsig": "mkdir"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpPathTraversal",
+     "fsig": "rmdir"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpPathTraversal",
+     "fsig": "move_uploaded_file"
+    },
+    {
+     "args": [
+      "2"
+     ],
+     "attribute": "PhpSSRF",
+     "fsig": "curl_setopt"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpSSRF",
+     "fsig": "curl_init"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PhpSSRF",
+     "fsig": "file_get_contents"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpSSRF",
+     "fsig": "fsockopen"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpHeaderInjection",
+     "fsig": "header"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpHeaderInjection",
+     "fsig": "setcookie"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpLDAPInjection",
+     "fsig": "ldap_search"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpLDAPInjection",
+     "fsig": "ldap_list"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpLDAPInjection",
+     "fsig": "ldap_read"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpXXE",
+     "fsig": "simplexml_load_string"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpXXE",
+     "fsig": "simplexml_load_file"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpXXE",
+     "calleeType": "DOMDocument",
+     "fsig": "loadXML"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpXXE",
+     "calleeType": "DOMDocument",
+     "fsig": "load"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpLogInjection",
+     "fsig": "error_log"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpLogInjection",
+     "fsig": "syslog"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PhpSqlInjection",
+     "calleeType": "*",
+     "fsig": "query"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PhpSqlInjection",
+     "calleeType": "*",
+     "fsig": "queryValue"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PhpSqlInjection",
+     "calleeType": "*",
+     "fsig": "queryColumn"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PhpSqlInjection",
+     "calleeType": "*",
+     "fsig": "multi_query"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PhpSqlInjection",
+     "calleeType": "*",
+     "fsig": "prepare"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PhpSqlInjection",
+     "calleeType": "*",
+     "fsig": "exec"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpXXE",
+     "calleeType": "SimpleXMLElement",
+     "fsig": "loadXML"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpXXE",
+     "calleeType": "SimpleXMLElement",
+     "fsig": "load"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpXXE",
+     "calleeType": "SimpleXMLIterator",
+     "fsig": "load"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpXXE",
+     "calleeType": "XMLReader",
+     "fsig": "open"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PhpSqlInjection",
+     "calleeType": "DbExecuter",
+     "fsig": "execute"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PhpPathTraversal",
+     "fsig": "tempnam"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpPathTraversal",
+     "fsig": "tmpfile"
+    },
+    {
+     "args": [
+      "1"
+     ],
+     "attribute": "PhpCSVInjection",
+     "fsig": "fputcsv"
+    },
+    {
+     "args": [
+      "1"
+     ],
+     "attribute": "PhpPathTraversal",
+     "fsig": "fwrite"
+    },
+    {
+     "args": [
+      "*"
+     ],
+     "attribute": "PhpHeaderInjection",
+     "fsig": "setrawcookie"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PhpHeaderInjection",
+     "fsig": "http_response_code"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PhpHeaderInjection",
+     "fsig": "header_remove"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PhpPathTraversal",
+     "fsig": "chmod"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "PhpPathTraversal",
+     "fsig": "chown"
+    }
+   ]
+  },
+  "sanitizers": {
+   "FuncCallSanitizer": [
+    {
+     "fsig": "htmlspecialchars",
+     "sanitizerType": "PhpXSS"
+    },
+    {
+     "fsig": "htmlentities",
+     "sanitizerType": "PhpXSS"
+    },
+    {
+     "fsig": "strip_tags",
+     "sanitizerType": "PhpXSS"
+    },
+    {
+     "fsig": "mysqli_real_escape_string",
+     "sanitizerType": "PhpSqlInjection"
+    },
+    {
+     "fsig": "real_escape_string",
+     "calleeType": "mysqli",
+     "sanitizerType": "PhpSqlInjection"
+    },
+    {
+     "fsig": "quote",
+     "calleeType": "PDO",
+     "sanitizerType": "PhpSqlInjection"
+    },
+    {
+     "fsig": "addslashes",
+     "sanitizerType": "PhpSqlInjection"
+    },
+    {
+     "fsig": "pg_escape_string",
+     "sanitizerType": "PhpSqlInjection"
+    },
+    {
+     "fsig": "pg_escape_literal",
+     "sanitizerType": "PhpSqlInjection"
+    },
+    {
+     "fsig": "intval",
+     "sanitizerType": "ALL"
+    },
+    {
+     "fsig": "floatval",
+     "sanitizerType": "ALL"
+    },
+    {
+     "fsig": "is_numeric",
+     "sanitizerType": "ALL"
+    },
+    {
+     "fsig": "ctype_digit",
+     "sanitizerType": "ALL"
+    },
+    {
+     "fsig": "ctype_alpha",
+     "sanitizerType": "ALL"
+    },
+    {
+     "fsig": "ctype_alnum",
+     "sanitizerType": "ALL"
+    },
+    {
+     "fsig": "escapeshellarg",
+     "sanitizerType": "PhpCommandInjection"
+    },
+    {
+     "fsig": "escapeshellcmd",
+     "sanitizerType": "PhpCommandInjection"
+    },
+    {
+     "fsig": "urlencode",
+     "sanitizerType": "PhpSSRF"
+    },
+    {
+     "fsig": "rawurlencode",
+     "sanitizerType": "PhpSSRF"
+    },
+    {
+     "fsig": "basename",
+     "sanitizerType": "PhpPathTraversal"
+    },
+    {
+     "fsig": "realpath",
+     "sanitizerType": "PhpPathTraversal"
+    },
+    {
+     "fsig": "filter_var",
+     "sanitizerType": "ALL"
+    },
+    {
+     "fsig": "filter_input",
+     "sanitizerType": "ALL"
+    },
+    {
+     "fsig": "preg_replace",
+     "sanitizerType": "ALL"
+    },
+    {
+     "fsig": "dirname",
+     "sanitizerType": "PhpPathTraversal"
+    },
+    {
+     "fsig": "libxml_disable_entity_loader",
+     "sanitizerType": "PhpXXE"
+    }
+   ]
+  }
+ }
+]

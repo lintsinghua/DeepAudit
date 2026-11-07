@@ -1,0 +1,93 @@
+[
+ {
+  "checkerIds": [
+   "taint_flow_java_input"
+  ],
+  "sources": {},
+  "sinks": {
+   "FuncCallTaintSink": [
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "JavaCommandExec",
+     "calleeType": "",
+     "fsig": "Runtime.getRuntime().exec"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "JavaCommandExec",
+     "calleeType": "",
+     "fsig": "SinkUtil.sink"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "JavaCommandExec",
+     "calleeType": "Runtime.getRuntime()",
+     "fsig": "exec"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "JavaCommandExec",
+     "calleeType": "Runtime",
+     "fsig": "exec"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "JavaSSRF",
+     "calleeType": "cn.hutool.http.HttpRequest",
+     "fsig": "post"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "JavaSSRF",
+     "calleeType": "org.apache.http.impl.client.CloseableHttpClient",
+     "fsig": "execute"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "JavaSSRF",
+     "calleeType": "java.net.HttpURLConnection",
+     "fsig": "openConnection"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "JavaSSRF",
+     "calleeType": "java.net.URL",
+     "fsig": "openConnection"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "JavaSSRF",
+     "calleeType": "com.squareup.okhttp.Call",
+     "fsig": "execute"
+    },
+    {
+     "args": [
+      "0"
+     ],
+     "attribute": "JavaSSRF",
+     "calleeType": "java.sql.Statement",
+     "fsig": "executeQuery"
+    }
+   ]
+  },
+  "sanitizers": []
+ }
+]
