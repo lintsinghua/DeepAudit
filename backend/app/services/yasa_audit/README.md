@@ -74,6 +74,11 @@ is needed. `task.py` then runs, within `timeout_seconds` (default 1800):
    for agent tasks. Triage verdicts become confidence (confirmed 0.85, likely 0.6, one severity lower), not
    `is_verified`: nothing is executed.
 
+Navigation initialization has its own timeout (up to 600 seconds within the audit budget). On timeout,
+the entire navigation process group is stopped, including native engine children. Its stdout/stderr
+are retained in the scoped project's `.yasa/navigation-init.log`; a timeout means degraded navigation,
+not successful indexing of the whole project.
+
 LLM settings come from the user's DeepAudit LLM config (then the environment); the provider must be
 OpenAI-compatible with tool calling. Cancelling the task stops agent loops and pending units. Run
 directories (rules, SARIF, transcripts, `not_reviewed`) go to `$YASA_AUDIT_RUNS_DIR/<task id>`

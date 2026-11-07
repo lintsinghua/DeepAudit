@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import shutil
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -66,9 +68,26 @@ def check_tools(cfg: AuditConfig) -> list[str]:
 
 
 def init_navigation(cfg: AuditConfig, root: Path, timeout_s: int = 600) -> None:
-    """Build the yasa-mcp navigation cache for the project (needed by the nav tools)."""
-    subprocess.run([cfg.yasamcp_bin, "init", str(root), "--no-progress", "-b", cfg.yasamcp_tools_dir],
-                   check=True, timeout=timeout_s, capture_output=True)
+    """Bound the whole navigation process tree, including native engine children."""
+    command = [cfg.yasamcp_bin, "init", str(root), "--no-progress", "-b", cfg.yasamcp_tools_dir]
+    log_path = root / ".yasa" / "navigation-init.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("w") as log:
+        with subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT,
+                              start_new_session=True) as process:
+            try:
+                code = process.wait(timeout=timeout_s)
+            except subprocess.TimeoutExpired as exc:
+                # Killing only the CLI leaves its YASA/codegraph children running indefinitely.
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait()
+                raise RuntimeError(f"yasa-mcp init timed out after {timeout_s}s; navigation process "
+                                   f"group stopped; log: {log_path}") from exc
+    if code:
+        raise RuntimeError(f"yasa-mcp init exited with code {code}; log: {log_path}")
 
 
 def _load(out: Path) -> dict:
