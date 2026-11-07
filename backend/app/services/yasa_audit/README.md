@@ -27,9 +27,15 @@ see `backend/benchmarks/yasa_audit/README.md`).
 ## Setup
 
 ```bash
-bash backend/scripts/setup_yasa.sh        # YASA engines + yasa-mcp (own virtualenv) into ~/.yasamcp, Linux x86_64
+bash backend/scripts/setup_yasa.sh        # native YASA + official yasa-mcp bundle into ~/.yasamcp
 export LLM_BASE_URL=... LLM_API_KEY=... LLM_MODEL=...   # CLI only; OpenAI-compatible with tool calling
 ```
+
+Supported platforms: Linux x86_64, macOS ARM64 (Apple Silicon) and macOS x86_64 (Intel).
+The installer preserves the official MCP bundle's `lib/` directory, verifies its release checksum,
+and reuses an existing installation on subsequent runs. No Docker or Rosetta is needed on macOS.
+Legacy source virtualenv installations are still discovered; use `YASA_REF=<tag/branch>` to install
+from source and set `YASAMCP_BIN` to the path printed by the installer.
 
 With the default location nothing else is needed. For another location run the script with
 `YASAMCP_HOME=/opt/yasamcp` and start the CLI or backend with the same variable; `YASA_BIN`, `YASAMCP_BIN`,
@@ -67,6 +73,11 @@ is needed. `task.py` then runs, within `timeout_seconds` (default 1800):
 3. findings saved through `_save_findings`, so the task page, finding status workflow and reports work as
    for agent tasks. Triage verdicts become confidence (confirmed 0.85, likely 0.6, one severity lower), not
    `is_verified`: nothing is executed.
+
+Navigation initialization has its own timeout (up to 600 seconds within the audit budget). On timeout,
+the entire navigation process group is stopped, including native engine children. Its stdout/stderr
+are retained in the scoped project's `.yasa/navigation-init.log`; a timeout means degraded navigation,
+not successful indexing of the whole project.
 
 LLM settings come from the user's DeepAudit LLM config (then the environment); the provider must be
 OpenAI-compatible with tool calling. Cancelling the task stops agent loops and pending units. Run

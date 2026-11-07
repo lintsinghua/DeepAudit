@@ -75,11 +75,14 @@ YASA 混合审计的流程（`backend/app/services/yasa_audit/`）：
 | Node.js | 20+ | 前端 |
 | pnpm | 10（随 corepack 提供） | 前端依赖管理 |
 | PostgreSQL | 15+ | 数据库 |
-| git、curl、unzip | — | 安装 YASA 工具 |
+| curl、unzip、tar | — | 安装 YASA 工具（源码安装另需 git） |
 | Redis | 可选 | 启动时检查，缺失不影响使用 |
 | Docker | 可选 | 只有 Agent 模式的沙箱验证需要；YASA 模式不需要 |
 
-YASA 混合审计只支持 **Linux x86_64**（YASA 官方提供的二进制）。内存建议 16 GB 以上：在 8 GB 的机器上，
+YASA 混合审计支持 **Linux x86_64、macOS Apple Silicon（ARM64）和 macOS Intel（x86_64）**。
+安装脚本和后端按本机平台选择官方工具包；macOS 不需要 Docker 或 Rosetta。
+macOS 可用 Homebrew 安装 PostgreSQL 15+、Node.js 20+、uv 和 pnpm；数据库创建好后按下文配置和启动。
+内存建议 16 GB 以上：在 8 GB 的机器上，
 YASA 处理 2 万行以上的 Spring 项目会因内存不足被终止，这时流水线会退化为只做残余危险调用复核，仍在预算内完成。
 
 ```bash
@@ -138,7 +141,12 @@ uv run alembic upgrade head      # 建表；首次启动时会自动创建演示
 bash scripts/setup_yasa.sh       # 仍在 backend/ 目录下执行
 ```
 
-脚本会把 YASA 引擎二进制和 yasa-mcp（装在独立的 virtualenv 里）安装到 `~/.yasamcp`，并检查两者能否启动，用时约 1 分钟。
+脚本会把本机平台的 YASA 引擎安装到 `~/.yasamcp/tools/<平台>/`，把官方
+[yasa-mcp v1.0.3](https://github.com/antgroup/YASA-Engine/releases/tag/yasamcp-v1.0.3)
+完整发布包（含 `lib/`）安装到 `~/.yasamcp/mcp/<平台>/`，校验 MCP 包的 SHA256，并检查工具能否启动。
+平台目录为 `linux-x86-64`、`darwin-aarch64` 或 `darwin-x86-64`。重复执行会复用已安装的引擎和同版本 MCP。
+需要从源码安装 MCP 时可设置 `YASA_REF=<上游 tag/分支>`，仍使用独立的 `~/.yasamcp/venv`，
+并按脚本输出设置 `YASAMCP_BIN`。原有 virtualenv 安装也继续兼容。
 装在默认位置时后端会自动找到，不用设置环境变量。想换位置就用 `YASAMCP_HOME=/opt/yasamcp bash scripts/setup_yasa.sh`，
 之后启动后端时也要带上同一个 `YASAMCP_HOME`。
 

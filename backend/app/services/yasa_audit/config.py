@@ -8,16 +8,33 @@ backend/scripts/setup_yasa.sh and can be overridden with YASA_* variables.
 from __future__ import annotations
 
 import os
+import platform
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULT_HOME = Path(os.environ.get("YASAMCP_HOME", Path.home() / ".yasamcp"))
-DEFAULT_TOOLS = DEFAULT_HOME / "tools" / "linux-x86-64"
+
+
+def platform_directory() -> str:
+    """Use the same native-tool directory names as upstream yasa-mcp."""
+    system, machine = platform.system(), platform.machine()
+    return {
+        ("Darwin", "arm64"): "darwin-aarch64",
+        ("Darwin", "aarch64"): "darwin-aarch64",
+        ("Darwin", "x86_64"): "darwin-x86-64",
+        ("Linux", "x86_64"): "linux-x86-64",
+    }.get((system, machine), f"{system.lower()}-{machine.lower()}")
+
+
+DEFAULT_TOOLS = DEFAULT_HOME / "tools" / platform_directory()
 
 
 def _default_yasamcp() -> str:
-    """yasa-mcp from the virtualenv created by scripts/setup_yasa.sh, else the one on PATH."""
+    """Official release bundle, legacy source virtualenv, then PATH."""
+    native_bin = DEFAULT_HOME / "mcp" / platform_directory() / "yasamcp"
+    if native_bin.is_file() and os.access(native_bin, os.X_OK):
+        return str(native_bin)
     venv_bin = DEFAULT_HOME / "venv" / "bin" / "yasa-mcp"
     return str(venv_bin) if venv_bin.exists() else "yasa-mcp"
 
