@@ -43,6 +43,14 @@ Each entry is annotated with `dispatcher` (request data selects the code: dynami
 server configs, or rule templates written by installer code). Dispatchers are reviewed first and the
 reviewer resolves the dispatch convention once.
 
+Engine input (`engine_scope.py`): the discovered entries also drive the taint engine. For PHP, and for any
+project above 1,500 source files, the builder's engine runs use a line-preserving shadow copy that contains
+only the files codegraph links to the entries. PHP entry scripts are wrapped as
+`YasaEntry<N>_<k>Service::run()` (top-level classes stay at file level), and the project's own `*Service`
+classes are renamed to `*Servic_`. The reason: YASA's PHP checker self-collects `*Service` methods, and it
+ignores ruleConfig entrypoints (the analyzer never runs the list the checker builds). SuiteCRM: 647 of 4,654
+files, 71 entrypoints, 2.5 min, 14 findings with the stock PHP rules. DVWA: 83 entrypoints, 59 findings, 9 s.
+
 Large projects: codegraph indexes SuiteCRM (760k LOC PHP) in 37 s, while YASA's call graph took more than
 15 min. Stages start when codegraph's index is complete; YASA's call graph keeps building in the background
 and is stopped at the end; until it exists, the navigation tools (find_function, find_callers, call_graph,

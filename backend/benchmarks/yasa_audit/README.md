@@ -161,3 +161,19 @@ unverified.
 Data-flow inventory: 3,684 sinks in 806 files (2,015 in files codegraph links to an entry). At about six
 file units per minute, a 30 min budget reviews roughly a fifth of them; ordering is by class, then
 reachability.
+
+### Engine on the entry slice (2026-11-07)
+
+`engine_scope.build_engine_src`: files codegraph links to the discovered entries, PHP entry scripts wrapped
+as `*Service::run()`, project `*Service` classes renamed (same length). Stock `rule_config_php.json`,
+`--entrypointMode SELF_COLLECT`, no LLM:
+
+| Target | Engine input | Entrypoints | Sources / sinks matched | Findings | Time |
+| --- | --- | --- | --- | --- | --- |
+| DVWA | 99 of 169 PHP files | 83 | 974 / 215 | 59 (57 sinks: SQLi, blind SQLi, exec, open redirect at the vulnerable levels; some `impossible`, left to triage) | 9 s |
+| SuiteCRM | 647 files, 278k lines (of 4,654 / 760k) | 71 | 1,241 / 1,064 | 14 (7 sinks, e.g. `createPortalUser.php:44` `$_REQUEST['record']` into `file_get_contents(URL)`) | 2.5 min |
+
+Before: the whole-tree call graph did not finish in 15 min; with the project's own 100+ `*Service` classes
+also collected as entries, the run was OOM-killed (5.7 GB) at entry 13 of 156; `YASA_EP_MEM_LIMIT_DELTA_MB`
+did not stop it. Limit: targets selected by dynamic dispatch (SuiteCRM `index.php?module=&action=`) are not
+linked by static edges, so they are outside the slice unless the builder adds them.

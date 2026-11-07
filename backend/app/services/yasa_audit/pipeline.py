@@ -19,6 +19,7 @@ from pathlib import Path
 from .agent_loop import run_agent
 from .config import AuditConfig
 from .discovery import discover, reachable_files
+from .engine_scope import build_engine_src
 from .entrypoints import global_guards_for
 from .llm import LLM
 from .prompts import authz_prompt, builder_prompt, trace_prompt, triage_prompt
@@ -76,9 +77,11 @@ L0_SINKS: dict[str, list[tuple[str, str]]] = {
 }
 GLOBS = {"ts": ["*.ts", "*.js"], "java": ["*.java", "*.jsp"], "py": ["*.py"],
          "php": ["*.php", "*.phtml", "*.inc"]}
-# Languages the YASA engine is used for. The released engine collects no entrypoints for plain PHP
-# scripts or Laravel (only for in-house frameworks), so PHP goes engine-less: residual sinks + authz.
-ENGINE_LANGS = {"ts", "java", "py"}
+# Languages the YASA engine is used for. PHP script entries reach the engine through the Service
+# wrapper in engine_scope (the PHP analyzer ignores ruleConfig entrypoints).
+ENGINE_LANGS = {"ts", "java", "py", "php"}
+# Above this many source files the engine gets the entry-scoped copy instead of the whole tree.
+ENGINE_SCOPE_MIN_FILES = 1500
 EXT_LANG = {".ts": "ts", ".js": "ts", ".java": "java", ".jsp": "java", ".py": "py", ".php": "php",
             ".phtml": "php"}
 SKIP_PARTS = {"node_modules", ".git", ".yasa", ".codegraph", "vendor", "venv", ".venv", "site-packages",
@@ -197,10 +200,29 @@ def build(cfg: AuditConfig, root: Path, out: Path, deploy: str = "",
         return m
     tb = Toolbox(cfg, root, out, enable_yasa=True)
     tb.deadline = deadline
+    entries, disc = discover(root, lang, cfg.yasamcp_bin, cfg.codegraph_bin)
+    scope_note = ""
+    n_src = sum(1 for p in root.rglob("*") if p.suffix in EXT_LANG and not any(x in SKIP_PARTS for x in p.parts))
+    if entries and (lang == "php" or n_src > ENGINE_SCOPE_MIN_FILES):
+        scope = build_engine_src(root, out / "engine_src", entries)
+        if scope["files"]:
+            tb.engine_root = out / "engine_src"
+            scope_note = (
+                f"\nThe engine runs on a scoped copy: {scope['files']} files that codegraph links to the "
+                f"{len(entries)} discovered entries (of {n_src} source files); source_subdir is relative to it."
+                + (f" {scope['php_wrapped']} PHP entry scripts are wrapped as YasaEntry*Service::run() so the "
+                   "PHP checker collects them (use entrypoint_mode SELF_COLLECT; superglobal sources are "
+                   "self-collected, so list sinks and sanitizers)." if scope["php_wrapped"] else ""))
+        (out / "engine_scope.json").write_text(json.dumps(scope, indent=1))
+    (out / "discovery.json").write_text(json.dumps(disc, indent=1))
+    sample = "\n".join(f"  {e['method']} {e['route']} -> {e['file']}:{e['line']} ({e['via']})"
+                       for e in entries[:40])
     tools = tool_schemas(enable_yasa=True, with_report=False)
     llm = LLM(cfg)
     res = run_agent(llm, tb, tools, builder_prompt(cfg.builder_budget, cfg.builder_max_yasa_runs, deploy),
-                    f"Build engine rules for the project. Top-level listing:\n{tb.list_dir('.', 1)}",
+                    f"Build engine rules for the project. Top-level listing:\n{tb.list_dir('.', 1)}\n"
+                    f"Discovered entries ({len(entries)}; {json.dumps({k: disc[k] for k in ('codegraph_routes', 'yasamcp_apis', 'dispatchers')})}):\n"
+                    f"{sample}{scope_note}",
                     cfg.builder_budget, out / "transcript.jsonl", deadline=deadline,
                     reminders=[(lambda steps, t: steps >= cfg.builder_budget // 2 and t.yasa_runs == 0,
                                 "You have used half of your budget without running the engine. Stop "

@@ -520,13 +520,6 @@ def test_l0_inventory_python_php(tmp_path):
     assert not any(f.startswith("vendor/") for f, _, _ in php)
 
 
-def test_build_skips_engine_for_php(tmp_path):
-    from app.services.yasa_audit.pipeline import build
-
-    _write(tmp_path / "src", {"a.php": "<?php echo 1;\n"})
-    m = build(AuditConfig(), tmp_path / "src", tmp_path / "out")
-    assert m["yasa_runs"] == 0 and m["prompt_tokens"] == 0 and "php" in m["skipped"]
-
 
 def test_inventory_not_truncated_on_many_hits(tmp_path):
     from app.services.yasa_audit.pipeline import inventory

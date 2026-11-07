@@ -234,10 +234,11 @@ uv run python -m app.services.yasa_audit authz /path/to/project --out out-authz/
   | Java（含 JSP） | 引擎 + 复核 | Servlet、JSP、Spring（注解 + 拦截器 + Security 规则） |
   | JS / TS | 引擎 + 复核 | Express（全局、前缀、内联中间件） |
   | Python | 引擎 + 复核 | Flask / FastAPI 装饰器（含 Blueprint/APIRouter 前缀、`Depends`）、Django `urls.py`（视图装饰器、Mixin、`MIDDLEWARE`） |
-  | PHP | **只做危险调用复核**，不跑引擎 | Laravel `routes/*.php`（`->middleware`）；没有 Laravel 时每个脚本都是入口，开头的 include/session 检查作为守卫 |
+  | PHP | 引擎（入口脚本包装为 `*Service`）+ 复核 | Laravel `routes/*.php`（`->middleware`）；没有 Laravel 时每个脚本都是入口，开头的 include/session 检查作为守卫 |
 
-  PHP 不跑引擎的原因：YASA 当前发布版对普通 PHP 脚本和 Laravel 收集不到任何入口（各种入口模式下入口数都是 0），
-  只支持它内部的几个框架。PHP 的数据流因此只靠危险调用清单 + Agent 复核，跨文件的长链路比其他语言更容易漏。
+  PHP 的引擎入口：YASA 的 PHP 分析器会忽略 ruleConfig 里的自定义入口（检查器收集了，分析器从不执行），只自动识别 `*Service`
+  类的公开方法等几种约定。流水线因此在引擎副本里把入口脚本的顶层代码包装成 `YasaEntry*Service::run()`（行号不变），
+  并把项目自己的 `*Service` 类改名，避免它们也被当成入口。
 - Go：YASA 引擎支持，但流水线还没有为 Go 写危险调用清单、路由提取和规则手册，请先用 Agent 模式。
 - 结论是静态判定，没有执行验证；报告里附带了路径和证据，需要的话请人工复现。
 - 大型 Spring 项目上引擎受内存限制（见上文），而且自定义入口方案还没跑通，这时数据流阶段主要靠残余危险调用复核。
@@ -245,8 +246,10 @@ uv run python -m app.services.yasa_audit authz /path/to/project --out out-authz/
 - 入口发现优先用 yasa-mcp 自带的 codegraph 路由表（覆盖 Spring、Laravel、Django/Flask/FastAPI、Express、NestJS、Go 等框架）；
   没有框架路由的脚本式项目（普通 PHP、JSP、SuiteCRM 这类前端控制器）用"直接访问保护常量"等通用规则找真正可访问的文件，
   并读取项目自带或安装器生成的 Web 服务器拒绝规则（`.htaccess` 等）。前端控制器的分发规则由 Agent 追踪一次后按类审查。
-- 超大项目（如 SuiteCRM 76 万行）：YASA 调用图在预算内建不完，数据流阶段主要靠残余危险调用复核，按危险等级和是否连到入口排序，
-  30 分钟只能复核其中一部分，其余列在未审清单里。
+- 引擎输入按入口切片：PHP 项目和源文件超过 1,500 个的项目，引擎只分析能连到入口的文件（保持行号的副本）。PHP 入口脚本会被包装成
+  YASA 能自动识别的 `*Service::run()`。SuiteCRM（76 万行）因此能在 2.5 分钟内跑完污点分析，之前整库调用图 15 分钟都建不完。
+  前端控制器通过动态分发（如 `index.php?module=&action=`）到达的代码不在静态切片里，需要建规则的 Agent 补充，数据流复核也只能覆盖一部分，
+  其余列在未审清单里。
 - 和 Agent 模式一样遵守项目的排除规则（默认 `node_modules/**`、`.git/**`、`dist/**`、`build/**`、`*.log`）和"指定文件"。
   只选部分文件时，跨到未选文件的数据流和路由注册（例如 Express 的 `server.ts`）会看不到，召回会下降。
 
