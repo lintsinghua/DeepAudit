@@ -24,24 +24,35 @@ Knowledge given to the agents lives in `kb/`: `l0_spec.md` (sources, sinks, clas
 `yasa_reference.md` (official engine reference), `yasa_playbook.md` (engine know-how; each item verified,
 see `backend/benchmarks/yasa_audit/README.md`).
 
-## Entry discovery and large projects
+## Entry discovery: an agent-authored model, not per-framework code
 
-Entries come from the indexes `yasamcp init` already builds, not from per-language code (`discovery.py`):
+The attack surface is found by a **recon stage** (`pipeline.recon`), not by a growing pile of
+per-framework extractors. The principle: tools give evidence, the agent builds a declarative model of
+how *this* project routes requests, and a deterministic executor expands and validates it.
 
-1. **codegraph routes**: codegraph's framework resolvers (Spring, Laravel, Drupal, Django, Flask, FastAPI,
-   Express, NestJS, Go, Rails, ASP.NET, ...) write `route` nodes; the handler is the function named on the
-   registration line among the route's call/reference edges.
-2. **yasa-mcp `api`**: interface / RPC implementations.
-3. **URL-addressable scripts** (PHP, JSP): if most files share a direct-access guard
-   (`if (!defined('X')) die`, as in SugarCRM/SuiteCRM, WordPress, CodeIgniter, Joomla), the entries are the
-   files that define X; otherwise files with top-level code that read request input and that no other file
-   includes. JSP pages outside WEB-INF.
-4. The regex extractors (`entrypoints.py`) only add guard annotations and fill gaps.
+- `routing.py` is project- and framework-agnostic. It runs a **recipe** the agent writes: a `family`
+  (`config-xml` for routes declared in XML config such as OFBiz `controller.xml`, Spring/Struts XML,
+  web.xml; or `annotation` for `@*Mapping`/`@Path`), the file glob, and how to read the route uri, the
+  `security`/auth, the handler, and the view. `expand()` applies it across the whole project; `resolve()`
+  binds every route's handler to real code via codegraph, following an optional
+  request -> service -> implementation hop (a `services` recipe section). No framework name appears in it.
+- The recon agent (`prompts.RECON`, `toolbox.try_recipe`) reads a real config file, writes a recipe,
+  runs `try_recipe`, and refines it against the coverage counters (routes / resolved / public) until the
+  surface is captured. Its `entries.json` is shared by build, triage and authz (`load_entries`).
+- `discovery.py` (codegraph route nodes, the `script`/`direct-access-guard` rule, `entrypoints.py`
+  regex extractors, dispatcher/`web_server_denied` annotations) is now the **fallback** used when the
+  agent finds less than the heuristics, and the source of the reachable-file set for engine scoping.
 
-Each entry is annotated with `dispatcher` (request data selects the code: dynamic include, `new $x`,
-`call_user_func`, getattr, reflection) and `web_server_denied` (a deny rule from `.htaccess`, `web.config`,
-server configs, or rule templates written by installer code). Dispatchers are reviewed first and the
-reviewer resolves the dispatch convention once.
+The resolved model also **drives the engine**: `auto_engine_plan` emits YASA entrypoints from the
+model's handlers (Java `packageName`+`functionName`, scripts by `filePath`), so config-wired handlers
+reach taint analysis instead of only the framework-collected ones.
+
+Example: Apache OFBiz (3,166 `request-map`s in 17 `controller.xml`; codegraph finds 0 routes, the
+heuristics 47 wrong ones). The agent writes a `config-xml` recipe with a `servicedef` services hop and
+gets 3,284 entries, 987 resolved to code, 59 public -- with no OFBiz-specific code in the pipeline.
+
+Each entry may be annotated with `dispatcher` (request data selects the code) and `web_server_denied`
+(a deny rule from `.htaccess`, server configs, or installer code). Dispatchers are reviewed first.
 
 Engine input (`engine_scope.py`): the discovered entries also drive the taint engine. For PHP, and for any
 project above 1,500 source files, the builder's engine runs use a line-preserving shadow copy that contains

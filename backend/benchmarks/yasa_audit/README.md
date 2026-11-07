@@ -193,3 +193,22 @@ after 69 s; triage then failed reading codegraph's database and the data-flow st
 | codegraph.db (WAL) still open by the background init | stages read a snapshot; index errors only disable ordering |
 
 Automatic run #1 now, no LLM: 2,098 files (of the slice), 7 entrypoints, 463 sources, 864 sinks, 7 findings, 135 s.
+
+## Apache OFBiz — generality of the method (2026-11-07)
+
+OFBiz `release18.12.12` (Java/Groovy + XML config, 1,095 Java + 360 Groovy + 1,369 XML files). It routes
+through `controller.xml` (`<request-map uri><security auth><event .../><response type="view">`), with a
+second hop through service definitions in `servicedef/*.xml`. No codegraph resolver or regex extractor
+understands this.
+
+| Approach | Entries | Notes |
+| --- | --- | --- |
+| codegraph route nodes | 0 | does not parse controller.xml or Groovy |
+| current heuristics (discover) | 47 | the JSP/script rule misfiring; none are real routes |
+| recon agent (config-xml recipe, agent-written) | 3,284 | 987 resolved to code, 59 public; 110 s, 26 steps |
+
+The agent read one `controller.xml`, found `servicedef/services_billing.xml`, and wrote a recipe with a
+`services` hop — no OFBiz code in the pipeline. The resolved model yields 145 engine entrypoints (Groovy
+scripts + Java events) that SELF_COLLECT would not find. Ground-truth CVEs for scoring the full run:
+CVE-2024-32113/36104/38856/45195 (unauth reach of the `ProgramExport`/`xmldsdump`/`viewdatafile` Groovy
+views via a controller/view auth desync), CVE-2024-45507 (screen/script URL), CVE-2024-45195 chain.
