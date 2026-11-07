@@ -139,3 +139,25 @@ PowerJob's two stages ran in parallel after a 40 s index build: about 21 minutes
   redirect (lower-case `location:`), upload medium/high. The two patterns were fixed afterwards and the
   inventory now contains all `xss_r` and `open_redirect` levels (201 candidates instead of 149); the LLM stage
   was not rerun.
+
+## Large project: SuiteCRM (2026-11-07)
+
+SuiteCRM `be61919` (PHP, 4,654 files, 760k LOC). `yasamcp init`: codegraph index 37 s; YASA's call graph
+(`--dumpAllCG`) still running after 15 min at 2.3 GB, stopped.
+
+| | before | after |
+| --- | --- | --- |
+| access-control entries | 4,293 (every PHP file) | 53 (direct-access guard `sugarEntry`: 2,415 files refuse direct access) |
+| dispatchers flagged | — | 6; reviewers traced `index.php?entryPoint=...` to its targets |
+| web-server deny rules | — | read from the installer's `.htaccess` template; 10 of 53 entries annotated |
+
+Authz run (before the deny-rule annotation): 3.7 min, 2.6 M tokens, 20 reports. Spot check: the 6 reports on
+`modules/*.php` and `emailmandelivery.php` are blocked by the installer-written `.htaccess` on Apache
+(reachable only where the server ignores it, e.g. nginx without equivalent rules); `install.php` refuses to
+run once `installer_locked` is set (false positive). Not yet rerun with the annotation. The SOAP/REST
+object-level reports (set_note_attachment, set/get_document_revision) need an authenticated session and are
+unverified.
+
+Data-flow inventory: 3,684 sinks in 806 files (2,015 in files codegraph links to an entry). At about six
+file units per minute, a 30 min budget reviews roughly a fifth of them; ordering is by class, then
+reachability.

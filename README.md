@@ -242,6 +242,11 @@ uv run python -m app.services.yasa_audit authz /path/to/project --out out-authz/
 - 结论是静态判定，没有执行验证；报告里附带了路径和证据，需要的话请人工复现。
 - 大型 Spring 项目上引擎受内存限制（见上文），而且自定义入口方案还没跑通，这时数据流阶段主要靠残余危险调用复核。
 - 时间预算优先：预算用完时剩下的候选不再复核，任务页会提示数量，清单在运行目录里。
+- 入口发现优先用 yasa-mcp 自带的 codegraph 路由表（覆盖 Spring、Laravel、Django/Flask/FastAPI、Express、NestJS、Go 等框架）；
+  没有框架路由的脚本式项目（普通 PHP、JSP、SuiteCRM 这类前端控制器）用"直接访问保护常量"等通用规则找真正可访问的文件，
+  并读取项目自带或安装器生成的 Web 服务器拒绝规则（`.htaccess` 等）。前端控制器的分发规则由 Agent 追踪一次后按类审查。
+- 超大项目（如 SuiteCRM 76 万行）：YASA 调用图在预算内建不完，数据流阶段主要靠残余危险调用复核，按危险等级和是否连到入口排序，
+  30 分钟只能复核其中一部分，其余列在未审清单里。
 - 和 Agent 模式一样遵守项目的排除规则（默认 `node_modules/**`、`.git/**`、`dist/**`、`build/**`、`*.log`）和"指定文件"。
   只选部分文件时，跨到未选文件的数据流和路由注册（例如 Express 的 `server.ts`）会看不到，召回会下降。
 

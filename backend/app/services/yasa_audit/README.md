@@ -24,6 +24,31 @@ Knowledge given to the agents lives in `kb/`: `l0_spec.md` (sources, sinks, clas
 `yasa_reference.md` (official engine reference), `yasa_playbook.md` (engine know-how; each item verified,
 see `backend/benchmarks/yasa_audit/README.md`).
 
+## Entry discovery and large projects
+
+Entries come from the indexes `yasamcp init` already builds, not from per-language code (`discovery.py`):
+
+1. **codegraph routes**: codegraph's framework resolvers (Spring, Laravel, Drupal, Django, Flask, FastAPI,
+   Express, NestJS, Go, Rails, ASP.NET, ...) write `route` nodes; the handler is the function named on the
+   registration line among the route's call/reference edges.
+2. **yasa-mcp `api`**: interface / RPC implementations.
+3. **URL-addressable scripts** (PHP, JSP): if most files share a direct-access guard
+   (`if (!defined('X')) die`, as in SugarCRM/SuiteCRM, WordPress, CodeIgniter, Joomla), the entries are the
+   files that define X; otherwise files with top-level code that read request input and that no other file
+   includes. JSP pages outside WEB-INF.
+4. The regex extractors (`entrypoints.py`) only add guard annotations and fill gaps.
+
+Each entry is annotated with `dispatcher` (request data selects the code: dynamic include, `new $x`,
+`call_user_func`, getattr, reflection) and `web_server_denied` (a deny rule from `.htaccess`, `web.config`,
+server configs, or rule templates written by installer code). Dispatchers are reviewed first and the
+reviewer resolves the dispatch convention once.
+
+Large projects: codegraph indexes SuiteCRM (760k LOC PHP) in 37 s, while YASA's call graph took more than
+15 min. Stages start when codegraph's index is complete; YASA's call graph keeps building in the background
+and is stopped at the end; until it exists, the navigation tools (find_function, find_callers, call_graph,
+search_symbol) answer from codegraph. Triage orders sinks by class, then by whether codegraph links their
+file to an entry.
+
 ## Setup
 
 ```bash

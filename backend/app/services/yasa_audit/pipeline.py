@@ -18,7 +18,8 @@ from pathlib import Path
 
 from .agent_loop import run_agent
 from .config import AuditConfig
-from .entrypoints import entries_for, global_guards_for
+from .discovery import discover, reachable_files
+from .entrypoints import global_guards_for
 from .llm import LLM
 from .prompts import authz_prompt, builder_prompt, trace_prompt, triage_prompt
 from .toolbox import Toolbox, tool_schemas
@@ -277,7 +278,15 @@ def triage(cfg: AuditConfig, root: Path, engine_dir: Path, out: Path, group: str
                               rank))
     else:
         units = [(c, cfg.triage_budget, _cand_rank(c)) for c in cands]
-    units.sort(key=lambda u: u[2])  # stable: engine first, then the worst residual classes
+    # Engine first, then the worst residual classes; within a class, sinks in files that codegraph
+    # links to a discovered entry come first (a tie-breaker only: dynamic dispatch hides edges).
+    reach = reachable_files(root, [e["file"] for e in discover(root, lang, "", "")[0]])
+    if reach:
+        def _file(u: dict) -> str:
+            return (u.get("candidates") or [u])[0]["sink"].rsplit(":", 1)[0]
+        units.sort(key=lambda u: (u[2], _file(u[0]) not in reach))
+    else:
+        units.sort(key=lambda u: u[2])
 
     results, skipped = _schedule(
         units, lambda i, u: _triage_unit(cfg, root, out / f"unit-{i:03d}", u[0], u[1], deploy, deadline),
@@ -298,6 +307,23 @@ def triage(cfg: AuditConfig, root: Path, engine_dir: Path, out: Path, group: str
     return m
 
 
+ROUTE_TABLE_CAP = 200
+
+
+def _peer_table(table: list[str], batch_files: list[str]) -> list[str] | dict:
+    """Full table when small; otherwise the rows of the batch's directories plus a sample, so every
+    unit can still compare peers without the prompt growing with the project."""
+    if len(table) <= ROUTE_TABLE_CAP:
+        return table
+    dirs = {f.rsplit("/", 1)[0] if "/" in f else "" for f in batch_files}
+    near = [r for r in table if any(f" -> {d}/" in r or (not d and "/" not in r.split(" -> ")[1].split(":")[0])
+                                    for d in dirs)]
+    rest = [r for r in table if r not in near]
+    step = max(1, len(rest) // max(1, ROUTE_TABLE_CAP - len(near)))
+    return {"rows_near_this_batch": near[:ROUTE_TABLE_CAP], "sample_of_other_rows": rest[::step][:ROUTE_TABLE_CAP],
+            "total_rows": len(table)}
+
+
 def authz(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", product: str = "",
           batch: int = 3, budget: int = 16, deadline: float | None = None) -> dict:
     """Access-control stage: deterministic entry inventory, then grouped review in fresh contexts.
@@ -309,16 +335,22 @@ def authz(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", product: st
     out.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
     lang = detect_lang(root)
-    entries = entries_for(root, lang)
+    entries, discovery = discover(root, lang, cfg.yasamcp_bin, cfg.codegraph_bin)
     global_guards = global_guards_for(root, lang)
-    table = [f"{e['method']} {e['route']} -> {e['file']}:{e['line']} guards={e['guards']}" for e in entries]
+    table = [f"{e['method']} {e['route']} -> {e['file']}:{e['line']} guards={e['guards']}"
+             + (f" dispatcher={e['dispatcher']!r}" if e.get("dispatcher") else "")
+             + (f" web_server_denied={e['web_server_denied']!r}" if e.get("web_server_denied") else "")
+             for e in entries]
+    (out / "discovery.json").write_text(json.dumps(discovery, indent=1))
     by_file: dict[str, list[dict]] = {}
     for e in entries:
         by_file.setdefault(e["file"], []).append(e)
     files = sorted(by_file)
+    # Dispatchers first: one of them can stand for hundreds of targets.
+    files.sort(key=lambda f: (not any(e.get("dispatcher") for e in by_file[f]), f))
     units = [{"origin": f"authz:{','.join(files[i:i + batch])}", "batch_files": files[i:i + batch],
               "entries": [e for f in files[i:i + batch] for e in by_file[f]],
-              "global_guards": global_guards, "route_table": table}
+              "global_guards": global_guards, "route_table": _peer_table(table, files[i:i + batch])}
              for i in range(0, len(files), batch)]
     (out / "entries.json").write_text(json.dumps(entries, indent=1, ensure_ascii=False))
 

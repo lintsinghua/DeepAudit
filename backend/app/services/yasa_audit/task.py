@@ -17,12 +17,14 @@ import fnmatch
 import logging
 import os
 import shutil
+import threading
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
 from .config import AuditConfig
+from .discovery import codegraph_ready
 from .runner import (
     check_tools,
     init_navigation,
@@ -147,11 +149,23 @@ async def execute_yasa_task(
     await emitter.emit_phase_start("indexing", "🧭 YASA: building navigation cache")
     task.current_phase = AgentTaskPhase.INDEXING
     await db.commit()
-    try:
-        await asyncio.to_thread(init_navigation, cfg, root, min(600, budget_s // 3))
-    except Exception as e:  # nav tools degrade to grep/read; the engine still runs
-        logger.warning("yasa-mcp init failed: %s", e)
-        await emitter.emit_warning(f"yasa-mcp init failed, navigation tools limited: {e}")
+    # yasa-mcp init writes codegraph's index first (seconds to a minute even for large projects),
+    # then YASA's call graph, which can take longer than the whole budget on large code bases.
+    # Stages start once the codegraph index is complete; navigation uses the YASA index when it
+    # appears and codegraph until then. Init keeps running in the background and is stopped at the end.
+    init_stop = threading.Event()
+    init_job = asyncio.ensure_future(asyncio.to_thread(
+        init_navigation, cfg, root, int(budget_s * 0.8), init_stop.is_set))
+    waited = 0
+    while not init_job.done() and not codegraph_ready(root) and waited < min(300, budget_s // 4):
+        await asyncio.sleep(2)
+        waited += 2
+    if init_job.done() and init_job.exception():
+        logger.warning("yasa-mcp init failed: %s", init_job.exception())
+        await emitter.emit_warning(f"yasa-mcp init failed, navigation tools limited: {init_job.exception()}")
+    elif not init_job.done():
+        await emitter.emit_info(f"🧭 codegraph index ready after {waited}s; YASA call graph continues "
+                                "in the background")
 
     if is_cancelled():
         raise asyncio.CancelledError("任务已取消")
@@ -178,6 +192,11 @@ async def execute_yasa_task(
     df, az = await asyncio.gather(
         stage("dataflow", run_dataflow, df_cfg, root, out, deploy, start, deadline),
         stage("authz", run_authz, az_cfg, root, out, deploy, product, deadline))
+    init_stop.set()
+    try:
+        await init_job
+    except Exception as e:  # already reported, or a late failure that no longer matters
+        logger.info("yasa-mcp init ended: %s", e)
     if is_cancelled():
         raise asyncio.CancelledError("任务已取消")
     if df is None and az is None:

@@ -354,7 +354,7 @@ async def test_execute_yasa_task_saves_findings(tmp_path, monkeypatch):
 
     monkeypatch.setattr(ytask, "RUNS_DIR", tmp_path / "runs")
     monkeypatch.setattr(ytask, "check_tools", lambda cfg: [])
-    monkeypatch.setattr(ytask, "init_navigation", lambda cfg, root, timeout: None)
+    monkeypatch.setattr(ytask, "init_navigation", lambda *a, **k: None)
     seen = {}
 
     def fake_df(cfg, root, out, deploy, start, deadline):
