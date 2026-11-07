@@ -27,9 +27,15 @@ see `backend/benchmarks/yasa_audit/README.md`).
 ## Setup
 
 ```bash
-bash backend/scripts/setup_yasa.sh        # YASA engines + yasa-mcp (own virtualenv) into ~/.yasamcp, Linux x86_64
+bash backend/scripts/setup_yasa.sh        # native YASA + official yasa-mcp bundle into ~/.yasamcp
 export LLM_BASE_URL=... LLM_API_KEY=... LLM_MODEL=...   # CLI only; OpenAI-compatible with tool calling
 ```
+
+Supported platforms: Linux x86_64, macOS ARM64 (Apple Silicon) and macOS x86_64 (Intel).
+The installer preserves the official MCP bundle's `lib/` directory, verifies its release checksum,
+and reuses an existing installation on subsequent runs. No Docker or Rosetta is needed on macOS.
+Legacy source virtualenv installations are still discovered; use `YASA_REF=<tag/branch>` to install
+from source and set `YASAMCP_BIN` to the path printed by the installer.
 
 With the default location nothing else is needed. For another location run the script with
 `YASAMCP_HOME=/opt/yasamcp` and start the CLI or backend with the same variable; `YASA_BIN`, `YASAMCP_BIN`,
