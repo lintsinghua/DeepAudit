@@ -89,6 +89,8 @@ class Toolbox:
         self.findings: list[dict] = []
         self.finished = False
         self.notes = ""
+        self.recon_entries: list[dict] = []
+        self.recon_recipe: dict | None = None
 
     # ---------- helpers ----------
     def _safe(self, rel: str) -> Path:
@@ -214,6 +216,42 @@ class Toolbox:
                 return f"rejected: yasa_ref '{ref}' is not an engine finding id (e.g. R2-F3)"
         self.findings.append(finding)
         return f"recorded #{len(self.findings)}"
+
+    def try_recipe(self, recipe: Any) -> str:
+        """Expand a routing recipe over the whole project and resolve handlers to real code.
+
+        Returns coverage counters and samples so the agent can correct the recipe. The last recipe
+        tried is kept as the recon result (the agent calls finish when the coverage looks right).
+        """
+        from . import routing
+        from .discovery import codegraph_db
+        if isinstance(recipe, str):
+            try:
+                recipe = json.loads(recipe)
+            except json.JSONDecodeError as e:
+                return f"error: recipe is not valid JSON: {e}"
+        if not isinstance(recipe, dict) or recipe.get("family") not in routing.FAMILIES:
+            return f"error: recipe needs a 'family' in {routing.FAMILIES}"
+        services = recipe.get("services")
+        try:
+            entries = routing.expand(self.root, recipe)
+        except Exception as e:
+            return f"error: expand failed: {type(e).__name__}: {e}"
+        if not entries:
+            return ("0 routes matched. Check the file glob and the route element/attribute names against "
+                    "a real config file (read one first).")
+        rep = routing.resolve(self.root, codegraph_db(self.root), entries, services)
+        self.recon_entries, self.recon_recipe = entries, recipe
+        pub = sum(1 for e in entries if e.get("public") is True)
+        auth = sum(1 for e in entries if e.get("public") is False)
+        sample = [f"{e['route']} public={e.get('public')} -> "
+                  f"{(e.get('file') + ':' + str(e.get('line'))) if e.get('resolved') else '(unresolved)'}"
+                  for e in entries[:12]]
+        return clip(json.dumps({"routes": len(entries), "resolved": rep["resolved"],
+                                "unresolved": rep["unresolved"], "public": pub, "auth_required": auth,
+                                "unknown_auth": len(entries) - pub - auth,
+                                "sample": sample, "unresolved_samples": rep["unresolved_samples"][:8]},
+                               ensure_ascii=False, indent=1))
 
     def finish(self, notes: str = "") -> str:
         self.finished = True
@@ -363,7 +401,7 @@ class Toolbox:
         return clip("\n".join(lines), 4000 if self.compact_engine_output else 12000)
 
 
-def tool_schemas(enable_yasa: bool, with_report: bool = True) -> list[dict]:
+def tool_schemas(enable_yasa: bool, with_report: bool = True, with_recipe: bool = False) -> list[dict]:
     def fn(name: str, desc: str, props: dict, required: list[str]) -> dict:
         return {"type": "function", "function": {
             "name": name, "description": desc,
@@ -404,6 +442,16 @@ def tool_schemas(enable_yasa: bool, with_report: bool = True) -> list[dict]:
         tools.append(fn("report_finding",
                         "Record ONE finding, or one rejected candidate with verdict false_positive.",
                         props, ["vuln_type", "cwe", "sink_file", "sink_line", "source", "verdict"]))
+    if with_recipe:
+        tools.append(fn(
+            "try_recipe",
+            "Expand a routing recipe over the whole project and resolve each route's handler to real "
+            "code. Returns route/auth/resolution counters and samples. Call it repeatedly, refining the "
+            "recipe, until coverage looks right; the last recipe is kept.",
+            {"recipe": {"type": "object", "description": "a routing recipe: family (config-xml | "
+                        "annotation), the file glob, and how to read the route uri, auth, handler and "
+                        "view; optionally a 'services' section for a request->service->impl hop"}},
+            ["recipe"]))
     tools.append(fn("finish", "Call once when you are done.", {"notes": s}, []))
     if enable_yasa:
         tools.append(fn(

@@ -20,13 +20,13 @@ import time
 from pathlib import Path
 
 from .config import AuditConfig
-from .pipeline import authz, build, trace, triage
+from .pipeline import authz, build, recon, trace, triage
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m app.services.yasa_audit")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("init", "run", "build", "triage", "trace", "authz"):
+    for name in ("init", "run", "build", "triage", "trace", "authz", "recon"):
         p = sub.add_parser(name)
         p.add_argument("project", type=Path)
         if name != "init":
@@ -38,9 +38,12 @@ def main(argv: list[str] | None = None) -> int:
                            help="wall-clock budget in minutes (default 30); unreviewed candidates are listed")
         if name == "triage":
             p.add_argument("--engine", type=Path, required=True, help="output dir of the build stage")
-        if name == "authz":
+        if name in ("authz", "recon"):
             p.add_argument("--product", default="",
                            help="product context, e.g. which routes are public by design and the roles")
+        if name in ("run", "authz"):
+            p.add_argument("--recon", action="store_true",
+                           help="run the recon agent first (agent-authored routing recipe) and share its entries")
         if name in ("run", "triage"):
             p.add_argument("--group", choices=["file", "none"], default="file")
     args = ap.parse_args(argv)
@@ -60,15 +63,28 @@ def main(argv: list[str] | None = None) -> int:
         result = build(cfg, root, args.out, args.deploy, deadline)
     elif args.cmd == "triage":
         result = triage(cfg, root, args.engine, args.out, args.group, args.deploy, deadline)
+    elif args.cmd == "recon":
+        result = recon(cfg, root, args.out, args.deploy, args.product, deadline=deadline)
     elif args.cmd == "authz":
-        result = authz(cfg, root, args.out, args.deploy, args.product, deadline=deadline)
+        ef = args.out / "recon" / "entries.json"
+        if getattr(args, "recon", False):
+            recon(cfg, root, args.out / "recon", args.deploy, args.product,
+                  start + 0.3 * cfg.time_budget_s)
+        result = authz(cfg, root, args.out, args.deploy, args.product, deadline=deadline,
+                       entries_file=ef if ef.exists() else None)
     elif args.cmd == "trace":
         result = trace(cfg, root, args.out, args.deploy, deadline)
     else:
+        ef = None
+        rec = None
+        if getattr(args, "recon", False):
+            rec = recon(cfg, root, args.out / "recon", args.deploy, "", start + 0.2 * cfg.time_budget_s)
+            ef = args.out / "recon" / "entries.json"
+            ef = ef if ef.exists() else None
         build_deadline = start + cfg.build_share * cfg.time_budget_s
-        b = build(cfg, root, args.out / "build", args.deploy, build_deadline)
+        b = build(cfg, root, args.out / "build", args.deploy, build_deadline, entries_file=ef)
         t = triage(cfg, root, args.out / "build", args.out / "triage", args.group, args.deploy, deadline)
-        result = {"build": b, "triage": t,
+        result = {"recon": rec, "build": b, "triage": t,
                   "total_tokens": b["prompt_tokens"] + b["completion_tokens"]
                   + t["prompt_tokens"] + t["completion_tokens"],
                   "total_wall_s": round(time.time() - start, 1),

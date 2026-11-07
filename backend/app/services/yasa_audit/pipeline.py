@@ -22,7 +22,7 @@ from .discovery import discover, reachable_files, snapshot_codegraph
 from .engine_scope import build_engine_src
 from .entrypoints import global_guards_for
 from .llm import LLM
-from .prompts import authz_prompt, builder_prompt, trace_prompt, triage_prompt
+from .prompts import authz_prompt, builder_prompt, recon_prompt, trace_prompt, triage_prompt
 from .toolbox import Toolbox, tool_schemas
 
 L0_SINKS: dict[str, list[tuple[str, str]]] = {
@@ -193,6 +193,48 @@ YASA_LANG = {"java": "java", "py": "python", "php": "php"}
 MAX_AUTO_ENTRYPOINTS = 60
 
 
+def recon(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", product: str = "",
+          deadline: float | None = None) -> dict:
+    """Agent-authored routing recipe -> validated entries. The general replacement for hand-written,
+    per-framework extractors: the agent describes the project's routing, a deterministic executor
+    expands and resolves it. Falls back to the heuristic discover() when the agent finds little.
+
+    Writes entries.json (authoritative entry list) and recon.json (recipe + metrics) to out.
+    """
+    out.mkdir(parents=True, exist_ok=True)
+    lang = detect_lang(root)
+    try:
+        snapshot_codegraph(root, out)
+    except Exception:
+        pass
+    heuristic, disc = discover(root, lang, cfg.yasamcp_bin, cfg.codegraph_bin)
+    tb = Toolbox(cfg, root, out, enable_yasa=False)
+    tools = tool_schemas(enable_yasa=False, with_report=False, with_recipe=True)
+    llm = LLM(cfg)
+    config_hits = tb.grep("<request-map|servlet-mapping|@(Get|Post|Request|Put|Delete)Mapping|Route::|"
+                          "app\\.(get|post|use)\\(|@(app|router|blueprint)\\.(route|get|post)", max_results=20)
+    user = (f"Language: {lang}. Heuristic discovery found {disc.get('total', 0)} entries "
+            f"({disc.get('codegraph_routes', 0)} from codegraph). Route-config probe:\n{config_hits}\n"
+            f"Top-level listing:\n{tb.list_dir('.', 2)}")
+    res = run_agent(llm, tb, tools, recon_prompt(cfg.builder_budget, deploy, product), user,
+                    cfg.builder_budget, out / "transcript.jsonl", deadline=deadline)
+    recon_entries = tb.recon_entries
+    # Keep whichever surface is larger; merge heuristic annotations (dispatcher/guards) onto recon routes.
+    use_recon = len(recon_entries) > len(heuristic)
+    entries = recon_entries if use_recon else heuristic
+    for e in entries:
+        e.setdefault("via", "recipe")
+    (out / "entries.json").write_text(json.dumps(entries, indent=1, ensure_ascii=False))
+    m = _metrics(llm, {"stage": "recon", "source": "recipe" if use_recon else "heuristic",
+                       "recipe": tb.recon_recipe, "entries": len(entries),
+                       "heuristic_entries": len(heuristic), "recon_entries": len(recon_entries),
+                       "resolved": sum(1 for e in entries if e.get("resolved")),
+                       "public": sum(1 for e in entries if e.get("public") is True),
+                       "discovery": disc, **res})
+    (out / "recon.json").write_text(json.dumps(m, indent=1, ensure_ascii=False))
+    return m
+
+
 def auto_engine_plan(lang: str, entries: list[dict]) -> dict:
     """Deterministic first engine run: default rules for the language plus the discovered entries.
 
@@ -246,7 +288,7 @@ def _auto_engine_run(tb: Toolbox, plan: dict, window_end: float | None) -> str:
 
 
 def build(cfg: AuditConfig, root: Path, out: Path, deploy: str = "",
-          deadline: float | None = None) -> dict:
+          deadline: float | None = None, entries_file: Path | None = None) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     lang = detect_lang(root)
     if lang not in ENGINE_LANGS:  # no engine for this language: triage covers residual sinks only
@@ -262,7 +304,7 @@ def build(cfg: AuditConfig, root: Path, out: Path, deploy: str = "",
     except Exception:  # discovery falls back to the live index
         pass
     try:
-        entries, disc = discover(root, lang, cfg.yasamcp_bin, cfg.codegraph_bin)
+        entries, disc = load_entries(cfg, root, lang, entries_file)
     except Exception as e:  # never lose the stage over entry discovery
         entries, disc = [], {"error": f"{type(e).__name__}: {e}", "codegraph_routes": 0, "yasamcp_apis": 0,
                              "dispatchers": 0}
@@ -280,8 +322,8 @@ def build(cfg: AuditConfig, root: Path, out: Path, deploy: str = "",
                    "self-collected, so list sinks and sanitizers)." if scope["php_wrapped"] else ""))
         (out / "engine_scope.json").write_text(json.dumps(scope, indent=1))
     (out / "discovery.json").write_text(json.dumps(disc, indent=1))
-    sample = "\n".join(f"  {e['method']} {e['route']} -> {e['file']}:{e['line']} ({e['via']})"
-                       for e in entries[:40])
+    sample = "\n".join(f"  {e.get('method', 'ANY')} {e['route']} -> "
+                       f"{e.get('file')}:{e.get('line')} ({e.get('via', '?')})" for e in entries[:40])
     plan = auto_engine_plan(lang, entries)
     auto = _auto_engine_run(tb, plan, deadline)
     (out / "auto_run.txt").write_text(auto)
@@ -296,7 +338,7 @@ def build(cfg: AuditConfig, root: Path, out: Path, deploy: str = "",
 
     res = run_agent(llm, tb, tools, builder_prompt(cfg.builder_budget, cfg.builder_max_yasa_runs, deploy),
                     f"Build engine rules for the project. Top-level listing:\n{tb.list_dir('.', 1)}\n"
-                    f"Discovered entries ({len(entries)}; {json.dumps({k: disc[k] for k in ('codegraph_routes', 'yasamcp_apis', 'dispatchers')})}):\n"
+                    f"Discovered entries ({len(entries)}; {json.dumps({k: disc.get(k, 0) for k in ('codegraph_routes', 'yasamcp_apis', 'dispatchers')})}):\n"
                     f"{sample}{scope_note}\n\nEngine run #1 was made automatically with the default "
                     f"{plan['language']} rules and {plan['entrypoints'] or 'self-collected'} entrypoints "
                     f"(mode {plan['entrypoint_mode']}); its output, findings registered as R1-F*:\n{auto[:6000]}\n"
@@ -418,6 +460,36 @@ def triage(cfg: AuditConfig, root: Path, engine_dir: Path, out: Path, group: str
 ROUTE_TABLE_CAP = 200
 
 
+def load_entries(cfg: AuditConfig, root: Path, lang: str,
+                 entries_file: Path | None = None) -> tuple[list[dict], dict]:
+    """Entries for a stage: a shared recon entries.json if given, else heuristic discover()."""
+    if entries_file and entries_file.exists():
+        entries = json.loads(entries_file.read_text())
+        return entries, {"source": "recon", "file": str(entries_file), "total": len(entries)}
+    return discover(root, lang, cfg.yasamcp_bin, cfg.codegraph_bin)
+
+
+def _entry_row(e: dict) -> str:
+    """One route-table line, for either entry shape (heuristic guards, or recipe auth/handler/view)."""
+    loc = f"{e.get('file')}:{e.get('line')}" if e.get("file") else "?"
+    row = f"{e.get('method', 'ANY')} {e['route']} -> {loc}"
+    if "public" in e and e["public"] is not None:
+        row += f" public={e['public']}"
+    if e.get("auth_raw"):
+        row += f" security={e['auth_raw']}"
+    if e.get("views"):
+        row += f" view={e['views']}"
+    if e.get("handlers"):
+        row += f" handler={[h.get('invoke') or h.get('path') for h in e['handlers']][:3]}"
+    if e.get("guards"):
+        row += f" guards={e['guards']}"
+    if e.get("dispatcher"):
+        row += f" dispatcher={e['dispatcher']!r}"
+    if e.get("web_server_denied"):
+        row += f" web_server_denied={e['web_server_denied']!r}"
+    return row
+
+
 def _peer_table(table: list[str], batch_files: list[str]) -> list[str] | dict:
     """Full table when small; otherwise the rows of the batch's directories plus a sample, so every
     unit can still compare peers without the prompt growing with the project."""
@@ -433,7 +505,8 @@ def _peer_table(table: list[str], batch_files: list[str]) -> list[str] | dict:
 
 
 def authz(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", product: str = "",
-          batch: int = 3, budget: int = 16, deadline: float | None = None) -> dict:
+          batch: int = 3, budget: int = 16, deadline: float | None = None,
+          entries_file: Path | None = None) -> dict:
     """Access-control stage: deterministic entry inventory, then grouped review in fresh contexts.
 
     Every unit gets the full route table so reviewers can compare peers. No RAG index is needed:
@@ -445,15 +518,12 @@ def authz(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", product: st
     lang = detect_lang(root)
     try:
         snapshot_codegraph(root, out)
-        entries, discovery = discover(root, lang, cfg.yasamcp_bin, cfg.codegraph_bin)
+        entries, discovery = load_entries(cfg, root, lang, entries_file)
     except Exception as e:  # fall back to the regex extractors
         from .entrypoints import entries_for
         entries, discovery = entries_for(root, lang), {"error": f"{type(e).__name__}: {e}"}
     global_guards = global_guards_for(root, lang)
-    table = [f"{e['method']} {e['route']} -> {e['file']}:{e['line']} guards={e['guards']}"
-             + (f" dispatcher={e['dispatcher']!r}" if e.get("dispatcher") else "")
-             + (f" web_server_denied={e['web_server_denied']!r}" if e.get("web_server_denied") else "")
-             for e in entries]
+    table = [_entry_row(e) for e in entries]
     (out / "discovery.json").write_text(json.dumps(discovery, indent=1))
     by_file: dict[str, list[dict]] = {}
     for e in entries:

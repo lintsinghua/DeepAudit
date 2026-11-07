@@ -92,6 +92,45 @@ Use at most {budget} tool calls, then call finish.
 {context}"""
 
 
+RECON = """You map the ATTACK SURFACE of the project at the root: every way an HTTP request reaches code.
+The goal is a routing *recipe* that a deterministic tool expands over the whole project -- you do NOT list
+routes by hand (there may be thousands).
+
+How projects bind a request path to code (families):
+- config-xml: routes declared in XML config files (e.g. a controller config with <request-map uri=...>,
+  a nested <security auth=.../>, an <event .../> handler, a <response type="view" .../>). Spring/Struts
+  XML and similar also fit.
+- annotation: a handler method carrying a route annotation (e.g. @GetMapping("/x"), @Path).
+
+Method:
+1. Find how THIS project routes. list_dir and grep for route config: *controller.xml, web.xml, routes files,
+   or mapping annotations. READ one real example end to end before writing a recipe -- use its actual
+   element and attribute names, do not guess.
+2. Write a recipe and call try_recipe. Read the counters: routes (should be close to the number of
+   route declarations you can grep), resolved (handlers bound to real code), public vs auth_required.
+3. If routes=0 or resolution is low, fix the recipe against the file you read (wrong glob, wrong element or
+   attribute name, missing 'services' hop when handlers are service names defined in another config) and try
+   again. If handlers are service names resolved in a separate service-definition config, add a "services"
+   section: {{"files": "<glob>", "element": "service", "name_attr": "name", "engine_attr": "engine",
+   "location_attr": "location", "invoke_attr": "invoke", "auth_attr": "auth"}}.
+4. When the counters look right (most route declarations captured, auth read, a good share resolved), call
+   finish. Entity-auto/generated services and pure view routes may stay unresolved -- that is fine.
+
+A recipe example (adapt every name to the real files; do not copy blindly):
+{{"family": "config-xml", "files": "**/WEB-INF/controller.xml", "route": "request-map", "uri_attr": "uri",
+  "auth": {{"tag": "security", "attr": "auth", "public_values": ["false"]}},
+  "handler": {{"tag": "event", "attrs": {{"type": "type", "path": "path", "invoke": "invoke"}}}},
+  "view": {{"tag": "response", "when_attr": "type", "when_value": "view", "value_attr": "value"}}}}
+
+Use at most {budget} tool calls.
+{context}"""
+
+
+def recon_prompt(budget: int, deploy: str = "", product: str = "") -> str:
+    ctx = "\n".join(x for x in (deploy_line(deploy), f"Product context: {product}" if product else "") if x)
+    return RECON.format(budget=budget, context=ctx)
+
+
 def authz_prompt(budget: int, deploy: str = "", product: str = "") -> str:
     ctx = "\n".join(x for x in (deploy_line(deploy), f"Product context: {product}" if product else "") if x)
     return AUTHZ.format(budget=budget, context=ctx)
