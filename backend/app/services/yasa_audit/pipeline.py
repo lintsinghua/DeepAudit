@@ -116,7 +116,7 @@ def _access_agent(cfg: AuditConfig, root: Path, out: Path, deploy: str, product:
     tb.finish_gates = [(lambda t: t.access_model is None,
                         "record_access_model first (how requests are authenticated and authorized)",
                         ["record_access_model"])]
-    llm = LLM(cfg)
+    llm = LLM(cfg, stage="access")
 
     def missing(t: Toolbox) -> list[str]:
         return [x for x, done in (("record_access_model", t.access_model is not None),
@@ -160,7 +160,7 @@ def _assets_agent(cfg: AuditConfig, root: Path, out: Path, deploy: str, product:
     except Exception:
         unseen = ""
     user = f"{user}\n\n{unseen}" if unseen else user
-    llm, t0 = LLM(cfg), time.time()
+    llm, t0 = LLM(cfg, stage="recon"), time.time()
     no_recipe = (lambda steps, t: not t.recipes and (steps >= cfg.assets_budget // 2 or (
                      deadline is not None and time.time() >= t0 + (deadline - t0) / 2)),
                  "Half of your time or tool budget is used and no recipe has run. Write recipes now for the "
@@ -390,7 +390,7 @@ def _reconcile(cfg: AuditConfig, out: Path, entries: list[dict], holder: dict, a
                         lambda t: "settle every group first; undecided: "
                                   + ", ".join(g for g in t.reconcile_groups if g not in t.decisions),
                         ["settle"])]
-    llm = holder.get("llm") or LLM(cfg)
+    llm = LLM(cfg, stage="reconcile")
     settle_now = (lambda steps, t: steps >= cfg.reconcile_budget // 2 and any(g not in t.decisions
                                                                                for g in t.reconcile_groups),
                   lambda t: "Half of your budget is used: settle the undecided groups now, in one call: "
@@ -429,7 +429,7 @@ def _followup(cfg: AuditConfig, root: Path, out: Path, tb: Toolbox, left: list[s
     taken = sorted(tb.extractors)
 
     def one(i: int, disp: str):
-        sub, sub_llm, t0 = Toolbox(cfg, root, out, unit="recon"), LLM(cfg), time.time()
+        sub, sub_llm, t0 = Toolbox(cfg, root, out, unit="recon"), LLM(cfg, stage="recon"), time.time()
         msg = (f"Earlier passes enumerated {len(tb.entries())} entries with the extractors "
                f"{', '.join(taken) or '(none)'}. Enumerate ONE dispatcher they left out:\n- {disp}\n\n"
                f"Notes of the earlier passes:\n{tb.notes}\n\n"
@@ -509,7 +509,7 @@ def recon(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", product: st
                         ["check_coverage"]),
                        (regressed, lambda t: "; ".join(regressions) + ". Fix the regression and run the extractor "
                         "again, or finish again if the smaller result is the right one.")]
-    llm = LLM(cfg)
+    llm = LLM(cfg, stage="recon")
     no_extractor_yet = (_past_half(t_recon, deadline, cfg.recon_budget),
                         "Half of your time or tool budget is used and no extractor has run. Stop reading: write an "
                         "extractor for the dispatcher you understand best and run it now, then refine.")
@@ -826,7 +826,7 @@ def _review_unit(cfg: AuditConfig, root: Path, out: Path, unit: dict, sh: _Share
         left = lambda t: [k for k in assets_map.IDENTITY_CHECKLIST if k not in t.design]  # noqa: E731
         tb.finish_gates = [(lambda t: bool(left(t)), lambda t: "answer with record_design: " + ", ".join(left(t)),
                             ["record_design"])]
-    llm = LLM(cfg)
+    llm = LLM(cfg, stage="review")
     user = "\n\n".join(x for x in (brief, sh.facts.prompt_block(), sh.issues.prompt_block(), code) if x)
     seen_facts = {f["id"] for f in sh.facts.facts}
     seen_issues = {i["id"] for i in sh.issues.issues}
@@ -979,6 +979,7 @@ def run(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", product: str 
     vf = verify(cfg, root, out / "review", deploy, product, rec.get("access_model"), resolver, deadline)
     tok = lambda m, k: (m or {}).get(k, 0) or 0  # noqa: E731
     m = {"recon": rec, "review": rv, "verify": vf,
+         "models": {s: cfg.model_for(s) for s in ("recon", "access", "reconcile", "review", "verify")},
          "total_tokens": sum(tok(x, "prompt_tokens") + tok(x, "completion_tokens") for x in (rec, rv, vf)),
          "total_cached_tokens": sum(tok(x, "cached_tokens") for x in (rec, rv, vf)),
          "total_wall_s": round(time.time() - start, 1), "time_budget_s": round(deadline - start)}

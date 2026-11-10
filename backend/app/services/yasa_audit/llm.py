@@ -92,9 +92,9 @@ _LIMITERS: dict[tuple, AdaptiveLimiter] = {}
 _LIMITERS_LOCK = threading.Lock()
 
 
-def limiter_for(cfg: AuditConfig) -> AdaptiveLimiter:
+def limiter_for(cfg: AuditConfig, model: str = "") -> AdaptiveLimiter:
     """One limiter per endpoint and model for the whole process (all stages and units share it)."""
-    key = (cfg.llm_base_url, cfg.llm_model)
+    key = (cfg.llm_base_url, model or cfg.llm_model)
     with _LIMITERS_LOCK:
         lim = _LIMITERS.get(key)
         if lim is None or lim.ceiling != max(1, cfg.llm_concurrency):
@@ -110,6 +110,7 @@ def _is_rate_limit(e: Exception) -> bool:
 @dataclass
 class LLM:
     cfg: AuditConfig
+    stage: str = "review"  # which model to use: cfg.model_for(stage)
     usage: Usage = field(default_factory=Usage)
     last_finish_reason: str | None = None  # 'length' when the reply was cut by the output limit
 
@@ -123,7 +124,8 @@ class LLM:
             timeout=self.cfg.llm_timeout_s,
             max_retries=0,  # retries are ours, so rate limits reach the limiter
         )
-        self.limiter = limiter_for(self.cfg)
+        self.model = self.cfg.model_for(self.stage)
+        self.limiter = limiter_for(self.cfg, self.model)
 
     def chat(self, messages: list[dict], tools: list[dict] | None = None) -> Any:
         """One completion. A reasoning model's hidden reasoning counts against max_tokens: when it uses
@@ -137,7 +139,7 @@ class LLM:
         while attempt < 6:
             t0 = time.time()
             kw: dict[str, Any] = {
-                "model": self.cfg.llm_model,
+                "model": self.model,
                 "messages": messages,
                 "temperature": self.cfg.llm_temperature,
                 "max_tokens": max_tokens,

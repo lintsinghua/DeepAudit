@@ -94,7 +94,7 @@ def config_from_llm(llm_config, workers: int = 6) -> AuditConfig:
                                    .endswith("openai") else "")
     cfg.llm_base_url = base or cfg.llm_base_url
     cfg.llm_api_key = llm_config.api_key or cfg.llm_api_key
-    cfg.llm_model = llm_config.model or cfg.llm_model
+    cfg.llm_model = llm_config.model or cfg.llm_model  # LLM_STRONG_MODEL (environment) stays as configured
     cfg.llm_timeout_s = float(llm_config.timeout or cfg.llm_timeout_s)
     cfg.llm_temperature = float(llm_config.temperature if llm_config.temperature is not None
                                 else cfg.llm_temperature)

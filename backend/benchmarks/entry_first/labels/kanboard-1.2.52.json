@@ -1,0 +1,14 @@
+{
+  "project": "kanboard", "repo": "https://github.com/kanboard/kanboard", "ref": "v1.2.52",
+  "advisories": [
+    {"id": "CVE-2026-58660", "title": "Board drag-and-drop moves a task of another project", "kind": "authz",
+     "files": ["app/Controller/BoardAjaxController.php"], "functions": ["save"],
+     "entry": {"handlers": ["BoardAjaxController"]}},
+    {"id": "CVE-2026-56774", "title": "Remember-me session of another user removed by id", "kind": "authz",
+     "files": ["app/Controller/UserViewController.php", "app/Model/RememberMeSessionModel.php"], "functions": ["removeSession"],
+     "entry": {"handlers": ["removeSession"]}},
+    {"id": "CVE-2026-57862", "title": "Private-network filter misses alternative IP notations", "kind": "value",
+     "files": ["app/Core/Http/Client.php", "app/ExternalLink/WebLink.php"], "functions": ["isPrivateURL", "isPrivateIpAddress"],
+     "entry": {"handlers": ["TaskExternalLinkController", "ExternalLink"]}}
+  ]
+}

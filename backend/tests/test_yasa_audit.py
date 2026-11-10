@@ -69,7 +69,7 @@ class ByRole:
     def __init__(self, **roles):
         self.roles = roles
 
-    def __call__(self, cfg):
+    def __call__(self, cfg, **kw):
         roles = self.roles
 
         class Proxy:
@@ -227,7 +227,7 @@ def test_handler_snippet_starts_at_the_handler(tmp_path):
 def test_recon_falls_back_to_codegraph_when_agent_finds_nothing(tmp_path, monkeypatch):
     from app.services.yasa_audit import pipeline
 
-    monkeypatch.setattr(pipeline, "LLM", lambda cfg: ScriptedLLM([]))
+    monkeypatch.setattr(pipeline, "LLM", lambda cfg, **kw: ScriptedLLM([]))
     monkeypatch.setattr(pipeline, "codegraph_db", lambda root: Path("x"))
     monkeypatch.setattr(pipeline, "codegraph_routes", lambda db, root: [
         {"route": "/orders/:id", "method": "GET", "file": "r.ts", "handler": "show"}])
@@ -308,7 +308,7 @@ def test_run_recon_then_review_end_to_end(tmp_path, monkeypatch):
                 self.script = _script(scripts, key)
             return super().chat(messages, tools)
 
-    monkeypatch.setattr(pipeline, "LLM", lambda cfg: Router([]))
+    monkeypatch.setattr(pipeline, "LLM", lambda cfg, **kw: Router([]))
     cfg = _cfg(workers=1)
     m = pipeline.run(cfg, proj, tmp_path / "out", deadline=time.time() + 600)
     assert m["recon"]["entries"] == 2 and m["recon"]["resolved"] == 2
@@ -451,7 +451,7 @@ async def test_execute_yasa_task_saves_findings(tmp_path, monkeypatch):
     from app.services.yasa_audit import task as ytask
 
     monkeypatch.setattr(ytask, "RUNS_DIR", tmp_path / "runs")
-    monkeypatch.setattr(ytask, "check_tools", lambda cfg: [])
+    monkeypatch.setattr(ytask, "check_tools", lambda cfg, **kw: [])
     monkeypatch.setattr(ytask, "init_navigation", lambda *a, **k: None)
     seen = {}
 
@@ -951,7 +951,7 @@ def test_reconcile_lets_the_access_agent_fix_its_resolver(tmp_path, monkeypatch)
                 self.script = _script(scripts, key)
             return super().chat(messages, tools)
 
-    monkeypatch.setattr(pipeline, "LLM", lambda cfg: Router([]))
+    monkeypatch.setattr(pipeline, "LLM", lambda cfg, **kw: Router([]))
     m = pipeline.recon(_cfg(), proj, tmp_path / "out", deadline=time.time() + 900)
     msg = next(u for u in users if "independently of you" in u)
     assert "G1: 1 entries, declared privileged, resolver public (rule: no gate)" in msg
@@ -1125,7 +1125,7 @@ def test_reconcile_shows_new_groups_after_the_resolver_changes(tmp_path, monkeyp
             seen.extend(m.get("content") or "" for m in messages if m.get("role") == "tool")
             return super().chat(messages, tools)
 
-    monkeypatch.setattr(pipeline, "LLM", lambda cfg: Router([]))
+    monkeypatch.setattr(pipeline, "LLM", lambda cfg, **kw: Router([]))
     m = pipeline.recon(_cfg(), proj, tmp_path / "out", deadline=time.time() + 900)
     assert any("Settle these too" in t and "- G2: 1 entries, declared public, resolver privileged" in t for t in seen)
     rc = m["reconcile"]
@@ -1247,7 +1247,7 @@ def test_refutation_check_moves_refuted_findings_out_and_marks_the_rest(tmp_path
                 self.script = [plan[iid]]
             return super().chat(messages, tools)
 
-    monkeypatch.setattr(pipeline, "LLM", lambda cfg: Checker([]))
+    monkeypatch.setattr(pipeline, "LLM", lambda cfg, **kw: Checker([]))
     m = verify(_cfg(workers=1), tmp_path, review, deadline=time.time() + 300)
     assert seen == ["I2", "I1", "I3"]  # public first, then the most repeated
     assert m["verdicts"] == {"uncertain": 2, "refuted": 1} and m["findings_refuted"] == 2
@@ -1347,7 +1347,7 @@ def test_recon_follows_up_on_dispatchers_left_unenumerated(tmp_path, monkeypatch
                 self.script = _script(scripts, key)
             return super().chat(messages, tools)
 
-    monkeypatch.setattr(pipeline, "LLM", lambda cfg: Router([]))
+    monkeypatch.setattr(pipeline, "LLM", lambda cfg, **kw: Router([]))
     now = time.time()
     m = pipeline.recon(_cfg(), proj, tmp_path / "out", deadline=now + 900, hard_deadline=now + 1800)
     follow = [u for u in users if "ONE dispatcher they left out" in u]
@@ -1475,3 +1475,16 @@ def test_a_unit_whose_model_keeps_replying_with_nothing_is_counted(tmp_path):
     assert res["ended_silent"] and not res["finished"]
     rows = [json.loads(x) for x in (tmp_path / "log.jsonl").read_text().splitlines()]
     assert rows[0]["finish_reason"] == "length"
+
+
+def test_stages_run_on_their_configured_models(monkeypatch):
+    from app.services.yasa_audit.llm import LLM, limiter_for
+
+    cfg = AuditConfig(llm_base_url="http://localhost:1", llm_api_key="k", llm_model="fast")
+    assert {s: cfg.model_for(s) for s in ("recon", "review", "verify")} == \
+        {"recon": "fast", "review": "fast", "verify": "fast"}
+    cfg.llm_strong_model = "strong"
+    assert [cfg.model_for(s) for s in ("recon", "access", "reconcile", "review", "verify")] == \
+        ["strong", "strong", "strong", "fast", "strong"]
+    assert LLM(cfg, stage="verify").model == "strong" and LLM(cfg).model == "fast"
+    assert limiter_for(cfg, "strong") is not limiter_for(cfg, "fast")  # each model has its own limit

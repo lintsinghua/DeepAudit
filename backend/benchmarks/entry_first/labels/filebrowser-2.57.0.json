@@ -1,0 +1,17 @@
+{
+  "project": "filebrowser", "repo": "https://github.com/filebrowser/filebrowser", "ref": "v2.57.0",
+  "advisories": [
+    {"id": "CVE-2026-25890", "title": "Path rules bypass (path not canonicalised before rule match)", "kind": "authz",
+     "files": ["rules/rules.go", "http/resource.go", "http/raw.go", "files/file.go"], "functions": ["Matches", "Check", "MatchString"],
+     "entry": {"routes": ["/api/resources", "/api/raw"]}},
+    {"id": "CVE-2026-62684", "title": "Share API exposes password hash and bypass token", "kind": "info",
+     "files": ["http/share.go", "http/public.go", "share/share.go"], "functions": ["shareGetsHandler", "shareListHandler", "publicShareHandler"],
+     "entry": {"routes": ["/api/share", "/api/public/share"]}},
+    {"id": "CVE-2026-62685", "title": "Sign-up home directory collision (username normalisation)", "kind": "value",
+     "files": ["http/auth.go", "settings/dir.go"], "functions": ["signupHandler", "MakeUserDir", "cleanUsername"],
+     "entry": {"routes": ["/api/signup"]}},
+    {"id": "CVE-2026-54089", "title": "Proxy authentication trusts a client-supplied header", "kind": "config",
+     "files": ["auth/proxy.go"], "functions": ["Auth"],
+     "entry": {"routes": ["/api/login"]}}
+  ]
+}

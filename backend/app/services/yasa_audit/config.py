@@ -37,6 +37,10 @@ class AuditConfig:
     llm_base_url: str = field(default_factory=lambda: os.environ.get("LLM_BASE_URL", ""))
     llm_api_key: str = field(default_factory=lambda: os.environ.get("LLM_API_KEY", ""))
     llm_model: str = field(default_factory=lambda: os.environ.get("LLM_MODEL", ""))
+    # A stronger model for the stages that decide what everything downstream sees (surface, access
+    # model, reconcile, refutation check): a small share of the tokens. Empty: llm_model everywhere.
+    llm_strong_model: str = field(default_factory=lambda: os.environ.get("LLM_STRONG_MODEL", ""))
+    strong_stages: tuple = ("recon", "access", "reconcile", "verify")
     llm_temperature: float = field(
         default_factory=lambda: float(os.environ.get("LLM_TEMPERATURE", "0.1"))
     )
@@ -76,6 +80,10 @@ class AuditConfig:
 
     def stopped(self) -> bool:
         return bool(self.should_stop and self.should_stop())
+
+    def model_for(self, stage: str) -> str:
+        """The model a stage runs on."""
+        return self.llm_strong_model if self.llm_strong_model and stage in self.strong_stages else self.llm_model
 
     def require_llm(self) -> None:
         missing = [
