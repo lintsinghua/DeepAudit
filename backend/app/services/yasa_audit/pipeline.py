@@ -953,6 +953,91 @@ def review(cfg: AuditConfig, root: Path, out: Path, entries: list[dict], deploy:
 
 # ----------------------------------------------------------------- both
 
+def _entry_key(e: dict) -> tuple:
+    """What makes two enumerated entries the same door: its code identity and the request that reaches it."""
+    return (_handler_id(e), str(e.get("method", "ANY")).upper(), _resource_key(e.get("route", "")))
+
+
+def _model_score(rec: dict) -> tuple:
+    """How complete a recon's access model is, to choose which run's model and resolver lead the merge."""
+    am = rec.get("access_model") or {}
+    return (bool((rec.get("resolver") or {}).get("installed")), bool(am.get("ladder")),
+            bool(am.get("shared_protections")), len(json.dumps(am)), rec.get("entries", 0))
+
+
+def converge_recon(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", product: str = "",
+                   deadline: float | None = None, hard_deadline: float | None = None) -> dict:
+    """Run recon several times (each a fresh context) and union the entries they enumerate: a single
+    run sees only part of a large surface and the misses are what the review never gets to see. Stops
+    adding runs once one grows the union by less than recon_converge_threshold, or the budget runs low.
+    The access model and resolver are taken from the most complete run and re-applied to the whole
+    union, so exposure, who_can_call and least_principal are consistent across it."""
+    runs = max(1, cfg.recon_runs)
+    if runs == 1:
+        return recon(cfg, root, out, deploy, product, deadline, hard_deadline)
+    hard = hard_deadline or deadline
+    share = cfg.recon_share if deadline is None else (deadline - time.time()) / max(1, runs)
+    merged: dict[tuple, dict] = {}
+    recs: list[dict] = []
+    growth: list[dict] = []
+    for i in range(runs):
+        sub = out if i == 0 else out.parent / f"{out.name}-{i + 1}"
+        r_deadline = None if deadline is None else time.time() + share
+        rec = recon(cfg, root, sub, deploy, product, r_deadline, hard_deadline=hard)
+        recs.append(rec)
+        before = len(merged)
+        for e in json.loads((sub / "entries.json").read_text()):
+            k = _entry_key(e)
+            if k not in merged or (e.get("resolved") and not merged[k].get("resolved")):
+                merged[k] = e
+        added = len(merged) - before
+        growth.append({"run": i + 1, "run_entries": rec.get("entries", 0), "union": len(merged), "added": added})
+        if i and added <= cfg.recon_converge_threshold * before:
+            break  # converged: the last run barely grew the union
+        if hard is not None and time.time() > hard - 2 * share:
+            break  # not enough budget left for another full run
+
+    entries = list(merged.values())
+    primary = max(range(len(recs)), key=lambda i: _model_score(recs[i]))
+    pdir = out if primary == 0 else out.parent / f"{out.name}-{primary + 1}"
+    model = recs[primary].get("access_model")
+    rf = pdir / "resolver.py"
+    resolver_code = rf.read_text() if rf.exists() else None
+
+    # re-number, re-check, and re-apply the chosen resolver to the full union
+    tb = Toolbox(cfg, root, out, unit="merge")
+    for i, e in enumerate(entries):
+        e["id"] = f"E{i + 1}"
+        e["resolved"] = tb._check_entry(e) is None
+        e.pop("exposure_declared", None)
+    resolver = _apply_resolver(tb, entries, resolver_code, out) if resolver_code else {}
+    _rank_principals(entries, (model or {}).get("ladder"))
+    resolver = {k: v for k, v in resolver.items() if not k.startswith("_")}
+    if resolver_code:
+        (out / "resolver.py").write_text(resolver_code)
+    (out / "entries.json").write_text(json.dumps(entries, indent=1, ensure_ascii=False))
+
+    # capture-recapture: from the overlap of the two largest runs, estimate the true surface size
+    estimate = None
+    if len(recs) >= 2:
+        sets = sorted((({_entry_key(e) for e in json.loads(((out if i == 0 else out.parent / f"{out.name}-{i + 1}")
+                        / "entries.json").read_text())}) for i in range(len(recs))), key=len, reverse=True)
+        a, b = sets[0], sets[1]
+        inter = len(a & b)
+        estimate = round(len(a) * len(b) / inter) if inter else None
+
+    m = dict(recs[primary])
+    tok = lambda k: sum(r.get(k, 0) or 0 for r in recs)  # noqa: E731
+    m.update({"entries": len(entries), "by_exposure": dict(collections.Counter(e["exposure"] for e in entries)),
+              "resolved": sum(e["resolved"] for e in entries), "resolver": resolver,
+              "converge": {"runs": len(recs), "growth": growth, "union": len(entries),
+                           "primary_run": primary + 1, "estimated_surface": estimate},
+              "prompt_tokens": tok("prompt_tokens"), "completion_tokens": tok("completion_tokens"),
+              "cached_tokens": tok("cached_tokens"), "llm_calls": tok("llm_calls")})
+    (out / "recon.json").write_text(json.dumps(m, indent=1, ensure_ascii=False))
+    return m
+
+
 def run(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", product: str = "",
         start: float | None = None, deadline: float | None = None) -> dict:
     """recon (reused when out/recon/entries.json exists, with its assets.json when there is one), review,
@@ -965,8 +1050,8 @@ def run(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", product: str 
         rec = json.loads((out / "recon" / "recon.json").read_text()) if (out / "recon" / "recon.json").exists() else {}
         rec.setdefault("reused", True)
     else:
-        rec = recon(cfg, root, out / "recon", deploy, product, start + cfg.recon_share * (deadline - start),
-                    hard_deadline=deadline)
+        rec = converge_recon(cfg, root, out / "recon", deploy, product,
+                             start + cfg.recon_share * (deadline - start), hard_deadline=deadline)
     entries = json.loads(ef.read_text())
     rf = out / "recon" / "resolver.py"
     resolver = rf.read_text() if rf.exists() else None

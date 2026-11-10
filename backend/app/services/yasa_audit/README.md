@@ -249,15 +249,22 @@ Output:
 ```bash
 bash backend/scripts/setup_yasa.sh        # codegraph + ripgrep into ~/.yasamcp/tools
 export LLM_BASE_URL=... LLM_API_KEY=... LLM_MODEL=...   # OpenAI-compatible with tool calling
+export LLM_STRONG_MODEL=...          # optional: used for recon/access/reconcile/verify (review = LLM_MODEL)
 cd backend
 uv run python -m app.services.yasa_audit init  /path/to/project            # codegraph index
 uv run python -m app.services.yasa_audit recon /path/to/project --out out/ # surface only
 uv run python -m app.services.yasa_audit run   /path/to/project --out out/ \
+       --recon-runs 2 --strong-model deepseek/deepseek-v4-pro \
        --deploy "Linux, nginx, PHP 8.3" \
        --product "Roles: guest, customer, admin. Public by design: catalog, login. CLI input is trusted."
 ```
 
-`run` reuses `out/recon/entries.json` when it exists. In DeepAudit, the "YASA" task mode runs the same
+`run` reuses `out/recon/entries.json` when it exists. `--recon-runs N` (or `recon_runs` in config)
+runs recon N times and unions the entries — a single run sees only part of a large surface — stopping
+early when a run grows the union by less than `recon_converge_threshold` (5%); `recon.json` then carries
+a `converge` block with the per-run growth and a capture-recapture estimate of the full surface. The
+deciding stages (recon, access model, reconcile, refutation check) run on `--strong-model` when set,
+while per-entry review stays on the cheaper `LLM_MODEL`; the resolved model per stage is in `metrics.json`. In DeepAudit, the "YASA" task mode runs the same
 `run` after the navigation index is ready; `product` and `deploy` come from the task's `audit_scope`.
 
 ## Not in this version

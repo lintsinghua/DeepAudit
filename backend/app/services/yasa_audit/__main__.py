@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 from .config import AuditConfig
-from .pipeline import recon, run
+from .pipeline import converge_recon, run
 from .runner import init_navigation
 
 
@@ -35,6 +35,10 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--workers", type=int, default=16)
             p.add_argument("--time-budget", type=float, default=30.0,
                            help="wall-clock budget in minutes (default 30); unreviewed entries are listed")
+            p.add_argument("--recon-runs", type=int, default=None,
+                           help="independent recon runs to union (default from config); >1 converges the surface")
+            p.add_argument("--strong-model", default=None,
+                           help="model for recon/access/reconcile/verify (review stays on LLM_MODEL)")
     args = ap.parse_args(argv)
     cfg = AuditConfig()
     root = args.project.resolve()
@@ -45,9 +49,14 @@ def main(argv: list[str] | None = None) -> int:
 
     cfg.workers = args.workers
     cfg.time_budget_s = int(args.time_budget * 60)
+    if args.recon_runs is not None:
+        cfg.recon_runs = args.recon_runs
+    if args.strong_model is not None:
+        cfg.llm_strong_model = args.strong_model
     start = time.time()
     if args.cmd == "recon":
-        result = recon(cfg, root, args.out / "recon", args.deploy, args.product, start + cfg.time_budget_s)
+        result = converge_recon(cfg, root, args.out / "recon", args.deploy, args.product,
+                                start + cfg.time_budget_s, hard_deadline=start + cfg.time_budget_s)
     elif args.cmd == "verify":
         from .verify import verify
         rec_file, rf = args.out / "recon" / "recon.json", args.out / "recon" / "resolver.py"

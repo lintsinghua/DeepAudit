@@ -1427,7 +1427,7 @@ def test_a_designed_capability_leaves_the_report_as_by_design(tmp_path, monkeypa
     tb = Toolbox(AuditConfig(), tmp_path, tmp_path / "x")
     assert tb.conclude("by_design", "crons runs commands").startswith("rejected: by_design needs power")
     grant = {"principal": "app:crons", "file": "docs/scopes.md", "line": 1, "quote": "may edit and run"}
-    monkeypatch.setattr(pipeline, "LLM", lambda cfg: ScriptedLLM([
+    monkeypatch.setattr(pipeline, "LLM", lambda cfg, **kw: ScriptedLLM([
         ("conclude", {"verdict": "by_design", "reason": "the crons scope is meant to run commands", "power": grant})]))
     m = verify(_cfg(workers=1), tmp_path, review, deadline=time.time() + 300)
     assert m["verdicts"] == {"by_design": 1} and m["findings_by_design"] == 1 and m["findings_kept"] == 0
@@ -1488,3 +1488,57 @@ def test_stages_run_on_their_configured_models(monkeypatch):
         ["strong", "strong", "strong", "fast", "strong"]
     assert LLM(cfg, stage="verify").model == "strong" and LLM(cfg).model == "fast"
     assert limiter_for(cfg, "strong") is not limiter_for(cfg, "fast")  # each model has its own limit
+
+
+def test_converge_recon_unions_entries_and_estimates_surface(tmp_path, monkeypatch):
+    from app.services.yasa_audit import pipeline
+
+    proj = tmp_path / "p"
+    _write(proj, {"a.php": "<?php\nfunction a() { echo $_GET['x']; }\n",
+                  "b.php": "<?php\nfunction b() { echo $_GET['y']; }\n",
+                  "c.php": "<?php\nfunction c() { echo $_GET['z']; }\n"})
+
+    def ext(name, routes):
+        rows = [{"route": r, "handler_file": f, "handler": h, "exposure": "public"} for r, f, h in routes]
+        return "import json\nprint(json.dumps(" + repr(rows) + "))"
+
+    # three fresh recons that each see a different, overlapping slice of a 3-route surface
+    slices = {
+        1: [("/a", "a.php", "a"), ("/b", "b.php", "b")],
+        2: [("/a", "a.php", "a"), ("/c", "c.php", "c")],
+        3: [("/a", "a.php", "a"), ("/b", "b.php", "b"), ("/c", "c.php", "c")],
+    }
+    seq = iter([1, 2, 3])
+    model = {"authentication": "n", "authorization": "n", "permission_mapping": "n", "principals": "anyone",
+             "ladder": ["anyone"], "shared_protections": "none",
+             "evidence": [{"file": "a.php", "line": 2, "quote": "function a()"}]}
+
+    class Router(ScriptedLLM):
+        def chat(self, messages, tools=None):
+            if not self.script and len(messages) == 2:
+                role = _role(messages[0]["content"])
+                if role == "access":
+                    self.script = [("record_access_model", model), ("finish", {"notes": "m"})]
+                elif role == "assets":
+                    self.script = list(ASSETS_NONE)
+                else:
+                    which = next(seq)
+                    self.script = [("run_extractor", {"name": "r", "code": ext("r", slices[which])}),
+                                   ("check_coverage", {"request_read_pattern": r"\$_GET"}),
+                                   ("finish", {"notes": f"slice {which}"})]
+            return super().chat(messages, tools)
+
+    monkeypatch.setattr(pipeline, "LLM", lambda cfg, **kw: Router([]))
+    cfg = _cfg()
+    cfg.recon_runs = 3
+    cfg.recon_converge_threshold = 0.05
+    now = time.time()
+    m = pipeline.converge_recon(cfg, proj, tmp_path / "out", deadline=now + 1200, hard_deadline=now + 1800)
+    assert m["entries"] == 3  # union of the three slices
+    assert [g["added"] for g in m["converge"]["growth"]] == [2, 1, 0]
+    assert m["converge"]["runs"] == 3  # the third run added 0 (<=5%); loop stops after it
+    # capture-recapture on the two largest runs (run3 has 3, run1 has 2, overlap 2) -> 3*2/2 = 3
+    assert m["converge"]["estimated_surface"] == 3
+    ids = [e["id"] for e in json.loads((tmp_path / "out" / "entries.json").read_text())]
+    assert ids == ["E1", "E2", "E3"]  # re-numbered over the union
+    assert (tmp_path / "out-2" / "entries.json").exists() and (tmp_path / "out-3" / "entries.json").exists()
