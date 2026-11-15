@@ -224,6 +224,7 @@ class Toolbox:
         self.identity: list[dict] | None = None
         self.entries_source: Any = None  # callable: the entries the surface agent has enumerated so far
         self._calls: Any = None
+        self.reach: Any = None  # assets.Reach of the run: who can run a piece of code (who_reaches)
         self.design: dict[str, dict] = {}  # identity design review: checklist item -> answer
         self.coverage: Any = None  # assets.Coverage shared by the review units
         self.records_reads = False  # entry units: the code read counts as reviewed for operation units
@@ -481,6 +482,22 @@ class Toolbox:
         if self.on_resolver_installed is not None:
             text += "\n\n" + self.on_resolver_installed()
         return clip(text, 12000)
+
+    def who_reaches(self, pattern: str, glob: str = "") -> str:
+        """The code matching a pattern and who can run it. Its main use is the step across storage: the
+        pattern of the code that writes a stored value gives the value's writers and their callers."""
+        from .assets import REACH_SITES
+        if self.reach is None:
+            return "error: not available in this stage; use grep and find_callers"
+        try:
+            rows = self.grep_rows(str(pattern or ""), str(glob or ""))
+        except subprocess.TimeoutExpired:
+            return "error: search timed out; narrow the pattern or the glob"
+        if len(rows) > REACH_SITES:
+            return (f"rejected: {len(rows)} matches. Match the code that does one thing (the assignments or "
+                    "calls that write this one field, file or key), not every mention of a name: narrow the "
+                    "pattern or give a glob")
+        return clip(self.reach.report(str(pattern), rows))
 
     def who_can_call(self, method: str, path: str) -> str:
         req = {**self.known_entries.get((str(method or "GET").upper(), str(path)), {}),
@@ -1130,10 +1147,8 @@ def tool_schemas(role: str) -> list[dict]:
                     "anchor": {"type": "string", "description": "file:line of the operation that makes this "
                                "risk plausible (where the request value is stored, queried, fetched, "
                                "rendered, used to pick an object, ...)"},
-                    "why": {"type": "string", "description": "rejected: the code that stops it (file:line); "
-                            "when that code lists forbidden values (names, characters, hosts), which consumers "
-                            "of the value you checked the list against. open: what is left to read (it is "
-                            "followed up in a fresh context)."},
+                    "why": {"type": "string", "description": "rejected: the code that stops it (file:line). "
+                            "open: what is left to read (it is followed up in a fresh context)."},
                     "status": {"type": "string", "enum": ["confirmed", "rejected", "open"]},
                     "evidence": s}, "required": ["risk", "anchor", "status"]}},
                 "facts_used": {"type": "array", "items": s,
@@ -1167,6 +1182,13 @@ def tool_schemas(role: str) -> list[dict]:
                 "verdict", "route_evidence", "impact"]),
             fn("who_can_call", "Who can call a request (method, path) under the project's access rules, "
                "computed by the access agent's resolver program.", {"method": s, "path": s}, ["method", "path"]),
+            fn("who_reaches", "The code matching a regex, by function, with the entries that reach each "
+               "function through calls and their least privileged caller. It is the step across storage "
+               "that find_callers is across a call: give the pattern of the code that WRITES a stored value "
+               "(a field assignment, a setter, a file or key write) to learn who can put a value there. From "
+               "a static index: a caller through an untyped or dynamic receiver can be missing, so read a "
+               "writer's callers when its list looks short.",
+               {"pattern": s, "glob": s}, ["pattern"]),
             fn("add_fact", "Share a project fact other reviewers can rely on: one claim, at most 240 "
                "characters (e.g. how a helper escapes, that all data access goes through a typed query API, "
                "which base class enforces login). Rejected unless each quote is found at file:line.",

@@ -102,8 +102,7 @@ IDENTITY_CHECKLIST: dict[str, str] = {
                          "compare what it can reach with its designed power in the access model: can it grant "
                          "or reach more than it holds (assign roles, groups, permissions or scopes above its "
                          "own, change the credentials, email or MFA of a more privileged account), directly or "
-                         "indirectly (groups, invitations, impersonation, data it writes that something more "
-                         "privileged later runs or obeys)?",
+                         "indirectly (groups, invitations, impersonation, token scopes)?",
 }
 DESIGN_STATUSES = ("sound", "flaw", "owner_decision", "unclear", "not_applicable")
 
@@ -404,6 +403,64 @@ def entry_reach(index: CallIndex, entries: list[dict], maps: tuple[dict, dict] |
     and the code those call (without an index, the handler files only)."""
     by_fn, by_file = maps or _entry_maps(index, entries)
     return index.reachable_files(set(by_fn), set(by_file) | index.loaded_by_name())
+
+
+REACH_SITES = 60  # who_reaches answers for the code that does one thing (the writes to one stored value)
+_WEAKEST = {"public": 0, "unknown": 1, "authenticated": 2, "privileged": 3}
+
+
+class Reach:
+    """Who can run a piece of code: the call index and the entries by the function that handles them,
+    built on first use and shared by a run's reviewers (read-only afterwards)."""
+
+    def __init__(self, root: Path, entries: list[dict]):
+        self.root, self.entries = root, entries
+        self._built: tuple | None = None
+        self._lock = threading.Lock()
+
+    def get(self) -> tuple[CallIndex, tuple[dict, dict], dict[str, dict]]:
+        with self._lock:
+            if self._built is None:
+                index = CallIndex(self.root)
+                by_id = {str(e.get("id") or f"#{i}"): e for i, e in enumerate(self.entries)}
+                self._built = (index, _entry_maps(index, self.entries), by_id)
+            return self._built
+
+    def report(self, pattern: str, rows: list[str]) -> str:
+        """The code matching `pattern` (ripgrep rows) by function, with the entries that reach each and
+        their least privileged caller. A trace that arrives at stored data continues at its writers:
+        this is the step across storage that find_callers is across a call."""
+        index, maps, by_id = self.get()
+        sites = expand({"name": "", "op_class": "", "pattern": pattern}, rows, index, [], maps)
+        if not sites:
+            return "no matches in product code (tests and vendored code are left out)"
+        groups: dict[tuple[str, str], list[dict]] = collections.defaultdict(list)
+        for site in sites:
+            groups[(site["file"], site["function"])].append(site)
+        out, overall = [], None
+        for (file, fn), ss in groups.items():
+            ids = sorted({i for x in ss for i in x["entries"]},
+                         key=lambda i: _WEAKEST.get(by_id.get(i, {}).get("exposure"), 1))
+            total = max(x["entries_total"] for x in ss)
+            weakest = by_id.get(ids[0], {}).get("exposure", "unknown") if ids else None
+            if weakest is not None and (overall is None or _WEAKEST[weakest] < _WEAKEST[overall]):
+                overall = weakest
+            out.append(f"{fn}  ({ss[0]['reach']}" + (f"; {total} entries, weakest caller: {weakest}" if ids
+                                                     else "") + ")")
+            out += [f"  {file}:{x['line']}  {x['code'][:140]}" for x in ss[:6]]
+            out += [f"    <- {by_id[i].get('method', 'ANY')} {by_id[i].get('route')}  "
+                    f"[{by_id[i].get('exposure')}" + (f": {by_id[i]['least_principal']}"
+                                                      if by_id[i].get("least_principal") else "") + "]"
+                    for i in ids[:5] if i in by_id]
+        kinds = {x["reach"] for x in sites}
+        notes = [f"{k}: {v}" for k, v in (
+            ("internal", "called, but by no enumerated entry: read its callers"),
+            ("no_callers", "nothing in the index calls it: a hook, a job, an extension point, or dead code"),
+            ("unindexed", "in a language the index does not parse: find what runs it")) if k in kinds]
+        head = f"{len(sites)} matches in {len(groups)} functions" + (
+            f"; least privileged caller that reaches any of them: {overall}" if overall else
+            "; no enumerated entry reaches them through calls")
+        return "\n".join([head, *out, *notes])
 
 
 def scoped_rows(grep: Any, recipe: dict, reachable: set[str],
@@ -798,8 +855,7 @@ def operation_brief(unit: dict, siblings: list[dict], recipes: dict[str, dict]) 
     elif unit["reach"] == "unindexed":
         rows.append("The code index does not parse this file's language, so nothing is known about what runs "
                     "it: find what runs, sources or renders it (a task runner, a command the application "
-                    "executes, a template engine), which of its values come from files, the environment or "
-                    "stored data, and who can write those.")
+                    "executes, a template engine).")
     elif unit["reach"] == "no_callers":
         rows.append("Nothing in the repository calls this code: it is a framework hook, an extension point, "
                     "a public API for plugins or themes, file-level code the framework loads, or dead code. "

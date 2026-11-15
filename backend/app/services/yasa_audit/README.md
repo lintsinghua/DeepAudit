@@ -138,6 +138,23 @@ verified facts so far. The reviewer:
 4. traces each risk with the navigation tools to a confirmed path or a rejection with evidence;
 5. records a card, reports findings (with `required_privilege`), and shares facts.
 
+**Paths cross storage.** A flaw is a path from a value someone controls to an operation that trusts it,
+and a path has two kinds of edge: a call, and a value written to storage and read back later (a database
+field, a file, a setting, an environment or cache key, a queue). The call graph ends at storage, so the
+reviewers are given the other edge: a value is as trusted as whoever can write it, not as the place it
+is read from.
+- Backward, a trace that arrives at stored data continues at its writers. `who_reaches(pattern)` takes
+  the pattern of the code that writes the value and returns the writers by function, the entries that
+  reach each through calls and their least privileged caller. It is to storage what `find_callers` is to
+  a call, and it is the recipe executor of the asset map, so it works on any text the project has
+  (scripts, templates and declarative files included).
+- Forward, when a request value is stored, what its readers do with it decides what the write must
+  check: the reviewer finds the readers and judges the check against the most demanding one.
+
+What a reviewer establishes about a stored value (who can write it, where it is used as code, a path, a
+query or markup) is shared as a fact. This one rule covers second-order injection, stored markup,
+templates or expressions kept in the database, and settings or environment values that a runner executes.
+
 Facts are accepted only when each quote is found at the cited file:line, so later reviewers can rely on
 them instead of re-deriving the same framework behaviour. The system prompt is identical for every unit
 (facts and the entry go in the user message), which keeps the provider's prefix cache effective.
@@ -173,8 +190,7 @@ There is no re-review stage.
   - token lifecycle (expiry, single use, hashing, constant-time comparison, revocation);
   - defaults;
   - privilege ceiling: for each principal the subsystem manages, whether it can grant or reach more than
-    its designed power (see below), directly or through data it writes that something more privileged
-    later runs or obeys.
+    its designed power (see below).
 
   Each answer has a status:
   - `sound`, `flaw` and `owner_decision` need quoted evidence;
@@ -192,9 +208,7 @@ There is no re-review stage.
   reports the finding or records what stops it. Follow-ups run as soon as the unit that raised them ends;
   a design follow-up's outcome is written next to its answer in the worksheet (`follow_up`).
 - **Rejections need reasons.** A card is refused while a hypothesis that is not confirmed has no `why`:
-  a rejection names the code that stops it, an open hypothesis what is left to read. A rejection that
-  rests on a list of forbidden values (names, characters, hosts) must have checked the list against the
-  value's consumers, in whatever language they are written, not against the hypothesis's own examples.
+  a rejection names the code that stops it, an open hypothesis what is left to read.
 
 The schedule puts design units first, because they are few and nothing else covers them. Entry units
 follow, and operation units take every `operation_every`-th slot, so neither kind waits for the other to

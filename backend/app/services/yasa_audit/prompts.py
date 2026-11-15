@@ -117,6 +117,18 @@ request sent, the file written, the data returned) and check the shared protecti
 and any guard on the way. A claim that a protection is missing needs the code that shows it: open the
 wrapper or helper the input passes through rather than assuming what it does.
 
+A value is as trusted as whoever can write it, not as the place it is read from. Storage (a database
+field, a file, a setting, an environment or cache key, a queue) is an edge of the path like a call is,
+in both directions:
+- backward: when the value you are following comes out of storage, the trace continues at its writers.
+  who_reaches(the pattern of the code that writes it) lists them with the entries that reach each and
+  their least privileged caller; that caller, not "it comes from the database", is who controls it;
+- forward: when a request value is stored, what its readers do with it decides what the write must
+  check. Find them (grep the read, in every language of the project: scripts and templates too) and
+  judge the check at the write against the most demanding reader, not against the values you thought of.
+Share what you establish about a stored value with add_fact: who can write it, and where it is used as
+code, a path, a query or markup.
+
 Who the attacker is: a remote user at the entry's exposure level. Input that only an operator controls
 (CLI arguments, deployment config files, installer steps) is trusted unless the product context says
 otherwise. Judge what the attacker obtains against the designed power of the least privileged principal
@@ -166,10 +178,7 @@ Method:
    hypothesis names that place as its anchor (file:line). If a verified fact rules out a class for this
    project (e.g. all data access is through a typed query API), do not raise it.
 5. Trace each hypothesis to a confirmed path (file:line hops, and why the checks do not stop it) or a
-   rejection with evidence. A check that lists forbidden values (names, characters, hosts, extensions)
-   is only as complete as the list is for what consumes the value: before you reject on it, find the
-   consumers (what reads, sources, runs or forwards the value, in any language of the project) and
-   check the list against them, not against the examples your hypothesis started from.
+   rejection with evidence.
    Then record_card again with every hypothesis's final status and the fact ids you relied on,
    report_finding for each confirmed or likely vulnerability, add_fact for short reusable facts you
    verified, and finish. report_finding is only for a vulnerability you traced to the harmful operation:
@@ -197,8 +206,7 @@ Method:
    find_callers and call_graph, and the paths the index cannot see: hooks, events, filters, render and
    template pipelines, scheduled jobs, dynamic registration (grep for the function's name as a string).
 3. For each path: who can take it (who_can_call for routes), which of the operation's values they
-   control, and which checks and transformations run on the way. A value read from storage is controlled
-   by whoever could write it earlier: find that write and who can make it. Compare with the sibling sites listed
+   control, and which checks and transformations run on the way. Compare with the sibling sites listed
    that have the project's guard: a check every sibling makes and this path does not is the most likely
    flaw.
 4. When nothing in the repository calls it, it is an extension point or a public API: the attacker model

@@ -753,6 +753,7 @@ class _Shared:
         self.entries, self.resolver, self.deadline = entries, resolver, deadline
         self.facts, self.issues, self.coverage = FactBook(root), IssueBoard(), assets_map.Coverage()
         self.leads = assets_map.LeadBoard()
+        self.reach = assets_map.Reach(root, entries)
         self.systems = {k: review_prompt(cfg.review_budget if k != "design" else cfg.design_budget, deploy,
                                          product, surface_notes, access_model, k)
                         for k in ("entry", "operation", "design", "lead")}
@@ -814,6 +815,7 @@ def _review_unit(cfg: AuditConfig, root: Path, out: Path, unit: dict, sh: _Share
     uid, brief, code = _unit_view(root, unit, sh)
     tb = Toolbox(cfg, root, out, facts=sh.facts, unit=uid, issues=sh.issues)
     tb.resolver_code, tb.known_entries, tb.coverage = sh.resolver, sh.known, sh.coverage
+    tb.reach = sh.reach
     if kind == "entry":  # what an entry reviewer reads counts as reviewed for the operations in it
         tb.records_reads = True
         if (shown := _SNIPPET_SPAN.match(code)) is not None:

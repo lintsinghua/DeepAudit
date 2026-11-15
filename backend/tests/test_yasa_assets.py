@@ -581,3 +581,64 @@ def test_code_the_index_does_not_parse_stays_in_the_map(tmp_path):
     assert outside == ["shell/task.sh:2:eval \"$CMD\""]
     sites = assets.expand(recipe, rows, index, [])
     assert {s["file"]: s["reach"] for s in sites}["shell/task.sh"] == "unindexed"
+
+
+FEATURE = "\n".join([
+    "class Feature {",                                  # 1
+    "  function update(req) {",                         # 2
+    "    this.row.description = req.body.description;",  # 3
+    "    this.row.save();",                             # 4
+    "  }",                                              # 5
+    "  function importAll(rows) {",                     # 6
+    "    for (r of rows) { r.description = r.text; }",  # 7
+    "  }",                                              # 8
+    "}", ""])
+
+
+@needs_rg
+def test_a_trace_crosses_storage_to_the_writers_and_who_can_run_them(tmp_path):
+    """A stored value is as trusted as whoever can write it: who_reaches gives the writers of a store and
+    the least privileged caller that reaches each, the way find_callers gives the callers of a function."""
+    _write(tmp_path, {"app/Feature.js": FEATURE, "app/Order.js": "function buy(f) {\n  expand(f.description);\n}\n",
+                      "shell/sync.sh": "#!/bin/sh\necho \"description = $1\" >> feature.conf\n",
+                      "tests/feature.test.js": "x.description = 1;\n", "app/big.js": "n.count = 1;\n" * 70})
+    _index(tmp_path, [("f", "class", "Feature", "Feature", "app/Feature.js", 1, 9),
+                      ("f_u", "method", "update", "Feature::update", "app/Feature.js", 2, 5),
+                      ("f_i", "method", "importAll", "Feature::importAll", "app/Feature.js", 6, 8),
+                      ("o_b", "function", "buy", "buy", "app/Order.js", 1, 3)],
+           [("f", "f_u", "contains"), ("f", "f_i", "contains")])
+    entries = [{"id": "E1", "method": "POST", "route": "/features", "handler_file": "app/Feature.js",
+                "handler": "update", "handler_line": 2, "exposure": "authenticated", "least_principal": "catalog_view"},
+               {"id": "E2", "method": "POST", "route": "/admin/features", "handler_file": "app/Feature.js",
+                "handler": "update", "handler_line": 2, "exposure": "privileged"}]
+    tb = Toolbox(_cfg(), tmp_path, tmp_path / "out")
+    assert tb.who_reaches("description").startswith("error: not available")  # recon stages have no entries
+    tb.reach = assets.Reach(tmp_path, entries)
+    out = tb.who_reaches(r"description\s*=")
+    assert out.splitlines()[0] == "3 matches in 3 functions; least privileged caller that reaches any of them: " \
+                                  "authenticated"
+    assert "Feature::update  (handler; 2 entries, weakest caller: authenticated)" in out
+    assert "app/Feature.js:3  this.row.description = req.body.description;" in out
+    assert "<- POST /features  [authenticated: catalog_view]" in out
+    assert "Feature::importAll  (no_callers)" in out and "nothing in the index calls it" in out
+    assert "<shell/sync.sh>  (unindexed)" in out and "does not parse" in out  # a writer in another language
+    assert "tests/" not in out
+    assert tb.who_reaches("count").startswith("rejected: 70 matches")
+    assert "no matches" in tb.who_reaches("nothing_like_this")
+
+
+def test_reviewers_follow_stored_values_and_the_special_cases_are_gone():
+    from app.services.yasa_audit.prompts import review_prompt
+    from app.services.yasa_audit.toolbox import tool_schemas
+
+    for mode in ("entry", "operation", "design", "lead"):
+        system = review_prompt(30, mode=mode)
+        assert "A value is as trusted as whoever can write it" in system and "who_reaches(" in system
+    names = lambda role: {t["function"]["name"] for t in tool_schemas(role)}  # noqa: E731
+    assert "who_reaches" in names("review") and "who_reaches" in names("design")
+    assert "who_reaches" not in names("recon") and "who_reaches" not in names("verify")
+    # one principle instead of the rules that restated it for one situation each
+    everything = review_prompt(30, mode="entry") + review_prompt(30, mode="operation") + \
+        assets.IDENTITY_CHECKLIST["privilege_ceiling"]
+    for gone in ("lists forbidden values", "A value read from storage is controlled", "later runs or obeys"):
+        assert gone not in everything
