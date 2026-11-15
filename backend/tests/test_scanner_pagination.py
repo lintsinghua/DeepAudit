@@ -6,17 +6,22 @@ repository with more branches or files than one page holds must still be
 listed completely.
 """
 
-from unittest.mock import patch
+import asyncio
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 
 from app.services.scanner import (
+    ListingTruncatedError,
     fetch_all_pages,
     get_gitea_branches,
     get_github_branches,
     get_gitlab_branches,
     get_gitlab_files,
+    scan_repo_task,
 )
 
 
@@ -106,3 +111,70 @@ class TestPaginationGuards:
         ):
             with pytest.raises(Exception, match="max_pages"):
                 await get_gitlab_files("https://gitlab.example.com/group/project", "main")
+
+
+class _FakeSession:
+    """Just enough of AsyncSession for scan_repo_task to reach the branch loop."""
+
+    def __init__(self, task, project):
+        self._rows = {"task": task, "project": project}
+
+    async def get(self, model, key):
+        return self._rows["task"] if key == "task-1" else self._rows["project"]
+
+    async def commit(self):
+        pass
+
+
+def _session_factory(task, project):
+    @asynccontextmanager
+    async def factory():
+        yield _FakeSession(task, project)
+
+    return factory
+
+
+class TestScanBranchFallback:
+    """scan_repo_task tries default_branch, main and master when a branch fails."""
+
+    def _run(self, fake_files):
+        task = SimpleNamespace(
+            project_id="project-1", branch_name="feature", exclude_patterns=None,
+            status="pending", started_at=None, completed_at=None,
+        )
+        project = SimpleNamespace(
+            source_type="repository", repository_url="https://gitlab.example.com/group/project",
+            repository_type="gitlab", default_branch="develop",
+        )
+        calls = []
+
+        async def get_gitlab_files(repo_url, branch, token=None, exclude_patterns=None):
+            calls.append(branch)
+            return await fake_files(branch)
+
+        with patch("app.services.scanner.get_gitlab_files", get_gitlab_files), patch(
+            "app.services.scanner.LLMService", MagicMock()
+        ), patch("app.services.scanner.task_control", MagicMock()):
+            asyncio.run(scan_repo_task("task-1", _session_factory(task, project)))
+        return task, calls
+
+    def test_truncated_listing_is_not_replaced_by_another_branch(self):
+        # The requested branch exists but is too large to list. Falling back to
+        # another branch would scan the wrong code, so the scan must stop here.
+        async def fake_files(branch):
+            if branch == "feature":
+                raise ListingTruncatedError("列表超过 max_pages=500 页")
+            return []
+
+        task, calls = self._run(fake_files)
+        assert calls == ["feature"]
+        assert task.status == "failed"
+
+    def test_other_errors_still_fall_back_to_other_branches(self):
+        # Characterization: a missing branch keeps the existing fallback order.
+        async def fake_files(branch):
+            raise Exception("GitLab API 404: not found")
+
+        task, calls = self._run(fake_files)
+        assert calls == ["feature", "develop", "main", "master"]
+        assert task.status == "failed"
