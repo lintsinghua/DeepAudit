@@ -9,7 +9,10 @@ listed completely.
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
+import pytest
+
 from app.services.scanner import (
+    fetch_all_pages,
     get_gitea_branches,
     get_github_branches,
     get_gitlab_branches,
@@ -78,3 +81,28 @@ class TestPaginationGuards:
         with patch("app.services.scanner.gitlab_api", ignores_page):
             branches = await get_gitlab_branches("https://gitlab.example.com/group/project")
         assert branches == [b["name"] for b in first_page]
+
+    async def test_listing_longer_than_page_cap_raises(self):
+        # 3 pages of 10, but only 2 pages allowed: returning 20 items would
+        # look like a complete listing, so the helper must refuse instead.
+        items = [{"name": f"b-{i}"} for i in range(30)]
+        fake = make_paged_api(items, "per_page", 10)
+        with pytest.raises(Exception, match="max_pages=2"):
+            await fetch_all_pages(fake, "https://h/x", per_page=10, max_pages=2)
+
+    async def test_listing_ending_exactly_at_page_cap_is_complete(self):
+        # 2 full pages and nothing after them: the cap is reached, but the
+        # extra probe sees an empty page, so the listing is complete.
+        items = [{"name": f"b-{i}"} for i in range(20)]
+        fake = make_paged_api(items, "per_page", 10)
+        result = await fetch_all_pages(fake, "https://h/x", per_page=10, max_pages=2)
+        assert result == items
+
+    async def test_truncated_gitlab_tree_fails_the_file_listing(self):
+        tree = [{"type": "blob", "path": f"src/file_{i}.py"} for i in range(250)]
+        fake = make_paged_api(tree, "per_page", 100)
+        with patch("app.services.scanner.gitlab_api", fake), patch(
+            "app.services.scanner.fetch_all_pages.__defaults__", ("per_page", 100, 2)
+        ):
+            with pytest.raises(Exception, match="max_pages"):
+                await get_gitlab_files("https://gitlab.example.com/group/project", "main")

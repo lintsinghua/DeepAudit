@@ -164,18 +164,34 @@ async def fetch_all_pages(
     per_page: int = 100,
     max_pages: int = 500,
 ) -> list[Any]:
-    """逐页请求列表接口，直到返回空页（GitHub/GitLab/Gitea 列表接口每次只返回一页）"""
+    """逐页请求列表接口，直到返回空页（GitHub/GitLab/Gitea 列表接口每次只返回一页）
+
+    达到 max_pages 后仍有数据时抛出异常，而不是返回不完整的列表。
+    """
     items: list[Any] = []
     sep = "&" if "?" in url else "?"
     previous = None
+
+    def is_last(data: Any) -> bool:
+        # 空页表示结束；与上一页相同说明服务端忽略了 page 参数，停止以免重复和无限请求
+        return not isinstance(data, list) or not data or data == previous
+
     for page in range(1, max_pages + 1):
         data = await api_func(f"{url}{sep}{per_page_param}={per_page}&page={page}", token)
-        # 空页表示结束；与上一页相同说明服务端忽略了 page 参数，停止以免重复和无限请求
-        if not isinstance(data, list) or not data or data == previous:
-            break
+        if is_last(data):
+            return items
         items.extend(data)
         previous = data
-    return items
+
+    # 已达到页数上限但尚未见到结束页：再探测一页。
+    # 列表恰好在上限处结束时这一页为空，结果完整；否则返回的列表会缺少后面的条目，
+    # 调用方（如扫描）会把它当成完整列表，因此直接报错。
+    data = await api_func(f"{url}{sep}{per_page_param}={per_page}&page={max_pages + 1}", token)
+    if is_last(data):
+        return items
+    raise Exception(
+        f"列表超过 max_pages={max_pages} 页（每页 {per_page} 条），结果不完整: {url}"
+    )
 
 
 async def fetch_file_content(url: str, headers: Dict[str, str] = None) -> Optional[str]:
