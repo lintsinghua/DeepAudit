@@ -107,17 +107,22 @@ def run_entry_audit(cfg: AuditConfig, root: Path, out: Path, deploy: str, produc
     m = run(cfg, root, out, deploy, product, start, deadline)
     data = json.loads((out / "review" / "findings.json").read_text())
     return {**m, "findings": data["findings"], "not_reviewed": data.get("not_reviewed", []),
-            "tokens": m["total_tokens"]}
+            "design_worksheet": data.get("design_worksheet", []), "tokens": m["total_tokens"]}
 
 
 def _describe(f: dict) -> str:
-    parts = [f"[yasa_audit/entry review] verdict: {f.get('verdict')}"]
+    parts = [f"[yasa_audit/{f.get('unit_kind') or 'entry'} review] verdict: {f.get('verdict')}"]
     if f.get("documented_intent"):
         di = f["documented_intent"]
         di = di if isinstance(di, dict) else (di or [{}])[0]
         parts.append(f"Documented as intended by the project: {di.get('file')}:{di.get('line')} \"{di.get('quote')}\"")
     if f.get("issue"):
         parts.append(f"Root cause {f['issue']}: {f.get('root_cause') or '(see linked finding)'}")
+    v = f.get("verification")
+    if v:
+        label = {"upheld": "upheld by an independent refutation check",
+                 "uncertain": "NOT verified by the refutation check"}.get(v.get("verdict"), v.get("verdict"))
+        parts.append(f"Verification: {label}. {v.get('reason', '')}".strip())
     for key, label in (("impact", "Impact"), ("entry", "Entry"), ("required_privilege", "Required privilege"),
                        ("source", "Source"), ("sanitizers", "Guards/sanitizers"), ("handler", "Handler")):
         if f.get(key):
@@ -160,8 +165,9 @@ def to_deepaudit_findings(findings: list[dict]) -> list[dict]:
             "file_path": f.get("sink_file"),
             "line_start": int(line) if str(line or "").isdigit() else None,
             "description": _describe(f),
-            "confidence": 0.85 if f.get("verdict") == "confirmed" else 0.6,
+            "confidence": (0.85 if f.get("verdict") == "confirmed" else 0.6)
+            - (0.2 if (f.get("verification") or {}).get("verdict") == "uncertain" else 0),
             "cwe_id": cwe or None,
-            "verification_method": "yasa_audit entry review (static, not executed)",
+            "verification_method": f"yasa_audit {f.get('unit_kind') or 'entry'} review (static, not executed)",
         })
     return out

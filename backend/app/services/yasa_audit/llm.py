@@ -18,6 +18,7 @@ class Usage:
     cached: int = 0  # prompt tokens served from the provider's prefix cache (billed lower)
     reasoning: int = 0  # completion tokens spent on hidden reasoning
     calls: int = 0
+    widened: int = 0  # requests sent again with a larger output allowance (see LLM.chat)
     seconds: float = 0.0
 
     def add(self, usage: Any, secs: float) -> None:
@@ -33,14 +34,16 @@ class Usage:
 
 
 class AdaptiveLimiter:
-    """Caps concurrent requests to one endpoint. Halves the cap when the provider rate-limits,
-    raises it by one after `grow_after` successes in a row, between 1 and `ceiling`.
+    """Caps concurrent requests to one endpoint. Halves the cap when the provider rate-limits (once per
+    burst: the requests in flight when the provider pushes back all fail together, and counting each one
+    took the cap from 16 to 4 for the rest of a run), raises it by one after as many successes in a row as
+    the cap (at most `grow_after`, at least 4), between 1 and `ceiling`.
 
     Many review units can run at once (most of a unit's time is spent outside LLM calls, in tools);
     the limiter keeps the number of requests in flight at what the provider accepts.
     """
 
-    def __init__(self, ceiling: int, start: int | None = None, grow_after: int = 20):
+    def __init__(self, ceiling: int, start: int | None = None, grow_after: int = 20, burst_s: float = 10.0):
         self.ceiling = max(1, ceiling)
         self.limit = max(1, min(self.ceiling, start or self.ceiling))
         self.grow_after = grow_after
@@ -48,6 +51,9 @@ class AdaptiveLimiter:
         self.ok_streak = 0
         self.throttled = 0
         self.peak = 0
+        self.burst_s = burst_s
+        self.last_cut = 0.0
+        self.last_error = ""  # the provider's last rate-limit message (RPM, TPM or concurrency: they differ)
         self._cv = threading.Condition()
 
     def acquire(self) -> None:
@@ -57,16 +63,21 @@ class AdaptiveLimiter:
             self.in_flight += 1
             self.peak = max(self.peak, self.in_flight)
 
-    def release(self, rate_limited: bool = False) -> None:
+    def release(self, rate_limited: bool = False, error: str = "") -> None:
         with self._cv:
+            if error:
+                self.last_error = error[:300]
             self.in_flight -= 1
             if rate_limited:
                 self.throttled += 1
                 self.ok_streak = 0
-                self.limit = max(1, self.limit // 2)
+                now = time.monotonic()
+                if now - self.last_cut >= self.burst_s:  # one cut per burst of rejections
+                    self.limit = max(1, self.limit // 2)
+                    self.last_cut = now
             else:
                 self.ok_streak += 1
-                if self.ok_streak >= self.grow_after and self.limit < self.ceiling:
+                if self.ok_streak >= min(self.grow_after, max(4, self.limit)) and self.limit < self.ceiling:
                     self.limit += 1
                     self.ok_streak = 0
             self._cv.notify_all()
@@ -74,7 +85,7 @@ class AdaptiveLimiter:
     def stats(self) -> dict:
         with self._cv:
             return {"limit": self.limit, "ceiling": self.ceiling, "peak_in_flight": self.peak,
-                    "rate_limited": self.throttled}
+                    "rate_limited": self.throttled, "last_rate_limit_error": self.last_error}
 
 
 _LIMITERS: dict[tuple, AdaptiveLimiter] = {}
@@ -100,6 +111,7 @@ def _is_rate_limit(e: Exception) -> bool:
 class LLM:
     cfg: AuditConfig
     usage: Usage = field(default_factory=Usage)
+    last_finish_reason: str | None = None  # 'length' when the reply was cut by the output limit
 
     def __post_init__(self) -> None:
         from openai import OpenAI  # transitive dependency of litellm
@@ -114,14 +126,21 @@ class LLM:
         self.limiter = limiter_for(self.cfg)
 
     def chat(self, messages: list[dict], tools: list[dict] | None = None) -> Any:
+        """One completion. A reasoning model's hidden reasoning counts against max_tokens: when it uses
+        the whole allowance nothing visible comes back (no text, no tool call, finish_reason 'length').
+        Asking again in words repeats the same reasoning and fails the same way, so the same request is
+        sent again with twice the allowance, up to llm_max_tokens_ceiling."""
         last_err: Exception | None = None
-        for attempt in range(6):
+        err = ""
+        max_tokens = self.cfg.llm_max_tokens
+        attempt = 0
+        while attempt < 6:
             t0 = time.time()
             kw: dict[str, Any] = {
                 "model": self.cfg.llm_model,
                 "messages": messages,
                 "temperature": self.cfg.llm_temperature,
-                "max_tokens": self.cfg.llm_max_tokens,
+                "max_tokens": max_tokens,
             }
             if tools:
                 kw["tools"] = tools
@@ -131,13 +150,22 @@ class LLM:
             try:
                 resp = self.client.chat.completions.create(**kw)
                 self.usage.add(resp.usage, time.time() - t0)
-                return resp.choices[0].message
+                self.last_finish_reason = getattr(resp.choices[0], "finish_reason", None)
+                msg = resp.choices[0].message
+                if (self.last_finish_reason == "length" and not msg.content and not msg.tool_calls
+                        and max_tokens < self.cfg.llm_max_tokens_ceiling):
+                    max_tokens = min(self.cfg.llm_max_tokens_ceiling, max_tokens * 2)
+                    self.usage.widened += 1
+                    continue
+                return msg
             except Exception as e:  # network / rate limit: back off and retry
                 last_err = e
                 limited = _is_rate_limit(e)
+                err = str(e) if limited else ""
             finally:
-                self.limiter.release(rate_limited=limited)
-            time.sleep(min(30, (5 if limited else 2) * (attempt + 1)))
+                self.limiter.release(rate_limited=limited, error=err)
+            attempt += 1
+            time.sleep(min(30, (5 if limited else 2) * attempt))
         raise RuntimeError(f"LLM call failed after retries: {last_err}")
 
 

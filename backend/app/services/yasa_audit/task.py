@@ -167,6 +167,13 @@ async def execute_yasa_task(
     await emitter.emit_info(f"🧭 recon: {rec.get('entries', 0)} entries ({rec.get('resolved', 0)} resolved to code)")
     await emitter.emit_info(f"✅ review: {rv['reviewed_units']} of {rv['units']} handlers reviewed, "
                             f"{sum(f.get('verdict') in ('confirmed', 'likely') for f in r['findings'])} reported")
+    if rv.get("operation_units") or rv.get("design_units"):
+        open_items = sum(i["status"] in ("flaw", "owner_decision", "unclear")
+                         for d in r.get("design_worksheet", []) for i in d["items"])
+        await emitter.emit_info(f"🎯 sensitive operations: {rv.get('reviewed_operation_units', 0)} of "
+                                f"{rv.get('operation_units', 0)} units reviewed; identity design: "
+                                f"{rv.get('reviewed_design_units', 0)} subsystems, {open_items} checklist items "
+                                f"for a human decision (design_worksheet in {out / 'review' / 'findings.json'})")
     findings = to_deepaudit_findings(r["findings"])
     if r["not_reviewed"]:
         await emitter.emit_warning(f"⏱ time budget reached: {len(r['not_reviewed'])} entries not "

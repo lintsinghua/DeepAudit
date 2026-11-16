@@ -3,6 +3,7 @@
     python -m app.services.yasa_audit init   <project>             # build codegraph's index of the project
     python -m app.services.yasa_audit recon  <project> --out DIR   # route reconnaissance only
     python -m app.services.yasa_audit run    <project> --out DIR   # recon (reused if DIR/recon exists) + review
+    python -m app.services.yasa_audit verify <project> --out DIR   # refutation check of DIR/review/findings.json
 
 LLM settings come from DeepAudit's LLM_BASE_URL / LLM_API_KEY / LLM_MODEL environment variables.
 """
@@ -23,7 +24,7 @@ from .runner import init_navigation
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m app.services.yasa_audit")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("init", "recon", "run"):
+    for name in ("init", "recon", "run", "verify"):
         p = sub.add_parser(name)
         p.add_argument("project", type=Path)
         if name != "init":
@@ -47,6 +48,12 @@ def main(argv: list[str] | None = None) -> int:
     start = time.time()
     if args.cmd == "recon":
         result = recon(cfg, root, args.out / "recon", args.deploy, args.product, start + cfg.time_budget_s)
+    elif args.cmd == "verify":
+        from .verify import verify
+        rec_file, rf = args.out / "recon" / "recon.json", args.out / "recon" / "resolver.py"
+        rec = json.loads(rec_file.read_text()) if rec_file.exists() else {}
+        result = verify(cfg, root, args.out / "review", args.deploy, args.product, rec.get("access_model"),
+                        rf.read_text() if rf.exists() else None, start + cfg.time_budget_s)
     else:
         result = run(cfg, root, args.out, args.deploy, args.product, start, start + cfg.time_budget_s)
     print(json.dumps(result, ensure_ascii=False, default=str))

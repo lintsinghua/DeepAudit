@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.services.yasa_audit.assets import OP_CLASSES
 from app.services.yasa_audit.config import AuditConfig
 from app.services.yasa_audit.toolbox import FactBook, Toolbox, tool_schemas
 
@@ -47,6 +48,20 @@ class ScriptedLLM:
         return SimpleNamespace(content="", tool_calls=[_call(name, args, f"c{self.usage.calls}")])
 
 
+def _role(system):
+    """Which recon agent a system prompt belongs to."""
+    return "assets" if "worth protecting" in system else "access" if "controls ACCESS" in system else "recon"
+
+
+# The asset agent of a test project that has none of the operations: every class absent, no identity.
+ASSETS_NONE = [("class_absent", {"op_class": c, "reason": "not in this test project"}) for c in OP_CLASSES] + [
+    ("record_identity", {"subsystems": []}), ("finish", {})]
+
+
+def _script(scripts, key):
+    return list(scripts.get("assets", ASSETS_NONE) if key == "assets" else scripts[key])
+
+
 class ByRole:
     """LLM factory for recon tests: each agent gets the scripted model for its role, picked from its
     system prompt at the first call (the two agents start in parallel, in no fixed order)."""
@@ -61,7 +76,9 @@ class ByRole:
             usage = SimpleNamespace(prompt=0, completion=0, cached=0, reasoning=0, calls=0)
 
             def chat(self, messages, tools=None):
-                role = "access" if "controls ACCESS" in messages[0]["content"] else "surface"
+                role = {"recon": "surface"}.get(_role(messages[0]["content"]), _role(messages[0]["content"]))
+                if role not in roles:
+                    roles[role] = ScriptedLLM(ASSETS_NONE)
                 return roles[role].chat(messages, tools)
 
         return Proxy()
@@ -234,7 +251,7 @@ def test_run_recon_then_review_end_to_end(tmp_path, monkeypatch):
     scripts = {
         "access": [("finish", {"notes": "too early"}),  # refused: no access model yet
                    ("record_access_model", {"authentication": "none", "authorization": "none",
-                                            "permission_mapping": "none", "principals": "anyone",
+                                            "permission_mapping": "none", "ladder": ["anonymous", "admin"], "shared_protections": "none", "principals": "anyone",
                                             "evidence": [{"file": "web/Home.php", "line": 3,
                                                           "quote": "function execute()"}]}),
                    ("write_access_resolver", {"code": "import json,sys; r=json.load(sys.stdin); print(json.dumps("
@@ -264,19 +281,31 @@ def test_run_recon_then_review_end_to_end(tmp_path, monkeypatch):
                                           "route_evidence": {"file": "web/Download.php", "line": 2,
                                                              "quote": "class Download"}})],
         "/home": [("record_card", {"function": "home page", "callers": "anyone", "authz_verdict": "ok",
+                                   "open_leads": ["web/Home.php:3 echo of q: check the template escaping"],
                                    "hypotheses": []})],
     }
+    scripts["verify"] = [("finish", {"notes": "too early"}),  # refused: no conclusion yet
+                         ("conclude", {"verdict": "upheld", "reason": "nothing between $_GET and readfile",
+                                       "path": [{"stage": "operation", "file": "web/Download.php", "line": 4,
+                                                 "quote": "readfile('/srv/files/' . $_GET['name'])"}]}),
+                         ("conclude", {"verdict": "upheld", "reason": "nothing between $_GET and readfile",
+                                       "path": [{"stage": s, "file": "web/Download.php", "line": ln, "quote": q,
+                                                 "effect": "passes"} for s, ln, q in (
+                                           ("input_validation", 4, "$_GET['name']"),
+                                           ("permission", 3, "function execute()"),
+                                           ("operation", 4, "readfile('/srv/files/' . $_GET['name'])"))]})]
     users, systems = [], []
 
     class Router(ScriptedLLM):
         def chat(self, messages, tools=None):
-            if not self.script and len(messages) == 2:
+            if not self.script and not self.usage.calls:  # a reminder may follow the first user message
                 user = messages[1]["content"]
                 users.append(user)
                 systems.append(messages[0]["content"])
-                key = next((k for k in ("/download", "/home") if f'"route": "{k}"' in user),
-                           "access" if "controls ACCESS" in messages[0]["content"] else "recon")
-                self.script = list(scripts[key])
+                key = ("verify" if "Try to refute it" in user else
+                       next((k for k in ("/download", "/home") if f'"route": "{k}"' in user),
+                            _role(messages[0]["content"])))
+                self.script = _script(scripts, key)
             return super().chat(messages, tools)
 
     monkeypatch.setattr(pipeline, "LLM", lambda cfg: Router([]))
@@ -293,6 +322,10 @@ def test_run_recon_then_review_end_to_end(tmp_path, monkeypatch):
     data = json.loads((tmp_path / "out" / "review" / "findings.json").read_text())
     (f,) = data["findings"]
     assert f["cwe"] == "CWE-22" and f["handler"] == "web/Download.php::execute" and data["not_reviewed"] == []
+    assert f["verification"]["verdict"] == "upheld" and data["refuted"] == []
+    assert m["verify"]["root_causes"] == 1 and m["verify"]["verdicts"] == {"upheld": 1}
+    (lead,) = data["open_leads"]  # unverified suspicions are kept apart from findings
+    assert lead["lead"] == "web/Home.php:3 echo of q: check the template escaping" and lead["entries"]
     cards = json.loads((tmp_path / "out" / "review" / "cards.json").read_text())
     assert {c["function"] for c in cards} == {"file download", "home page"}  # one card per unit
     assert next(c for c in cards if c["function"] == "file download")["hypotheses"][0]["anchor"] == \
@@ -547,7 +580,7 @@ def test_agent_loop_explains_unparsable_arguments_and_forces_finish(tmp_path):
 
 
 @needs_rg
-def test_recon_second_pass_turns_notes_into_extractors(tmp_path, monkeypatch):
+def test_recon_pass_that_read_the_code_writes_the_extractor(tmp_path, monkeypatch):
     from app.services.yasa_audit import pipeline
 
     _write(tmp_path, {"api/Posts.java": "class Posts {\n  Mono<ServerResponse> list(ServerRequest r) {\n"
@@ -555,14 +588,12 @@ def test_recon_second_pass_turns_notes_into_extractors(tmp_path, monkeypatch):
     extractor = ("import json; print(json.dumps([{'route': '/apis/posts', 'handler_file': 'api/Posts.java', "
                  "'handler': 'list', 'exposure': 'authenticated'}]))")
     model = {"authentication": "session", "authorization": "RBAC filter", "permission_mapping": "verb+path",
-             "principals": "anonymous < user", "evidence": [{"file": "api/Posts.java", "line": 2,
+             "ladder": ["anonymous", "admin"], "shared_protections": "none", "principals": "anonymous < user", "evidence": [{"file": "api/Posts.java", "line": 2,
                                                              "quote": "list(ServerRequest r)"}]}
-    script = [("list_dir", {})] * 8 + [                       # pass 1 only reads (budget 2, +6 grace) ...
-              ("finish", {"notes": "RouterFunction beans: /apis/posts -> Posts::list"}),  # ... forced finish
-              ("run_extractor", {"name": "router", "code": extractor}),                  # pass 2
+    script = [("list_dir", {})] * 8 + [                       # the pass only reads (budget 2, +6 grace) ...
+              ("run_extractor", {"name": "router", "code": extractor}),  # ... then is offered only the gate's tools
               ("record_access_model", model),
-              ("check_coverage", {"request_read_pattern": r"queryParam\("}),
-              ("finish", {"notes": "RouterFunction beans, 1 extractor"})]
+              ("check_coverage", {"request_read_pattern": r"queryParam\("})]
     surface = ScriptedLLM([x for x in script if x[0] != "record_access_model"])
     access = ScriptedLLM([("record_access_model", model), ("finish", {})])
     seen = []
@@ -576,8 +607,9 @@ def test_recon_second_pass_turns_notes_into_extractors(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "LLM", ByRole(access=access, surface=surface))
     cfg = _cfg(recon_budget=2)
     m = pipeline.recon(cfg, tmp_path, tmp_path / "recon")
-    assert m["passes"] == 2 and m["source"] == "agent" and m["entries"] == 1 and m["resolved"] == 1
-    assert any("/apis/posts -> Posts::list" in x for x in seen) and m["notes"] == "RouterFunction beans, 1 extractor"
+    # finish is refused until an extractor ran, so the pass that read the code writes it (no second pass)
+    assert m["passes"] == 1 and m["source"] == "agent" and m["entries"] == 1 and m["resolved"] == 1
+    assert any("no extractor has run" in x for x in seen) and m["coverage"] is not None
     assert m["access_model"]["principals"] == "anonymous < user"
 
 
@@ -586,12 +618,12 @@ def test_recon_finish_gates_and_access_model_evidence(tmp_path):
     tb = Toolbox(AuditConfig(), tmp_path, tmp_path)
     tb.finish_gates = [(lambda t: t.access_model is None, "record_access_model first")]
     assert tb.finish("x") == "not finished: record_access_model first" and not tb.finished
-    base = {"authentication": "a", "authorization": "b", "permission_mapping": "c", "principals": "d"}
+    base = {"authentication": "a", "authorization": "b", "permission_mapping": "c", "ladder": ["anonymous", "admin"], "shared_protections": "none", "principals": "d"}
     assert tb.record_access_model(**base).startswith("rejected: evidence is required")
     assert "quote not found" in tb.record_access_model(
         **base, evidence=[{"file": "Sec.java", "line": 2, "quote": "denyAll"}])
-    assert tb.record_access_model(**base, evidence=[{"file": "Sec.java", "line": 2, "quote": "allowed()"}]) == \
-        "access model recorded"
+    assert tb.record_access_model(**base, evidence=[{"file": "Sec.java", "line": 2, "quote": "allowed()"}]) \
+        .startswith("access model recorded")
     assert tb.finish("done").startswith("finished") and tb.finished
     tb2 = Toolbox(AuditConfig(), tmp_path, tmp_path)
     tb2.finish_gates = tb.finish_gates
@@ -609,8 +641,11 @@ def test_record_card_requires_anchors_and_counts_fact_citations(tmp_path):
     assert tb.record_card(**card, hypotheses=[{"risk": "sqli", "status": "rejected"}]).startswith("rejected")
     assert tb.record_card(**card, hypotheses=[{"risk": "x", "anchor": "A.java:99", "status": "open"}]) \
         .startswith("rejected")  # line out of range
+    assert "have no why" in tb.record_card(**card, hypotheses=[{"risk": "idor", "anchor": "A.java:3",
+                                                                 "status": "rejected"}])
     assert "unknown fact ids ignored: ['F7']" in tb.record_card(
-        **card, hypotheses=[{"risk": "idor", "anchor": "A.java:3", "status": "open"}], facts_used=["F2", "F7"])
+        **card, hypotheses=[{"risk": "idor", "anchor": "A.java:3", "status": "open", "why": "who owns the row"}],
+        facts_used=["F2", "F7"])
     tb.record_card(**card, hypotheses=[], facts_used=["F2"])
     assert len(tb.cards) == 1  # a later call replaces the card
     block = fb.prompt_block()
@@ -656,7 +691,7 @@ def test_recon_sends_access_model_to_the_surface_agent(tmp_path, monkeypatch):
 
     _write(tmp_path, {"Sec.java": "class Sec {\n  boolean allowed() { return true; }\n}\n"})
     recorded = threading.Event()
-    model = {"authentication": "a", "authorization": "b", "permission_mapping": "c", "principals": "anon < admin",
+    model = {"authentication": "a", "authorization": "b", "permission_mapping": "c", "ladder": ["anonymous", "admin"], "shared_protections": "none", "principals": "anon < admin",
              "evidence": [{"file": "Sec.java", "line": 2, "quote": "allowed()"}]}
 
     class Access(ScriptedLLM):
@@ -884,7 +919,7 @@ def test_reconcile_lets_the_access_agent_fix_its_resolver(tmp_path, monkeypatch)
                      "{'least_privileged': 'unknown'} for q in r]))")
     scripts = {
         "access": [("record_access_model", {"authentication": "session", "authorization": "in handlers",
-                                            "permission_mapping": "require_admin()", "principals": "anyone, admin",
+                                            "permission_mapping": "require_admin()", "ladder": ["anonymous", "admin"], "shared_protections": "none", "principals": "anyone, admin",
                                             "evidence": [{"file": "web/Admin.php", "line": 3,
                                                           "quote": "require_admin()"}]}),
                    ("write_access_resolver", {"code": gate_only, "samples": [{"route": "/a"}, {"route": "/b"},
@@ -912,8 +947,8 @@ def test_reconcile_lets_the_access_agent_fix_its_resolver(tmp_path, monkeypatch)
                 user = messages[1]["content"]
                 users.append(user)
                 key = ("reconcile" if "independently of you" in user else
-                       "access" if "controls ACCESS" in messages[0]["content"] else "recon")
-                self.script = list(scripts[key])
+                       _role(messages[0]["content"]))
+                self.script = _script(scripts, key)
             return super().chat(messages, tools)
 
     monkeypatch.setattr(pipeline, "LLM", lambda cfg: Router([]))
@@ -1021,3 +1056,422 @@ def test_units_merge_entries_that_share_a_request():
            "exposure": "public"}]
     units = _units(es)
     assert sorted(sorted(e["id"] for e in u["entries"]) for u in units) == [["E1", "E2", "E3"], ["E4"]]
+
+
+def test_ladder_orders_units_within_a_level_and_is_shown(tmp_path):
+    from app.services.yasa_audit.pipeline import _rank_principals, _units
+    from app.services.yasa_audit.prompts import access_model_text
+
+    tb = Toolbox(AuditConfig(), tmp_path, tmp_path)
+    _write(tmp_path, {"a.js": "x\n"})
+    assert tb.record_access_model(authentication="session", authorization="grants", permission_mapping="doc.method",
+                                  shared_protections="none", principals="visitor < contributor < editor < owner",
+                                  ladder=["Visitor", "Contributor", "Editor", "Super Editor", "Owner"],
+                                  evidence=[{"file": "a.js", "line": 1, "quote": "x"}]) \
+        .startswith("access model recorded")
+    assert "ladder (least to most privileged): Visitor < Contributor < Editor < Super Editor < Owner" in \
+        access_model_text(tb.access_model)
+
+    def e(i, route, principals):
+        return {"id": i, "method": "GET", "route": route, "handler_file": f"{i}.js", "handler": "h",
+                "exposure": "privileged", "resolved": True,
+                "who_can_call": {"least_privileged": "privileged", "principals": principals, "rule": "r"}}
+
+    es = [e("E1", "/a/settings", ["Owner"]), e("E2", "/a/tags", ["Super Editor", "Owner"]),
+          e("E3", "/a/posts", ["any staff user (Contributor and above)", "Owner"]), e("E4", "/a/x", ["robot"])]
+    _rank_principals(es, tb.access_model["ladder"])
+    assert [x.get("least_principal") for x in es] == ["Owner", "Super Editor", "Contributor", None]
+    assert [u["entries"][0]["id"] for u in _units(es)] == ["E3", "E2", "E1", "E4"]
+
+
+def test_reconcile_shows_new_groups_after_the_resolver_changes(tmp_path, monkeypatch):
+    from app.services.yasa_audit import pipeline
+
+    proj = tmp_path / "p"
+    _write(proj, {"web/Admin.php": "<?php\nfunction execute() { require_admin(); }\n",
+                  "web/Home.php": "<?php\nfunction execute() { echo 1; }\n"})
+    extractor = ("import json\nprint(json.dumps([{'route': '/admin', 'handler_file': 'web/Admin.php', "
+                 "'handler': 'execute', 'exposure': 'privileged'}, {'route': '/home', 'handler_file': "
+                 "'web/Home.php', 'handler': 'execute', 'exposure': 'public'}]))")
+    public_all = ("import json,sys; r=json.load(sys.stdin); print(json.dumps([{'least_privileged': 'public', "
+                  "'rule': 'no gate'} for _ in r]))")
+    admin_all = ("import json,sys; r=json.load(sys.stdin); print(json.dumps([{'least_privileged': 'privileged', "
+                 "'rule': 'everything admin'} for _ in r]))")
+    seen = []
+    scripts = {
+        "access": [("record_access_model", {"authentication": "s", "authorization": "a", "permission_mapping": "p",
+                                            "ladder": ["anonymous", "admin"], "shared_protections": "none", "principals": "anyone, admin", "evidence": [
+                                                {"file": "web/Admin.php", "line": 2, "quote": "require_admin()"}]}),
+                   ("write_access_resolver", {"code": public_all, "samples": [{"route": "/a"}, {"route": "/b"},
+                                                                              {"route": "/c"}]}),
+                   ("finish", {"notes": "x"})],
+        "recon": [("run_extractor", {"name": "web", "code": extractor}),
+                  ("check_coverage", {"request_read_pattern": "echo"}), ("finish", {"notes": "web"})],
+        "reconcile": [("settle", {"decisions": [{"group": "G1", "verdict": "resolver_wrong", "reason": "Admin:2"}]}),
+                      ("write_access_resolver", {"code": admin_all, "samples": [{"route": "/admin"},
+                                                                               {"route": "/home"}, {"route": "/x"}]}),
+                      ("finish", {"notes": "too early"}),  # refused: the new group G2 is undecided
+                      ("settle", {"decisions": [{"group": "G2", "verdict": "resolver_wrong", "reason": "Home:2"}]}),
+                      ("finish", {"notes": "done"})],
+    }
+
+    class Router(ScriptedLLM):
+        def chat(self, messages, tools=None):
+            if not self.script and len(messages) == 2:
+                user = messages[1]["content"]
+                key = ("reconcile" if "independently of you" in user else
+                       _role(messages[0]["content"]))
+                self.script = _script(scripts, key)
+            seen.extend(m.get("content") or "" for m in messages if m.get("role") == "tool")
+            return super().chat(messages, tools)
+
+    monkeypatch.setattr(pipeline, "LLM", lambda cfg: Router([]))
+    m = pipeline.recon(_cfg(), proj, tmp_path / "out", deadline=time.time() + 900)
+    assert any("Settle these too" in t and "- G2: 1 entries, declared public, resolver privileged" in t for t in seen)
+    rc = m["reconcile"]
+    assert {g: v.get("verdict") for g, v in rc["groups"].items()} == {"G1": "resolver_wrong", "G2": "resolver_wrong"}
+    es = {e["route"]: e for e in json.loads((tmp_path / "out" / "entries.json").read_text())}
+    assert es["/home"]["exposure"] == "public" and es["/admin"]["exposure"] == "privileged"
+    assert rc["applied"] == {"resolver_wrong": 1}  # /home; /admin now agrees with the new resolver
+
+
+def test_access_model_carries_shared_protections_and_cards_quote_the_registration(tmp_path):
+    from app.services.yasa_audit.pipeline import _declared_code
+    from app.services.yasa_audit.prompts import access_model_text
+
+    _write(tmp_path, {"routes.js": "const r = express.Router();\nr.get('/posts', auth, posts.browse);\n"})
+    tb = Toolbox(AuditConfig(), tmp_path, tmp_path / "out")
+    tb.record_access_model(authentication="a", authorization="b", permission_mapping="c", principals="d", ladder=["a", "b"],
+                           shared_protections="ids validated globally (validators/all.ts:27)",
+                           evidence=[{"file": "routes.js", "line": 2, "quote": "r.get('/posts'"}])
+    assert "- shared protections: ids validated globally (validators/all.ts:27)" in access_model_text(tb.access_model)
+    assert _declared_code(tmp_path, {"declared_at": "routes.js:2"}) == \
+        {"declared_code": "r.get('/posts', auth, posts.browse);"}
+    assert _declared_code(tmp_path, {"declared_at": "routes.js:9"}) == {}
+    assert _declared_code(tmp_path, {"declared_at": "nofile.js:1"}) == {}
+
+
+def test_evidence_quotes_may_span_a_multi_line_registration_and_long_root_causes_are_cut(tmp_path):
+    from app.services.yasa_audit.toolbox import verify_evidence
+
+    _write(tmp_path, {"routes.js": "\n" * 19 + "  // Webmentions\n  router.post(\n    '/receive',\n"
+                                    "    bodyParser.urlencoded({ extended: true, limit: '64kb' }),\n"
+                                    "    http(api.mentions.receive),\n  );\n  return router;\n"})
+    quote = ("router.post(\n    '/receive',\n    bodyParser.urlencoded({ extended: true, limit: '64kb' }),\n"
+             "    http(api.mentions.receive),\n  );")
+    assert verify_evidence(tmp_path, [{"file": "routes.js", "line": 21, "quote": quote}]) is None
+    assert verify_evidence(tmp_path, [{"file": "routes.js", "line": 21, "quote": "router.get("}]) is not None
+    tb = Toolbox(AuditConfig(), tmp_path, tmp_path / "out", unit="E1")
+    long_rc = "The receiver passes the attacker's URL to the client " + "and more words " * 30
+    out = tb.report_finding(vuln_type="SSRF", cwe="CWE-918", sink_file="routes.js", sink_line=22, source="url",
+                            entry="POST /receive", required_privilege="public", verdict="likely",
+                            impact="server-side request", root_cause=long_rc,
+                            route_evidence={"file": "routes.js", "line": 21, "quote": quote})
+    assert out == "recorded #1"
+    rc = tb.findings[0]["root_cause"]
+    assert len(rc) <= 240 and rc.endswith("…") and rc.startswith("The receiver passes")
+
+
+def test_budget_end_offers_the_tools_a_closed_gate_needs(tmp_path):
+    from app.services.yasa_audit.agent_loop import run_agent
+    from app.services.yasa_audit.toolbox import tool_schemas
+
+    _write(tmp_path, {"Sec.java": "class Sec {\n  boolean allowed() { return true; }\n}\n"})
+    tb = Toolbox(AuditConfig(), tmp_path, tmp_path / "out", unit="access")
+    tb.finish_gates = [(lambda t: t.access_model is None, "record_access_model first", ["record_access_model"])]
+    seen_tools, prompts = [], []
+
+    class LLM(ScriptedLLM):
+        def chat(self, messages, tools=None):
+            seen_tools.append(sorted(t["function"]["name"] for t in tools or []))
+            prompts.append(messages[-1].get("content") or "")
+            return super().chat(messages, tools)
+
+    model = {"authentication": "a", "authorization": "b", "permission_mapping": "c", "ladder": ["anonymous", "admin"], "shared_protections": "none", "principals": "anon < admin",
+             "evidence": [{"file": "Sec.java", "line": 2, "quote": "allowed()"}]}
+    llm = LLM([("list_dir", {"path": "."})] * 8 + [("record_access_model", model)])
+    res = run_agent(llm, tb, tool_schemas("access"), "sys", "go", 2, tmp_path / "log.jsonl")
+    assert any("Still required before you can finish: record_access_model first" in p for p in prompts)
+    assert seen_tools[-2] == ["record_access_model"]  # the closed gate's tool only
+    assert "Tool budget used up. Before finishing" in prompts[-2]
+    assert tb.access_model is not None and res["finished"]  # then the finish-only turn
+
+
+def test_access_notes_reach_reviewers_when_no_model_was_recorded():
+    from app.services.yasa_audit.prompts import access_model_text
+
+    text = access_model_text({"unverified_notes": "ACCESS MODEL: session cookie; canThis(...) in pipeline"})
+    assert text.startswith("(the access agent ran out of budget") and "canThis(...)" in text
+
+
+def test_access_model_requires_ladder_and_shared_protections(tmp_path):
+    _write(tmp_path, {"a.js": "x\n"})
+    tb = Toolbox(AuditConfig(), tmp_path, tmp_path / "out")
+    base = {"authentication": "a", "authorization": "b", "permission_mapping": "c", "principals": "d",
+            "evidence": [{"file": "a.js", "line": 1, "quote": "x"}]}
+    assert tb.record_access_model(**base) == "rejected: missing shared_protections, ladder"
+    assert tb.record_access_model(**base, shared_protections="s", ladder="anon < admin") == "rejected: missing ladder"
+    assert tb.record_access_model(**base, shared_protections="s", ladder=["anon", "admin"]) \
+        .startswith("access model recorded")
+
+
+
+def test_refutation_check_moves_refuted_findings_out_and_marks_the_rest(tmp_path, monkeypatch):
+    from app.services.yasa_audit import pipeline
+    from app.services.yasa_audit.runner import to_deepaudit_findings
+    from app.services.yasa_audit.verify import verify
+
+    _write(tmp_path, {"api/posts.js": "function destroy(id) {\n  if (!isOwner(id)) throw new Forbidden();\n"
+                                      "  db.delete(id);\n}\n"})
+    review = tmp_path / "out" / "review"
+    review.mkdir(parents=True)
+    base = {"vuln_type": "IDOR", "cwe": "CWE-639", "sink_file": "api/posts.js", "sink_line": 3, "source": "id",
+            "required_privilege": "authenticated", "verdict": "likely", "impact": "deletes others' posts"}
+    findings = [dict(base, entry="DELETE /posts/:id", issue="I1", root_cause="no owner check"),
+                dict(base, entry="DELETE /posts", issue="I1", root_cause="no owner check"),
+                dict(base, entry="GET /x", issue="I2", root_cause="other", required_privilege="public"),
+                dict(base, entry="GET /y", issue="I3", root_cause="third")]
+    (review / "findings.json").write_text(json.dumps({"findings": findings, "not_reviewed": []}))
+    seen = []
+    plan = {"I1": ("conclude", {"verdict": "refuted", "reason": "destroy checks ownership first",
+                                "path": [{"stage": "permission", "file": "api/posts.js", "line": 2,
+                                          "quote": "if (!isOwner(id))", "effect": "stops"}]}),
+            "I2": ("conclude", {"verdict": "upheld", "reason": "nothing stops it"}),  # refused: no evidence
+            "I3": ("conclude", {"verdict": "uncertain", "reason": "did not reach the model"})}
+
+    class Checker(ScriptedLLM):
+        def chat(self, messages, tools=None):
+            if not self.script and len(messages) == 2:
+                iid = messages[1]["content"].split()[2]
+                seen.append(iid)
+                self.script = [plan[iid]]
+            return super().chat(messages, tools)
+
+    monkeypatch.setattr(pipeline, "LLM", lambda cfg: Checker([]))
+    m = verify(_cfg(workers=1), tmp_path, review, deadline=time.time() + 300)
+    assert seen == ["I2", "I1", "I3"]  # public first, then the most repeated
+    assert m["verdicts"] == {"uncertain": 2, "refuted": 1} and m["findings_refuted"] == 2
+    data = json.loads((review / "findings.json").read_text())
+    assert [f["entry"] for f in data["refuted"]] == ["DELETE /posts/:id", "DELETE /posts"]
+    assert data["refuted"][0]["verification"]["path"][0]["quote"] == "if (!isOwner(id))"
+    assert {f["issue"]: f["verification"]["verdict"] for f in data["findings"]} == {"I2": "uncertain",
+                                                                                  "I3": "uncertain"}
+    out = to_deepaudit_findings(data["findings"])
+    assert "NOT verified by the refutation check" in out[0]["description"] and out[0]["confidence"] < 0.6
+
+
+
+def test_conclude_requires_the_stages_it_claims(tmp_path):
+    _write(tmp_path, {"a.js": "validate(body)\ncan(user, 'edit')\ndb.update(body)\n"})
+    tb = Toolbox(AuditConfig(), tmp_path, tmp_path / "out")
+
+    def st(stage, line, quote, effect="passes"):
+        return {"stage": stage, "file": "a.js", "line": line, "quote": quote, "effect": effect}
+
+    assert tb.conclude("upheld", "x", [st("operation", 3, "db.update(body)")]).startswith(
+        "rejected: upheld needs the code of each stage the request passes, quoted: missing input_validation, "
+        "permission")
+    assert tb.conclude("upheld", "x", [st("permission", 2, "can(user, 'edit')", "stops")]).startswith(
+        "rejected: a stage you quoted stops")
+    assert tb.conclude("refuted", "x", [st("permission", 2, "can(user, 'edit')")]).startswith(
+        "rejected: refuted needs the stage")
+    assert tb.conclude("upheld", "x", [st("input_validation", 1, "validate(body)"), st("permission", 2, "nope"),
+                                       st("operation", 3, "db.update(body)")]).startswith("rejected: path: quote")
+    assert tb.conclude("upheld", "x", [st("input_validation", 1, "validate(body)"),
+                                       st("permission", 2, "can(user, 'edit')"),
+                                       st("operation", 3, "db.update(body)")]) == "concluded: upheld"
+
+
+def test_a_reply_cut_by_the_output_limit_is_named(tmp_path):
+    from app.services.yasa_audit.agent_loop import run_agent
+    from app.services.yasa_audit.toolbox import tool_schemas
+
+    tb = Toolbox(AuditConfig(), tmp_path, tmp_path / "out")
+    prompts = []
+
+    class Cut(ScriptedLLM):
+        cfg = AuditConfig()
+        last_finish_reason = None
+
+        def chat(self, messages, tools=None):
+            prompts.append(messages[-1].get("content") or "")
+            if self.usage.calls == 0:
+                self.usage.calls += 1
+                self.last_finish_reason = "length"
+                return SimpleNamespace(content="", tool_calls=None)
+            self.last_finish_reason = "tool_calls"
+            return super().chat(messages, tools)
+
+    run_agent(Cut([]), tb, tool_schemas("review"), "sys", "go", 5, tmp_path / "log.jsonl")
+    assert "cut off by the output limit" in prompts[1] and "parses the registration code" in prompts[1]
+
+
+def test_recon_follows_up_on_dispatchers_left_unenumerated(tmp_path, monkeypatch):
+    from app.services.yasa_audit import pipeline
+
+    proj = tmp_path / "p"
+    _write(proj, {"web/Home.php": "<?php\nfunction home() { echo $_GET['q']; }\n",
+                  "api/Users.php": "<?php\nfunction users() { echo $_GET['id']; }\n",
+                  "hook/Push.php": "<?php\nfunction push() { echo $_POST['ref']; }\n"})
+    web = ("import json\nprint(json.dumps([{'route': '/home', 'handler_file': 'web/Home.php', 'handler': 'home', "
+           "'exposure': 'public'}]))")
+    api = ("import json\nprint(json.dumps([{'route': '/api/users', 'handler_file': 'api/Users.php', "
+           "'handler': 'users', 'exposure': 'public'}]))")
+    hook = ("import json\nprint(json.dumps([{'route': '/hook/push', 'handler_file': 'hook/Push.php', "
+            "'handler': 'push', 'exposure': 'public'}]))")
+    users = []
+    scripts = {
+        "access": [("record_access_model", {"authentication": "none", "authorization": "none",
+                                            "permission_mapping": "none", "principals": "anyone",
+                                            "ladder": ["anyone"], "shared_protections": "none",
+                                            "evidence": [{"file": "web/Home.php", "line": 2,
+                                                          "quote": "function home()"}]}),
+                   ("finish", {"notes": "open"})],
+        "recon": [("run_extractor", {"name": "web", "code": web}),
+                  ("check_coverage", {"request_read_pattern": r"\$_GET"}),
+                  ("finish", {"notes": "web pages and a JSON API", "unenumerated": ["API: api/*.php functions", "hooks: hook/*.php"]})],
+        "API": [("run_extractor", {"name": "api", "code": api}),
+                ("finish", {"notes": "the JSON API is enumerated"})],
+        "hooks": [("run_extractor", {"name": "web", "code": hook}),  # a taken name: kept apart on merge
+                  ("finish", {"notes": "hooks enumerated"})],
+    }
+
+    class Router(ScriptedLLM):
+        def chat(self, messages, tools=None):
+            # first call: a reminder (the access model is ready) may already follow the user message
+            if not self.script and not self.usage.calls:
+                user = messages[1]["content"]
+                users.append(user)
+                key = (("API" if "- API:" in user else "hooks") if "ONE dispatcher they left out" in user else
+                       _role(messages[0]["content"]))
+                self.script = _script(scripts, key)
+            return super().chat(messages, tools)
+
+    monkeypatch.setattr(pipeline, "LLM", lambda cfg: Router([]))
+    now = time.time()
+    m = pipeline.recon(_cfg(), proj, tmp_path / "out", deadline=now + 900, hard_deadline=now + 1800)
+    follow = [u for u in users if "ONE dispatcher they left out" in u]
+    assert len(follow) == 2 and all("extractors web" in u for u in follow)  # one fresh agent per dispatcher
+    assert any("- API: api/*.php functions" in u for u in follow)
+    assert m["entries"] == 3 and m["passes"] == 2
+    assert "JSON API is enumerated" in m["notes"] and "hooks enumerated" in m["notes"]
+    assert set(m["extractors"]) == {"web", "api", "web-f1"}
+
+
+def test_extractor_nudge_fires_on_time_as_well_as_steps(tmp_path):
+    from app.services.yasa_audit import pipeline
+    from app.services.yasa_audit.toolbox import Toolbox
+
+    tb = Toolbox(_cfg(), tmp_path, tmp_path)
+    now = time.time()
+    assert not pipeline._past_half(now, now + 600, 60)(3, tb)  # early, few steps
+    assert pipeline._past_half(now - 400, now + 200, 60)(3, tb)  # past half of the time window
+    assert pipeline._past_half(now, now + 600, 60)(30, tb)  # half of the steps
+    tb.extractors["x"] = {"entries": [], "run": 1}
+    assert not pipeline._past_half(now - 400, now + 200, 60)(30, tb)  # an extractor ran: no nudge
+
+
+def test_limiter_cuts_once_per_burst_and_recovers():
+    from app.services.yasa_audit.llm import AdaptiveLimiter
+
+    lim = AdaptiveLimiter(16)
+    for _ in range(5):  # five requests rejected together: one cut, not four
+        lim.acquire()
+    for _ in range(5):
+        lim.release(rate_limited=True)
+    assert lim.limit == 8
+    for _ in range(8):  # a low cap grows after as many successes as the cap
+        lim.acquire()
+        lim.release()
+    assert lim.limit == 9
+
+
+def test_access_model_records_designed_powers_and_shows_them(tmp_path):
+    from app.services.yasa_audit.prompts import access_model_text
+
+    _write(tmp_path, {"docs/scopes.md": "crons: may edit and run scheduled commands\nenvs: task data only\n"})
+    tb = Toolbox(AuditConfig(), tmp_path, tmp_path / "out")
+    base = {"authentication": "token", "authorization": "scopes", "permission_mapping": "ns -> scope",
+            "principals": "apps", "shared_protections": "joi", "ladder": ["anonymous", "app", "admin"],
+            "evidence": [{"file": "docs/scopes.md", "line": 1, "quote": "crons: may edit"}]}
+    assert "without powers" in tb.record_access_model(**base)
+    assert tb.record_access_model(**base, powers=[{"principal": "app:crons"}]) == \
+        "rejected: powers: each row needs principal and power"
+    assert "quote not found" in tb.record_access_model(**base, powers=[
+        {"principal": "app:envs", "power": "data", "evidence": {"file": "docs/scopes.md", "line": 2, "quote": "runs"}}])
+    assert tb.record_access_model(**base, powers=[
+        {"principal": "app:crons", "power": "edits and runs scheduled commands (code execution by design)",
+         "evidence": {"file": "docs/scopes.md", "line": 1, "quote": "crons: may edit and run"}},
+        {"principal": "app:envs", "power": "writes task data; must not control the task runner",
+         "evidence": {"file": "docs/scopes.md", "line": 2, "quote": "envs: task data only"}},
+        {"principal": "team_admin", "power": "manages one team", "held_for_one_object": True}]) == \
+        "access model recorded"
+    assert tb.access_model["scoped_roles"] == ["team_admin"]
+    text = access_model_text(tb.access_model)
+    assert "designed powers" in text and "app:envs: writes task data; must not control the task runner" in text
+    assert "team_admin (held for one object" in text and "docs/scopes.md:1" in text
+
+
+def test_a_designed_capability_leaves_the_report_as_by_design(tmp_path, monkeypatch):
+    from app.services.yasa_audit import pipeline
+    from app.services.yasa_audit.verify import verify
+
+    _write(tmp_path, {"api/crons.js": "function create(cmd) {\n  exec(cmd);\n}\n",
+                      "docs/scopes.md": "crons: may edit and run scheduled commands\n"})
+    review = tmp_path / "out" / "review"
+    review.mkdir(parents=True)
+    f = {"vuln_type": "RCE", "cwe": "CWE-78", "sink_file": "api/crons.js", "sink_line": 2, "source": "cmd",
+         "required_privilege": "authenticated", "verdict": "confirmed", "impact": "an app runs commands",
+         "entry": "POST /open/crons", "issue": "I1", "root_cause": "commands run as given"}
+    (review / "findings.json").write_text(json.dumps({"findings": [f], "not_reviewed": []}))
+    tb = Toolbox(AuditConfig(), tmp_path, tmp_path / "x")
+    assert tb.conclude("by_design", "crons runs commands").startswith("rejected: by_design needs power")
+    grant = {"principal": "app:crons", "file": "docs/scopes.md", "line": 1, "quote": "may edit and run"}
+    monkeypatch.setattr(pipeline, "LLM", lambda cfg: ScriptedLLM([
+        ("conclude", {"verdict": "by_design", "reason": "the crons scope is meant to run commands", "power": grant})]))
+    m = verify(_cfg(workers=1), tmp_path, review, deadline=time.time() + 300)
+    assert m["verdicts"] == {"by_design": 1} and m["findings_by_design"] == 1 and m["findings_kept"] == 0
+    data = json.loads((review / "findings.json").read_text())
+    assert data["findings"] == [] and data["by_design"][0]["verification"]["power"]["principal"] == "app:crons"
+
+
+def test_an_empty_reply_cut_by_the_output_limit_is_asked_again_with_a_wider_allowance():
+    from app.services.yasa_audit.llm import LLM
+
+    cfg = AuditConfig(llm_base_url="http://localhost:1/v1", llm_api_key="k", llm_model="m", llm_max_tokens=1000,
+                      llm_max_tokens_ceiling=3000)
+    llm = LLM(cfg)
+    asked = []
+
+    def create(**kw):
+        asked.append(kw["max_tokens"])
+        empty = len(asked) < 3
+        msg = SimpleNamespace(content="" if empty else "ok", tool_calls=None)
+        return SimpleNamespace(choices=[SimpleNamespace(message=msg, finish_reason="length" if empty else "stop")],
+                               usage=None)
+
+    llm.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    assert llm.chat([{"role": "user", "content": "x"}]).content == "ok"
+    assert asked == [1000, 2000, 3000] and llm.usage.widened == 2
+    asked.clear()
+    llm.cfg.llm_max_tokens_ceiling = 1000  # nothing wider to try: the empty reply goes back to the loop
+    assert llm.chat([{"role": "user", "content": "x"}]).content == "" and asked == [1000]
+
+
+def test_a_unit_whose_model_keeps_replying_with_nothing_is_counted(tmp_path):
+    from app.services.yasa_audit.agent_loop import run_agent
+    from app.services.yasa_audit.toolbox import tool_schemas
+
+    class Silent(ScriptedLLM):
+        cfg = AuditConfig()
+        last_finish_reason = "length"
+
+        def chat(self, messages, tools=None):
+            self.usage.calls += 1
+            return SimpleNamespace(content="", tool_calls=None)
+
+    tb = Toolbox(AuditConfig(), tmp_path, tmp_path / "out")
+    res = run_agent(Silent([]), tb, tool_schemas("review"), "sys", "go", 5, tmp_path / "log.jsonl")
+    assert res["ended_silent"] and not res["finished"]
+    rows = [json.loads(x) for x in (tmp_path / "log.jsonl").read_text().splitlines()]
+    assert rows[0]["finish_reason"] == "length"

@@ -59,7 +59,12 @@ def verify_evidence(root: Path, evidence: list[dict]) -> str | None:
         line, quote = int(ev.get("line") or 0), _norm(str(ev.get("quote") or ""))
         if not quote:
             return "each evidence item needs a quote copied from the code"
-        window = _norm(" ".join(lines[max(0, line - 4):line + 3]))
+        # A few lines around the cited line, extended so that a quote spanning several lines (a route
+        # registration with its middleware) fits.
+        end = line + 3
+        while end < len(lines) and end - line < 60 and len(_norm(" ".join(lines[max(0, line - 1):end]))) < len(quote) + 40:
+            end += 1
+        window = _norm(" ".join(lines[max(0, line - 4):end]))
         if quote not in window:
             return f"quote not found near {ev.get('file')}:{line}"
     return None
@@ -207,9 +212,22 @@ class Toolbox:
         self.extractor_best: dict[str, int] = {}  # most entries any version of each extractor produced
         self.regressions_shown: set[tuple] = set()
         self.reconcile_groups: dict[str, list[str]] = {}  # group id -> entry ids (reconcile pass)
+        self.on_resolver_installed = None  # reconcile: regroups the disagreements for a new resolver
+        self.conclusion: dict | None = None  # refutation check
+        self.unenumerated: list[str] = []  # recon: dispatchers found but not enumerated yet
         self.decisions: dict[str, dict] = {}  # the access agent's who-can-call program
         # (condition, message): finish is refused while a condition holds (e.g. no access model yet)
         self.finish_gates: list[tuple[Any, str]] = []
+        # the sensitive-asset map (assets agent): operation recipes, absent classes, identity subsystems
+        self.recipes: dict[str, dict] = {}
+        self.absent: dict[str, str] = {}
+        self.identity: list[dict] | None = None
+        self.entries_source: Any = None  # callable: the entries the surface agent has enumerated so far
+        self._calls: Any = None
+        self.reach: Any = None  # assets.Reach of the run: who can run a piece of code (who_reaches)
+        self.design: dict[str, dict] = {}  # identity design review: checklist item -> answer
+        self.coverage: Any = None  # assets.Coverage shared by the review units
+        self.records_reads = False  # entry units: the code read counts as reviewed for operation units
 
     # ---------- helpers ----------
     def _safe(self, rel: str) -> Path:
@@ -254,6 +272,8 @@ class Toolbox:
         end = int(end_line or 0) or min(len(lines), start + 119)
         end = min(end, start + 249, len(lines))
         body = "\n".join(f"{i:5d}| {lines[i - 1]}" for i in range(start, end + 1))
+        if self.records_reads and self.coverage is not None:
+            self.coverage.read(self.unit, str(p.relative_to(self.root)), start, end)
         return clip(f"{path} lines {start}-{end} of {len(lines)}\n{body}")
 
     def grep_rows(self, pattern: str, glob: str = "") -> list[str]:
@@ -312,9 +332,11 @@ class Toolbox:
         """Union of all extractor outputs and manual entries. One entry per (method, route, handler file):
         the most recently run extractor wins, and an entry whose handler does not resolve is dropped when
         another one for the same request does (two services may serve the same path from different files)."""
+        # sorted() copies the values before calling the key: another agent's thread reads the entries
+        # while this one adds extractors
         runs = sorted(self.extractors.values(), key=lambda ex: ex.get("run", 0))
         by_req: dict[tuple, dict[str, dict]] = {}
-        for e in [x for ex in runs for x in ex["entries"]] + self.manual:  # later ones replace earlier ones
+        for e in [x for ex in runs for x in ex["entries"]] + list(self.manual):  # later ones replace earlier ones
             by_req.setdefault((e.get("method", "ANY"), e.get("route")), {})[str(e.get("handler_file"))] = e
         out = []
         for cands in by_req.values():
@@ -400,7 +422,10 @@ class Toolbox:
             r = subprocess.run([sys.executable, "-I", str(script), str(self.root)], capture_output=True,
                                text=True, timeout=timeout, cwd=work, env=env, input=stdin)
         except subprocess.TimeoutExpired:
-            return False, f"error: program ran longer than {timeout} s"
+            return False, (f"error: program ran longer than {timeout} s. Reading and parsing source files takes "
+                           "seconds; a run this long is almost always a loop that does not advance (a while "
+                           "loop whose index is not moved on every branch) or a regex that backtracks on long "
+                           "input. Fix that rather than narrowing the input.")
         if r.returncode:
             return False, clip(f"error: program exited {r.returncode}\n{r.stderr[-3000:]}", 4000)
         return True, r.stdout
@@ -452,8 +477,27 @@ class Toolbox:
         rows = [f"{s.get('method', 'GET')} {s['route']} -> {r['least_privileged']} {r['principals']} ({r['rule']})"
                 for s, r in zip(samples, res, strict=True)]
         unknown = sum(r["least_privileged"] == "unknown" for r in res)
-        return clip("resolver installed. Check each result against the code you read; fix and resend if any is "
-                    f"wrong{' (unknown results: ' + str(unknown) + ')' if unknown else ''}:\n" + "\n".join(rows))
+        text = ("resolver installed. Check each result against the code you read; fix and resend if any is "
+                f"wrong{' (unknown results: ' + str(unknown) + ')' if unknown else ''}:\n" + "\n".join(rows))
+        if self.on_resolver_installed is not None:
+            text += "\n\n" + self.on_resolver_installed()
+        return clip(text, 12000)
+
+    def who_reaches(self, pattern: str, glob: str = "") -> str:
+        """The code matching a pattern and who can run it. Its main use is the step across storage: the
+        pattern of the code that writes a stored value gives the value's writers and their callers."""
+        from .assets import REACH_SITES
+        if self.reach is None:
+            return "error: not available in this stage; use grep and find_callers"
+        try:
+            rows = self.grep_rows(str(pattern or ""), str(glob or ""))
+        except subprocess.TimeoutExpired:
+            return "error: search timed out; narrow the pattern or the glob"
+        if len(rows) > REACH_SITES:
+            return (f"rejected: {len(rows)} matches. Match the code that does one thing (the assignments or "
+                    "calls that write this one field, file or key), not every mention of a name: narrow the "
+                    "pattern or give a glob")
+        return clip(self.reach.report(str(pattern), rows))
 
     def who_can_call(self, method: str, path: str) -> str:
         req = {**self.known_entries.get((str(method or "GET").upper(), str(path)), {}),
@@ -480,7 +524,7 @@ class Toolbox:
         print a JSON list of entries. The result replaces any earlier extractor of the same name."""
         if not re.fullmatch(r"[\w-]{1,40}", str(name)):
             return "error: name must be 1-40 letters, digits, '-' or '_'"
-        ok, out = self._run_python(code, "extractor")
+        ok, out = self._run_python(code, "extractor", timeout=60)
         if not ok:
             return out
         try:
@@ -585,6 +629,128 @@ class Toolbox:
                              for f, rows in sorted(by_file.items(), key=lambda kv: -len(kv[1]))[:25]]}
         return clip(json.dumps(res, ensure_ascii=False, indent=1))
 
+    # ---------- sensitive-asset map ----------
+    def call_index(self):
+        from .assets import CallIndex
+        if self._calls is None:
+            self._calls = CallIndex(self.root)
+        return self._calls
+
+    def _entries_now(self) -> list[dict]:
+        return list(self.entries_source()) if self.entries_source is not None else []
+
+    def run_recipe(self, name: str, op_class: str, pattern: str, glob: str = "", exclude: str = "",
+                   guard: str = "", why: str = "") -> str:
+        """Expand a recipe for one form of a sensitive operation over the whole project and place every
+        site in the call graph. The same name replaces the earlier version."""
+        from .assets import (
+            MAX_SITES,
+            OP_CLASSES,
+            check_recipe,
+            counters,
+            entry_reach,
+            expand,
+            scoped_rows,
+        )
+        r = {"name": str(name), "op_class": str(op_class), "pattern": str(pattern or ""), "glob": str(glob or ""),
+             "exclude": str(exclude or ""), "guard": str(guard or ""), "why": str(why or "")[:400]}
+        err = check_recipe(r)
+        if err:
+            return f"rejected: {err}"
+        entries = self._entries_now()
+        index = self.call_index()
+        try:
+            rows, outside = scoped_rows(self.grep_rows, r, entry_reach(index, entries), index.unparsed)
+        except subprocess.TimeoutExpired:
+            return "error: search timed out; narrow the pattern or the glob"
+        if len(rows) > MAX_SITES:
+            return (f"rejected: {len(rows)} matches. A recipe matches the operation itself (the call or "
+                    "assignment that performs it), not every mention of a word: narrow it")
+        sites = expand(r, rows, index, entries)
+        self.recipes[r["name"]] = r
+        self.absent.pop(r["op_class"], None)
+        res = counters(r, sites, len(entries), outside_glob=outside)
+        if not self.call_index().indexed:
+            res["note_index"] = "no code index: every site counts as file-level code, reach is by handler file"
+        if self.entries_source is not None:
+            res["entries_note"] = "the surface agent is still enumerating entries; reach is against those so far"
+        left = [c for c in OP_CLASSES if c not in {x["op_class"] for x in self.recipes.values()}
+                and c not in self.absent]
+        res["classes_left"] = left
+        return clip(json.dumps(res, ensure_ascii=False, indent=1))
+
+    def drop_recipe(self, name: str) -> str:
+        if self.recipes.pop(str(name), None) is None:
+            return f"error: no recipe {name!r}; recipes: {', '.join(self.recipes) or 'none'}"
+        return f"dropped {name}; recipes: {', '.join(self.recipes) or 'none'}"
+
+    def class_absent(self, op_class: str, reason: str) -> str:
+        """Say that the project does not perform a class of operation at all."""
+        from .assets import OP_CLASSES
+        if op_class not in OP_CLASSES:
+            return f"rejected: op_class must be one of {', '.join(OP_CLASSES)}"
+        if not str(reason or "").strip():
+            return "rejected: give the reason (what you searched and found)"
+        if any(r["op_class"] == op_class for r in self.recipes.values()):
+            return f"rejected: a recipe for {op_class} exists; drop_recipe it first if it was wrong"
+        self.absent[op_class] = str(reason)[:400]
+        return f"recorded: {op_class} absent"
+
+    def record_identity(self, subsystems: Any) -> str:
+        """Record identity subsystems; a later record with the same name replaces that subsystem, so they
+        can be sent one per call."""
+        from .assets import check_identity, group_identity, merge_identity
+        if isinstance(subsystems, dict):
+            subsystems = [subsystems]
+        clean, problems = check_identity(subsystems, self.root)
+        if problems and not clean:
+            return "rejected: " + "; ".join(problems[:6])
+        self.identity = merge_identity(self.identity, clean)
+        entries = self._entries_now()
+        rows = [f"- {g['name']} ({g['kind']}): {len(group_identity(g, entries, [])['entry_ids'])} entries so far, "
+                f"{len(g['files'])} files, {len(g['settings'])} settings" for g in clean]
+        return ("recorded " + str(len(clean)) + " subsystem(s)" + (":\n" + "\n".join(rows) if rows else "")
+                + f"\n{len(self.identity)} subsystem(s) recorded in all"
+                + ("\nnot recorded: " + "; ".join(problems[:6]) if problems else ""))
+
+    def record_design(self, items: Any = None, item: str = "", status: str = "", answer: str = "",
+                      evidence: Any = None, to_verify: str = "") -> str:
+        """Answers to the identity checklist, several in `items` or one in the top-level fields; each
+        replaces an earlier answer to the same item."""
+        from .assets import DESIGN_STATUSES, IDENTITY_CHECKLIST
+        items = [items] if isinstance(items, dict) else items if isinstance(items, list) else []
+        if item:
+            items.append({"item": item, "status": status, "answer": answer, "evidence": evidence,
+                          "to_verify": to_verify})
+        if not items:
+            return ("rejected: send one answer as item, status, answer (and evidence, to_verify), or several "
+                    "in items")
+        errors = []
+        for it in items:
+            it = it if isinstance(it, dict) else {}
+            key, status = str(it.get("item") or ""), it.get("status")
+            if key not in IDENTITY_CHECKLIST:
+                errors.append(f"unknown item {key!r}")
+                continue
+            if status not in DESIGN_STATUSES:
+                errors.append(f"{key}: status must be one of {', '.join(DESIGN_STATUSES)}")
+                continue
+            if not str(it.get("answer") or "").strip():
+                errors.append(f"{key}: answer is required")
+                continue
+            ev = it.get("evidence") or []
+            ev = [ev] if isinstance(ev, dict) else ev if isinstance(ev, list) else []
+            if status in ("sound", "flaw", "owner_decision"):
+                err = verify_evidence(self.root, ev) if ev else "evidence is required for this status"
+                if err:
+                    errors.append(f"{key}: {err}")
+                    continue
+            self.design[key] = {"item": key, "status": status, "answer": str(it["answer"])[:1500],
+                                "evidence": ev[:6], "to_verify": str(it.get("to_verify") or "")[:400]}
+        left = [k for k in IDENTITY_CHECKLIST if k not in self.design]
+        return "; ".join(errors + [f"answered: {len(self.design)}",
+                                   f"left: {', '.join(left)}" if left else "all items answered"])
+
     # ---------- review / output ----------
     def _anchor_ok(self, anchor: Any) -> bool:
         m = re.match(r"^\s*([^:\s]+):(\d+)", str(anchor or ""))
@@ -605,10 +771,63 @@ class Toolbox:
             return ("rejected: these hypotheses have no anchor (file:line of the operation in the code that "
                     f"makes the risk plausible): {bad[:6]}. Anchor them, or drop risks the code gives no "
                     "reason to suspect.")
+        bare = [str(h.get("risk", "?")) for h in hyps if isinstance(h, dict) and h.get("status") != "confirmed"
+                and not str(h.get("why") or "").strip()]
+        if bare:
+            return ("rejected: these hypotheses have no why: " + str(bare[:6]) + ". A rejection needs its reason as "
+                    "much as a finding does: the code that stops it (file:line); an open one says what is left "
+                    "to read.")
         unknown = self.facts.cite(card.get("facts_used")) if self.facts is not None else []
         card["_unit"] = self.unit
         self.cards = [card]  # a later call updates the card
+        if self.coverage is not None:
+            for h in hyps:
+                if isinstance(h, dict):
+                    self.coverage.add(h.get("anchor"))
         return "card recorded" + (f" (unknown fact ids ignored: {unknown})" if unknown else "")
+
+    UPHOLD_STAGES = ("input_validation", "permission", "operation")
+
+    def conclude(self, verdict: str, reason: str = "", path: Any = None, power: Any = None) -> str:
+        """Refutation check. path: the stages of the request as read in the code, each {stage, file,
+        line, quote, effect} with effect 'passes' or 'stops'. upheld needs input_validation,
+        permission and operation, each quoted and none stopping; refuted needs a quoted stage that
+        stops it; by_design needs the principal whose designed power covers the outcome, with the
+        quote where the project grants it; uncertain needs only the reason."""
+        if verdict not in ("upheld", "refuted", "by_design", "uncertain"):
+            return "rejected: verdict must be upheld, refuted, by_design or uncertain"
+        if not str(reason or "").strip():
+            return "rejected: reason is required"
+        path = [p for p in ([path] if isinstance(path, dict) else (path or [])) if isinstance(p, dict)]
+        if verdict == "by_design":
+            power = power if isinstance(power, dict) else {}
+            if not str(power.get("principal") or "").strip():
+                return ("rejected: by_design needs power: {principal, file, line, quote}: the least privileged "
+                        "principal that can take the path, and where the project grants it this capability")
+            err = verify_evidence(self.root, [power])
+            if err:
+                return f"rejected: power: {err}"
+            self.conclusion = {"verdict": verdict, "reason": str(reason)[:1500], "path": path[:10],
+                               "power": {k: power.get(k) for k in ("principal", "file", "line", "quote")}}
+            return f"concluded: {verdict}"
+        if verdict != "uncertain":
+            err = verify_evidence(self.root, path) if path else "path is required"
+            if err:
+                return f"rejected: path: {err}"
+            stops = [p for p in path if p.get("effect") == "stops"]
+            if verdict == "refuted" and not stops:
+                return "rejected: refuted needs the stage that stops the attack (effect: stops)"
+            if verdict == "upheld":
+                if stops:
+                    return "rejected: a stage you quoted stops the attack; conclude refuted"
+                missing = [x for x in self.UPHOLD_STAGES if x not in {p.get("stage") for p in path}]
+                if missing:
+                    return (f"rejected: upheld needs the code of each stage the request passes, quoted: missing "
+                            f"{', '.join(missing)}. Open it (framework validators, the permission hook of "
+                            "the model or service, the code that performs the operation) rather than "
+                            "assuming what it does; quote where you looked if a stage does not exist.")
+        self.conclusion = {"verdict": verdict, "reason": str(reason)[:1500], "path": path[:10]}
+        return f"concluded: {verdict}"
 
     SETTLE_VERDICTS = ("resolver_wrong", "declared_wrong", "inconsistent_code")
 
@@ -632,15 +851,45 @@ class Toolbox:
 
     def record_access_model(self, **model: Any) -> str:
         """The project-wide model of how requests are authenticated and authorized (recon stage)."""
-        need = ("authentication", "authorization", "permission_mapping", "principals")
-        missing = [k for k in need if not str(model.get(k) or "").strip()]
+        need = ("authentication", "authorization", "permission_mapping", "principals", "shared_protections")
+        ladder = [str(x).strip() for x in (model.get("ladder") or []) if str(x).strip()] \
+            if isinstance(model.get("ladder"), list) else []
+        missing = [k for k in need if not str(model.get(k) or "").strip()] + ([] if ladder else ["ladder"])
         if missing:
             return f"rejected: missing {', '.join(missing)}"
         err = verify_evidence(self.root, model.get("evidence") or [])
         if err:
             return f"rejected: {err}"
+        powers, err = self._powers(model.get("powers"))
+        if err:
+            return f"rejected: powers: {err}"
         self.access_model = {k: model.get(k) for k in (*need, "public_by_default", "evidence")}
+        self.access_model["ladder"] = ladder[:12]
+        self.access_model["powers"] = powers
+        legacy = [str(x).strip() for x in model.get("scoped_roles") or [] if str(x).strip()] \
+            if isinstance(model.get("scoped_roles"), list) else []
+        self.access_model["scoped_roles"] = list(dict.fromkeys(
+            [p["principal"] for p in powers if p["held_for_one_object"]] + legacy))[:12]
+        if not powers:
+            return ("access model recorded, but without powers: add them (record_access_model again with "
+                    "the same fields and powers), or reviewers cannot tell a designed capability from an "
+                    "escalation")
         return "access model recorded"
+
+    def _powers(self, rows: Any) -> tuple[list[dict], str]:
+        """What each principal is designed to be able to do, with where the project says so."""
+        out: list[dict] = []
+        for r in rows if isinstance(rows, list) else []:
+            if not isinstance(r, dict) or not str(r.get("principal") or "").strip() \
+                    or not str(r.get("power") or "").strip():
+                return [], "each row needs principal and power"
+            ev = r.get("evidence")
+            ev = [ev] if isinstance(ev, dict) else [e for e in ev or [] if isinstance(e, dict)]
+            if ev and (err := verify_evidence(self.root, ev)):
+                return [], f"{r['principal']}: {err}"
+            out.append({"principal": str(r["principal"]).strip()[:80], "power": _norm(str(r["power"]))[:400],
+                        "held_for_one_object": bool(r.get("held_for_one_object")), "evidence": ev[:2]})
+        return out[:24], ""
 
     def report_finding(self, **finding: Any) -> str:
         missing = [k for k in FINDING_REQUIRED if finding.get(k) in (None, "")]
@@ -656,8 +905,9 @@ class Toolbox:
                     "and check that it really serves the path you report.")
         if not str(finding.get("root_cause") or "").strip() and not finding.get("same_as"):
             return "rejected: root_cause is required (one sentence: the underlying flaw), or same_as=<issue id>"
-        if len(_norm(str(finding.get("root_cause") or ""))) > 240:
-            return "rejected: root_cause is one sentence of at most 240 characters"
+        rc = _norm(str(finding.get("root_cause") or ""))
+        if len(rc) > 240:  # a key for grouping findings, not the explanation: keep its start
+            finding["root_cause"] = rc[:239].rsplit(" ", 1)[0] + "…"
         if finding.get("documented_intent"):
             di = finding["documented_intent"]
             err = verify_evidence(self.root, [di] if isinstance(di, dict) else di)
@@ -676,17 +926,21 @@ class Toolbox:
             evidence = [evidence]
         return self.facts.add(str(statement), evidence if isinstance(evidence, list) else [], self.unit)
 
-    def finish(self, notes: str = "", _force: bool = False) -> str:
-        for cond, msg in self.finish_gates:
+    def finish(self, notes: str = "", unenumerated: Any = None, _force: bool = False) -> str:
+        for cond, msg, *_ in self.finish_gates:
             if not _force and cond(self):
                 return f"not finished: {msg(self) if callable(msg) else msg}"
         self.finished = True
         self.notes = notes
+        self.unenumerated = [str(x)[:400] for x in (unenumerated or []) if str(x).strip()][:12] \
+            if isinstance(unenumerated, list) else []
         return f"finished ({len(self.findings)} findings, {len(self.cards)} cards)"
 
 
 def tool_schemas(role: str) -> list[dict]:
-    """role: 'recon' (surface), 'access' (access-control model) or 'review'."""
+    """role: 'recon' (surface), 'access' (access-control model), 'assets' (sensitive-asset map),
+    'review' (entry and operation units), 'design' (identity design units) or 'verify' (refutation)."""
+    from .assets import DESIGN_STATUSES, IDENTITY_CHECKLIST, IDENTITY_KINDS, OP_CLASSES
     def fn(name: str, desc: str, props: dict, required: list[str]) -> dict:
         return {"type": "function", "function": {
             "name": name, "description": desc,
@@ -727,7 +981,8 @@ def tool_schemas(role: str) -> list[dict]:
                "result per request, same order. A request is an entry of the attack surface: method, route "
                "(in whatever shape the surface agent wrote it), and when known kind, handler_file, handler, "
                "handler_line. A result is {least_privileged: public|authenticated|privileged|denied|unknown, "
-               "principals: [roles or principal kinds allowed], rule: where the decision comes from (file:line "
+               "principals: [roles or principal kinds allowed, named as in your ladder], rule: where the "
+               "decision comes from (file:line "
                "or config key)}. least_privileged is the least privileged principal whose request gets the "
                "handler's operation done: count the shared gates AND the checks the handler itself makes (the "
                "program can read the handler's code). Answer unknown for requests whose shape you do not "
@@ -757,9 +1012,32 @@ def tool_schemas(role: str) -> list[dict]:
                                "privileged, who gets each (any visitor, any registered user, ...), and how "
                                "to tell from an entry's declaration which is the least one that can call it"},
                 "public_by_default": s,
+                "shared_protections": {"type": "string", "description": "protections every request or outgoing "
+                                       "operation passes whatever the handler does, with file:line: input "
+                                       "validation in the framework, output filtering, wrappers for outbound "
+                                       "HTTP, file paths, queries, templates"},
+                "ladder": {"type": "array", "items": s, "description": "the principals' names from least to "
+                           "most privileged, as this project calls them (e.g. visitor, member, editor, admin); "
+                           "the resolver's principals use these names"},
+                "powers": {"type": "array", "description": "what each principal is DESIGNED to be able to "
+                           "do, one row per role, permission or scope that grants something different (each "
+                           "scope of a token, not only the ladder's names): what it may read, change, run or "
+                           "grant, and what the project says it must not do. Take it from the project's own "
+                           "statements: documentation, comments, the checks and restrictions it adds, its "
+                           "security fixes. Reviewers judge a capability against this: within the power is "
+                           "designed, beyond it is an escalation.",
+                           "items": {"type": "object", "properties": {
+                               "principal": s, "power": s,
+                               "held_for_one_object": {"type": "boolean", "description": "a role held for ONE "
+                                                       "object (team, organization, project or workspace admin "
+                                                       "or owner) that an ordinary user can obtain by creating "
+                                                       "such an object or being made its admin"},
+                               "evidence": {"type": "object", "properties": {"file": s, "line": i, "quote": s}}},
+                               "required": ["principal", "power"]}},
                 "evidence": {"type": "array", "items": {"type": "object", "properties": {
                     "file": s, "line": i, "quote": s}}}},
-               ["authentication", "authorization", "permission_mapping", "principals", "evidence"]),
+               ["authentication", "authorization", "permission_mapping", "principals", "ladder",
+                "shared_protections", "evidence"]),
         ]
     elif role == "recon":
         tools += [
@@ -787,6 +1065,63 @@ def tool_schemas(role: str) -> list[dict]:
                "entry handler found so far, grouped by directory.",
                {"request_read_pattern": s, "glob": s, "depth": i}, ["request_read_pattern"]),
         ]
+    elif role == "assets":
+        tools += [
+            fn("run_probe", "Run a throwaway Python 3 program (standard library; project root in sys.argv[1]) "
+               "to explore the code, e.g. list the fields of every model; prints its output.", {"code": s},
+               ["code"]),
+            fn("run_recipe",
+               "Expand a recipe for one form of a sensitive operation over the whole project. pattern: a "
+               "ripgrep regex (case-sensitive, (?i) for insensitive) matching the code that PERFORMS the "
+               "operation in this project (the call, assignment or output), not every mention of a word. "
+               "glob narrows the files (relative to the root). exclude: a Python regex; matching lines are "
+               "dropped. guard: a Python regex for the check this project applies to this operation (a "
+               "permission or ownership check, an escaping or allowlist call); each site says whether it "
+               "is in the operation's function before it or in a close caller. Returns, for the sites, "
+               "whether an entry reaches them, whether anything calls them, the guard counts and samples to "
+               "read. The same name replaces the earlier version.",
+               {"name": s, "op_class": {"type": "string", "enum": list(OP_CLASSES)}, "pattern": s, "glob": s,
+                "exclude": s, "guard": s,
+                "why": {"type": "string", "description": "how this project performs the operation and the "
+                        "evidence (file:line); reviewers read it"}}, ["name", "op_class", "pattern", "why"]),
+            fn("drop_recipe", "Remove a recipe and its sites.", {"name": s}, ["name"]),
+            fn("class_absent", "Say that the project does not perform a class of operation at all, with what "
+               "you searched.", {"op_class": {"type": "string", "enum": list(OP_CLASSES)}, "reason": s},
+               ["op_class", "reason"]),
+            fn("record_identity",
+               "Record identity subsystems (an empty list if the project creates no identities). A later record "
+               "with the same name replaces that subsystem: send them one per call to keep each call short.",
+               {"subsystems": {"type": "array", "items": {"type": "object", "properties": {
+                   "name": s, "kind": {"type": "string", "enum": list(IDENTITY_KINDS)},
+                   "routes": {"type": "array", "items": s, "description": "regular expressions over route "
+                              "paths as the surface agent writes them (e.g. ^/users/(register|signup))"},
+                   "files": {"type": "array", "items": s, "description": "controllers, services, directories"},
+                   "models": {"type": "array", "items": s, "description": "model, schema or migration files"},
+                   "settings": {"type": "array", "items": s, "description": "configuration keys that change "
+                                "its behaviour, with their defaults and file:line"},
+                   "notes": s}, "required": ["name", "kind"]}}}, ["subsystems"]),
+        ]
+    elif role == "verify":
+        tools += [
+            fn("who_can_call", "Who can call a request (method, path) under the project's access rules, "
+               "computed by the access agent's resolver program.", {"method": s, "path": s}, ["method", "path"]),
+            fn("conclude", "Your conclusion on the reported vulnerability, with the request's path as you read "
+               "it in the code: one item per stage (entry, input_validation, permission, handler, "
+               "operation, output) with file, line, a quote and its effect on the attack (passes or stops). "
+               "refuted: a quoted stage stops it. by_design: the path holds but what it gives is within the "
+               "designed power of the least privileged principal that can take it (power: that principal "
+               "and the quote where the project grants it). upheld: input_validation, permission and "
+               "operation are quoted, none stops it, and it gives more than that power. uncertain: say "
+               "what is left to check.",
+               {"verdict": {"type": "string", "enum": ["upheld", "refuted", "by_design", "uncertain"]},
+                "reason": s,
+                "power": {"type": "object", "properties": {"principal": s, "file": s, "line": i, "quote": s}},
+                "path": {"type": "array", "items": {"type": "object", "properties": {
+                    "stage": {"type": "string", "enum": ["entry", "input_validation", "permission", "handler",
+                                                         "operation", "output"]},
+                    "file": s, "line": i, "quote": s,
+                    "effect": {"type": "string", "enum": ["passes", "stops"]}}}}}, ["verdict", "reason"]),
+        ]
     else:
         tools += [
             fn("record_card",
@@ -794,6 +1129,9 @@ def tool_schemas(role: str) -> list[dict]:
                "then again with every hypothesis's final status (a later call replaces the card).",
                {"function": {"type": "string", "description": "what the entry does, in business terms"},
                 "callers": {"type": "string", "description": "who can call it, with the evidence"},
+                "open_leads": {"type": "array", "items": s, "description": "suspicions you could not verify "
+                               "to the harmful operation: file:line and what is left to check (kept for "
+                               "follow-up, not reported as findings)"},
                 "least_privileged_caller": {"type": "string", "description": "who can actually call it, as you "
                                             "established from the code (put a wrong recon exposure right "
                                             "here, not in report_finding)",
@@ -809,7 +1147,9 @@ def tool_schemas(role: str) -> list[dict]:
                     "anchor": {"type": "string", "description": "file:line of the operation that makes this "
                                "risk plausible (where the request value is stored, queried, fetched, "
                                "rendered, used to pick an object, ...)"},
-                    "why": s, "status": {"type": "string", "enum": ["confirmed", "rejected", "open"]},
+                    "why": {"type": "string", "description": "rejected: the code that stops it (file:line). "
+                            "open: what is left to read (it is followed up in a fresh context)."},
+                    "status": {"type": "string", "enum": ["confirmed", "rejected", "open"]},
                     "evidence": s}, "required": ["risk", "anchor", "status"]}},
                 "facts_used": {"type": "array", "items": s,
                                "description": "ids of verified facts you relied on (e.g. F3)"}},
@@ -842,11 +1182,46 @@ def tool_schemas(role: str) -> list[dict]:
                 "verdict", "route_evidence", "impact"]),
             fn("who_can_call", "Who can call a request (method, path) under the project's access rules, "
                "computed by the access agent's resolver program.", {"method": s, "path": s}, ["method", "path"]),
+            fn("who_reaches", "The code matching a regex, by function, with the entries that reach each "
+               "function through calls and their least privileged caller. It is the step across storage "
+               "that find_callers is across a call: give the pattern of the code that WRITES a stored value "
+               "(a field assignment, a setter, a file or key write) to learn who can put a value there. From "
+               "a static index: a caller through an untyped or dynamic receiver can be missing, so read a "
+               "writer's callers when its list looks short.",
+               {"pattern": s, "glob": s}, ["pattern"]),
             fn("add_fact", "Share a project fact other reviewers can rely on: one claim, at most 240 "
                "characters (e.g. how a helper escapes, that all data access goes through a typed query API, "
                "which base class enforces login). Rejected unless each quote is found at file:line.",
                {"statement": s, "evidence": {"type": "array", "items": {"type": "object", "properties": {
                    "file": s, "line": i, "quote": s}}}}, ["statement", "evidence"]),
         ]
-    tools.append(fn("finish", "Call once when you are done.", {"notes": s}, []))
+    if role == "design":
+        evidence = {"type": "object", "properties": {"file": s, "line": i, "quote": s}}
+        tools.append(fn(
+            "record_design",
+            "Answer checklist items of the identity design review, one per call (item, status, answer, evidence, "
+            "to_verify) or several in items; a later answer to an item replaces the earlier one. status: sound (the design holds, evidence quoted), flaw (it does not; also "
+            "report_finding when you traced the harm), owner_decision (a risky default or trade-off the "
+            "owner must accept or change, evidence quoted), unclear (say what is left to read), "
+            "not_applicable.",
+            {"item": {"type": "string", "enum": list(IDENTITY_CHECKLIST)},
+             "status": {"type": "string", "enum": list(DESIGN_STATUSES)},
+             "answer": {"type": "string", "description": "the design as the code implements it, and why it "
+                        "holds or not"},
+             "evidence": {"type": "array", "items": evidence},
+             "to_verify": {"type": "string", "description": "for a flaw or unclear answer: the function or "
+                           "file:line still to read to confirm it; a fresh reviewer is sent there"},
+             "items": {"type": "array", "description": "several answers at once (same fields)",
+                       "items": {"type": "object", "properties": {
+                           "item": {"type": "string", "enum": list(IDENTITY_CHECKLIST)},
+                           "status": {"type": "string", "enum": list(DESIGN_STATUSES)}, "answer": s,
+                           "evidence": {"type": "array", "items": evidence}, "to_verify": s},
+                           "required": ["item", "status", "answer"]}}},
+            []))
+    if role == "recon":
+        tools.append(fn("finish", "Call once when you are done. unenumerated: every dispatcher you found but "
+                        "did not enumerate (yet), each with where its routes are declared; another pass will "
+                        "enumerate them.", {"notes": s, "unenumerated": {"type": "array", "items": s}}, []))
+    else:
+        tools.append(fn("finish", "Call once when you are done.", {"notes": s}, []))
     return tools

@@ -171,7 +171,9 @@ pnpm dev                         # http://localhost:5173
    （例如"角色 guest / user / admin；公开 /login、/search；配置文件可信"），能明显减少权限误报。
 4. 任务页实时显示阶段事件；完成后发现列表、状态流转和报告导出照常使用。
    结论中的 confirmed / likely 换算为置信度（0.85 / 0.6，likely 严重度降一级），不会标成"已验证"。
-5. 入口清单、卡片、事实、每个 Agent 的对话记录和未审清单（`not_reviewed`）保存在 `YASA_AUDIT_RUNS_DIR/<任务 ID>/`。
+5. 入口清单、敏感操作与身份子系统地图（`recon/assets.json`）、卡片、事实、每个 Agent 的对话记录、未审清单
+   （`not_reviewed`）和身份模块的设计审查工作单（`design_worksheet`，需要人工判断的默认值与设计取舍）保存在
+   `YASA_AUDIT_RUNS_DIR/<任务 ID>/`。
 
 ### API
 
