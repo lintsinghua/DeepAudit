@@ -1,3 +1,7 @@
+"""
+模块说明：核心配置与安全组件：security。
+"""
+
 from datetime import datetime, timedelta, timezone
 from typing import Any, Union
 from jose import jwt

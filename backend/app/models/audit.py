@@ -1,3 +1,7 @@
+"""
+模块说明：数据模型定义：audit。
+"""
+
 import uuid
 from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Text, Float
 from sqlalchemy.sql import func

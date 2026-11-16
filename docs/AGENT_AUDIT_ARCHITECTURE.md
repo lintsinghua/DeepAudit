@@ -1,4 +1,4 @@
-# DeepAudit Agent 审计架构文档
+# DeepAudit 项目架构文档
 
 ## 目录
 
@@ -17,6 +17,9 @@
 9. [关键设计模式](#9-关键设计模式)
 10. [安全与健壮性](#10-安全与健壮性)
 11. [扩展指南](#11-扩展指南)
+12. [项目整体架构](#12-项目整体架构)
+13. [核心业务流程](#13-核心业务流程)
+14. [数据模型与存储](#14-数据模型与存储)
 
 ---
 
@@ -1144,6 +1147,99 @@ switch (event.type) {
 
 ---
 
+## 12. 项目整体架构
+
+### 12.1 代码组织与层次
+
+```
+DeepAudit_improve/
+├── backend/                     # FastAPI 后端
+│   ├── app/
+│   │   ├── api/                 # REST API 路由
+│   │   ├── core/                # 配置与安全
+│   │   ├── db/                  # 数据库会话与初始化
+│   │   ├── models/              # ORM 数据模型
+│   │   ├── schemas/             # Pydantic Schema
+│   │   ├── services/            # 业务服务层（Agent/LLM/RAG/扫描/存储）
+│   │   └── main.py              # 应用入口
+│   └── tests/
+├── frontend/                    # React + TypeScript 前端
+│   └── src/
+│       ├── pages/               # 页面级模块
+│       ├── shared/api/          # API 调用与 SSE 客户端
+│       └── components/          # UI 组件
+├── docker/                      # 沙箱与数据库镜像
+└── docs/                        # 文档
+```
+
+### 12.2 后端分层职责
+
+- 入口层：`app/main.py` 创建 FastAPI 实例、CORS、中间件与生命周期管理
+- API 层：`app/api/v1/api.py` 聚合各业务路由并挂载到 `/api/v1`
+- 依赖与鉴权：`app/api/deps.py` 提供 OAuth2/JWT 认证依赖
+- 业务服务层：`app/services/*` 实现扫描、Agent、LLM、RAG、ZIP 存储等核心逻辑
+- 数据层：`app/models/*` 定义数据模型，`app/db/session.py` 管理异步会话
+
+### 12.3 前端分层职责
+
+- 页面层：`pages/AgentAudit` 负责 Agent 审计的任务创建、日志、树状视图与报告导出
+- 状态层：`pages/AgentAudit/hooks` 与 `shared/api` 实现状态归集和 SSE 流处理
+- API 层：`shared/api/agentTasks.ts` 与 `shared/api/agentStream.ts` 负责任务与事件调用
+
+---
+
+## 13. 核心业务流程
+
+### 13.1 项目创建与代码来源
+
+1. 创建项目：通过 `projects` API 创建 Project 记录
+2. 代码来源：
+   - 仓库模式：根据仓库类型拉取代码（GitHub/GitLab/Gitea）
+   - ZIP 模式：上传 ZIP 并存储在本地 ZIP 存储目录
+3. 项目关联：记录项目元信息与用户所有权，供后续扫描与审计复用
+
+### 13.2 传统扫描流程（非 Agent）
+
+1. 创建扫描任务：`scan` API 创建 `AuditTask`
+2. LLM 分析：`LLMService` 解析文件与风险点，生成 `AuditIssue`
+3. 任务生命周期：任务可取消，完成后持久化结果并返回摘要
+
+### 13.3 Agent 审计流程（动态多 Agent）
+
+1. 任务创建：`agent_tasks` API 创建 `AgentTask` 并启动后台执行器
+2. 初始化上下文：收集项目结构、初始化工具、启动事件流
+3. 动态调度：Orchestrator 生成并派发 Recon/Analysis/Verification 子 Agent
+4. 事件与结果：事件流写入数据库并同步 SSE，发现记录写入 `AgentFinding`
+5. 报告生成：按严重程度汇总发现，生成 Markdown/JSON 报告
+
+### 13.4 前端交互流程
+
+1. 任务创建后进入 AgentAudit 页面
+2. SSE 流式接入：展示 thinking、tool、phase、finding 等事件
+3. 任务结束后展示报告导出入口与统计摘要
+
+---
+
+## 14. 数据模型与存储
+
+### 14.1 核心实体
+
+- 用户与权限：`User`、`ProjectMember`
+- 项目与任务：`Project`、`AuditTask`、`AgentTask`
+- 扫描结果：`AuditIssue`、`AgentFinding`
+- 事件流：`AgentEvent`
+- 规则与提示词：`AuditRuleSet`、`AuditRule`、`PromptTemplate`
+- 用户配置：`UserConfig`
+
+### 14.2 存储策略
+
+- 关系数据：PostgreSQL（通过 SQLAlchemy 异步会话访问）
+- ZIP 代码包：本地文件系统存储，保存 ZIP 与元数据文件
+- RAG 索引：向量存储（Chroma/InMemory）持久化项目代码块与元数据
+- 事件流：运行态内存队列 + 数据库持久化，支持断线重连
+
+---
+
 ## 附录: 关键文件索引
 
 ```
@@ -1190,5 +1286,5 @@ API:
 
 ---
 
-*文档版本: 1.0*
-*最后更新: 2025-12-13*
+*文档版本: 1.1*
+*最后更新: 2026-03-06*

@@ -1,3 +1,7 @@
+"""
+模块说明：后端模块：check_docker_direct。
+"""
+
 
 import sys
 try:
