@@ -569,6 +569,13 @@ def counters(recipe: dict, sites: list[dict], entries_known: int, seed: int = 0,
 
 # ----------------------------------------------------------------- identity subsystems
 
+def _paths(items: Any) -> list[str]:
+    """Paths as the agent wrote them, without what is not part of a path: "app/Model.php (user table)",
+    "app/Model.php:12" -> app/Model.php."""
+    return [re.sub(r"(\s+(\(.*\)|[-—–]\s.*)|:\d+\S*)$", "", str(f).strip()).lstrip("./")
+            for f in (items if isinstance(items, list) else []) if str(f).strip()]
+
+
 def check_identity(subsystems: Any, root: Path) -> tuple[list[dict], list[str]]:
     """Clean the agent's identity subsystems; problems are returned to it."""
     if not isinstance(subsystems, list):
@@ -589,18 +596,22 @@ def check_identity(subsystems: Any, root: Path) -> tuple[list[dict], list[str]]:
                 re.compile(r)
             except re.error:
                 bad.append(r)
-        files = [str(f).strip().lstrip("./") for f in (s.get("files") or []) + (s.get("models") or [])
-                 if str(f).strip()]
-        missing = [f for f in files if not (root / f).exists()]
-        if bad or missing or not (routes or files):
-            problems.append(f"{s['name']}: " + "; ".join(
-                x for x in (f"routes that are not regular expressions: {bad}" if bad else "",
-                            f"files that do not exist: {missing[:5]}" if missing else "",
-                            "give its routes or files" if not (routes or files) else "") if x))
+        routes = [r for r in routes if r not in bad]
+
+        files, models = _paths(s.get("files")), _paths(s.get("models"))
+        missing = [f for f in files + models if not (root / f).exists()]
+        files = [f for f in files if f not in missing]
+        models = [f for f in models if f not in missing]
+        # a bad item is dropped and named; the subsystem is kept as long as something locates it
+        dropped = "; ".join(x for x in (f"routes that are not regular expressions dropped: {bad}" if bad else "",
+                                        f"files that do not exist dropped: {missing[:5]}" if missing else "") if x)
+        if not (routes or files or models):
+            problems.append(f"{s['name']}: " + (dropped + "; " if dropped else "") + "give its routes or files")
             continue
+        if dropped:
+            problems.append(f"{s['name']}: {dropped}")
         out.append({"name": str(s["name"])[:80], "kind": kind, "routes": routes[:12],
-                    "files": [str(f).strip().lstrip("./") for f in (s.get("files") or [])][:20],
-                    "models": [str(f).strip().lstrip("./") for f in (s.get("models") or [])][:10],
+                    "files": files[:20], "models": models[:10],
                     "settings": [str(x)[:200] for x in (s.get("settings") or [])][:12],
                     "notes": str(s.get("notes") or "")[:1500]})
     return out, problems

@@ -88,7 +88,8 @@ Find and read, with the navigation tools:
   and option formats are enforced; do object-level checks (ownership, model permission hooks) also
   run for collection routes without an id; which output fields are removed for which caller.
   Reviewers judge each handler with these in mind.
-Then call record_access_model (each statement backed by evidence quotes from the code).
+Record it with record_access_model as you establish it, not in one call at the end: each call sets the
+fields it gives and keeps the others (each statement backed by evidence quotes from the code).
 If the decision can be computed from the request, its handler and the code or configuration (route
 tables, role and permission definitions, middleware or filter order, annotations, the checks a handler
 makes), write it as a program with write_access_resolver and test it on sample requests of every
@@ -306,10 +307,11 @@ are added to the map. The product context says who is trusted; it does not take 
 Part 2: identity subsystems. Find the code that creates or proves an identity or changes what it may do:
 registration, login, password recovery, SSO / OAuth / SAML / LDAP, API or access tokens, account
 linking, invitations, multi-factor, sessions, user and role management. Record them with
-record_identity, one per call: for each, its routes (regular expressions over route paths), files, models, and the
+record_identity, one per call, as you find them (not all at the end): for each, its routes (regular expressions over route paths), files, models, and the
 settings that change its behaviour with their defaults (file:line). A reviewer checks each subsystem's
 design against a fixed checklist (identity binding, claiming of existing records, token lifecycle,
-defaults, privilege ceiling): give them what they need for it.
+defaults, privilege ceiling): give them what they need for it. Every identity kind is either recorded or
+declared absent with identity_absent (what you searched).
 
 Then finish. Spend at most half of your budget before your first run_recipe.
 Use at most {budget} tool calls.

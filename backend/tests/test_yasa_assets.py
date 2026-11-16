@@ -172,6 +172,7 @@ def test_identity_subsystems_and_the_design_checklist(tmp_path):
                                  {"route": "/login", "handler_file": "web/Login.php"}]
     assert tb.record_identity([{"name": "x", "kind": "magic"}]).startswith("rejected")
     assert "do not exist" in tb.record_identity([{"name": "x", "kind": "login", "files": ["nope.php"]}])
+    assert tb.identity is None  # nothing locates it, so nothing is recorded
     res = tb.record_identity([{"name": "registration", "kind": "registration", "routes": ["^/register"],
                                "files": ["web/Register.php"], "settings": ["config.php:2 allowPublicRegistration"]},
                               {"name": "broken", "kind": "sso", "routes": ["("]}])
@@ -230,6 +231,9 @@ def test_run_maps_assets_and_reviews_operations_and_identity_design(tmp_path, mo
                    ("record_identity", {"subsystems": [{"name": "registration", "kind": "registration",
                                                         "routes": ["^/register"], "files": ["web/Register.php"],
                                                         "settings": ["config.php:2 allowPublicRegistration"]}]}),
+                   ("finish", {}),  # refused: identity kinds left
+                   *[("identity_absent", {"kind": k, "reason": "searched, none"})
+                     for k in assets.IDENTITY_KINDS if k != "registration"],
                    ("finish", {"notes": "mapped"})],
         "/download": [("record_card", {"function": "download", "callers": "anyone", "authz_verdict": "ok",
                                        "hypotheses": []})],
@@ -642,3 +646,19 @@ def test_reviewers_follow_stored_values_and_the_special_cases_are_gone():
         assets.IDENTITY_CHECKLIST["privilege_ceiling"]
     for gone in ("lists forbidden values", "A value read from storage is controlled", "later runs or obeys"):
         assert gone not in everything
+
+
+def test_identity_records_keep_what_is_valid_and_every_kind_is_accounted_for(tmp_path):
+    _write(tmp_path, {"web/Invite.php": "<?php\nfunction accept() {}\n", "lib/User.php": "<?php\n"})
+    tb = Toolbox(_cfg(), tmp_path, tmp_path / "out")
+    tb.entries_source = lambda: []
+    # an annotated path, a line suffix and a missing file: the bad item is dropped, not the subsystem
+    out = tb.record_identity({"name": "invitations", "kind": "invitation", "routes": ["acceptInvitation"],
+                              "files": ["web/Invite.php:2", "web/Gone.php"], "models": ["lib/User.php (user table)"]})
+    assert "recorded 1 subsystem" in out and "Gone.php" in out
+    assert tb.identity[0]["files"] == ["web/Invite.php"] and tb.identity[0]["models"] == ["lib/User.php"]
+    assert "invitation" not in tb.identity_left() and "login" in tb.identity_left()
+    assert tb.identity_absent("invitation", "x").startswith("rejected")  # it is recorded
+    assert tb.identity_absent("sso", "searched for oauth/saml/oidc, none").startswith("recorded")
+    assert "sso" not in tb.identity_left()
+    assert "identity_absent" in {t["function"]["name"] for t in tool_schemas("assets")}

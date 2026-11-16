@@ -113,23 +113,30 @@ def _access_agent(cfg: AuditConfig, root: Path, out: Path, deploy: str, product:
                   deadline: float | None, user: str, holder: dict) -> None:
     """Works out the project-wide access-control model; publishes it in holder['model']."""
     tb = Toolbox(cfg, root, out, unit="access")
-    tb.finish_gates = [(lambda t: t.access_model is None,
-                        "record_access_model first (how requests are authenticated and authorized)",
+    tb.finish_gates = [(lambda t: t.access_model is None or bool(t.access_model.get("incomplete")),
+                        lambda t: "record_access_model first: " + ", ".join(
+                            (t.access_model or {}).get("incomplete") or ["how requests are authenticated and "
+                                                                         "authorized"]),
                         ["record_access_model"])]
     llm = LLM(cfg, stage="access")
 
     def missing(t: Toolbox) -> list[str]:
-        return [x for x, done in (("record_access_model", t.access_model is not None),
+        return [x for x, done in (("record_access_model", t.access_model is not None
+                                   and not t.access_model.get("incomplete")),
                                   ("write_access_resolver", t.resolver_code is not None)) if not done]
 
-    # Reading the security chain can take the whole budget; at two thirds, say what is still owed.
+    # Reading the security chain can take the whole budget. At a third, nothing recorded yet: record what is
+    # known now (parts are accepted); at two thirds, say what is still owed.
+    early = (lambda steps, t: steps >= cfg.access_budget // 3 and t.access_model is None,
+             "A third of your budget is used and nothing is recorded. Record what you know now with "
+             "record_access_model (the fields you have; later calls add the rest and replace what changes).")
     owed = (lambda steps, t: steps >= cfg.access_budget * 2 // 3 and bool(missing(t)),
             lambda t: "Two thirds of your budget is used. Still to do: " + ", ".join(missing(t))
                       + " (a resolver may answer unknown for what you could not work out).")
     try:
         holder["res"] = run_agent(llm, tb, tool_schemas("access"), access_prompt(cfg.access_budget, deploy, product),
                                   user, cfg.access_budget, out / "transcript-access.jsonl", deadline=deadline,
-                                  reminders=[owed])
+                                  reminders=[early, owed])
     except Exception as e:  # the surface agent and the review still run without a model
         holder["error"] = f"{type(e).__name__}: {e}"
     model = tb.access_model
@@ -153,8 +160,9 @@ def _assets_agent(cfg: AuditConfig, root: Path, out: Path, deploy: str, product:
     tb.finish_gates = [(lambda t: bool(_classes_left(t)),
                         lambda t: "run a recipe, or class_absent, for: " + ", ".join(_classes_left(t)),
                         ["run_recipe", "class_absent"]),
-                       (lambda t: t.identity is None,
-                        "record_identity (an empty list if the project creates no identities)", ["record_identity"])]
+                       (lambda t: bool(t.identity_left()),
+                        lambda t: "record_identity, or identity_absent, for: " + ", ".join(t.identity_left()),
+                        ["record_identity", "identity_absent"])]
     try:  # what the index cannot see into is part of the map too: say so before the agent picks globs
         unseen = assets_map.unparsed_summary(root, tb.call_index())
     except Exception:
@@ -184,6 +192,7 @@ def _build_assets(holder: dict, entries: list[dict], out: Path) -> dict:
         data = assets_map.build(tb, dict(tb.recipes), tb.identity, dict(tb.absent), entries)
     except Exception as e:  # a map that cannot be built must not cost the recon
         return {"error": f"{type(e).__name__}: {e}"}
+    data["identity_absent"] = dict(tb.identity_none)
     assets_map.dump(data, out / "assets.json")
     res = holder.get("res") or {}
     return {**data["summary"], "steps": res.get("steps"), "finished": res.get("finished"),

@@ -221,6 +221,7 @@ class Toolbox:
         # the sensitive-asset map (assets agent): operation recipes, absent classes, identity subsystems
         self.recipes: dict[str, dict] = {}
         self.absent: dict[str, str] = {}
+        self.identity_none: dict[str, str] = {}  # identity kind -> what was searched
         self.identity: list[dict] | None = None
         self.entries_source: Any = None  # callable: the entries the surface agent has enumerated so far
         self._calls: Any = None
@@ -696,6 +697,24 @@ class Toolbox:
         self.absent[op_class] = str(reason)[:400]
         return f"recorded: {op_class} absent"
 
+    def identity_absent(self, kind: str, reason: str) -> str:
+        """Say that the project has no subsystem of an identity kind, with what was searched."""
+        from .assets import IDENTITY_KINDS
+        if kind not in IDENTITY_KINDS:
+            return f"rejected: kind must be one of {', '.join(IDENTITY_KINDS)}"
+        if not str(reason or "").strip():
+            return "rejected: give the reason (what you searched and found)"
+        if any(g["kind"] == kind for g in self.identity or []):
+            return f"rejected: a subsystem of kind {kind} is recorded"
+        self.identity_none[kind] = str(reason)[:400]
+        return f"recorded: no {kind} subsystem"
+
+    def identity_left(self) -> list[str]:
+        """Identity kinds neither recorded nor declared absent."""
+        from .assets import IDENTITY_KINDS
+        done = {g["kind"] for g in self.identity or []} | set(self.identity_none)
+        return [k for k in IDENTITY_KINDS if k not in done]
+
     def record_identity(self, subsystems: Any) -> str:
         """Record identity subsystems; a later record with the same name replaces that subsystem, so they
         can be sent one per call."""
@@ -711,6 +730,8 @@ class Toolbox:
                 f"{len(g['files'])} files, {len(g['settings'])} settings" for g in clean]
         return ("recorded " + str(len(clean)) + " subsystem(s)" + (":\n" + "\n".join(rows) if rows else "")
                 + f"\n{len(self.identity)} subsystem(s) recorded in all"
+                + (f"\nkinds still to record or declare absent (identity_absent): {', '.join(self.identity_left())}"
+                   if self.identity_left() else "")
                 + ("\nnot recorded: " + "; ".join(problems[:6]) if problems else ""))
 
     def record_design(self, items: Any = None, item: str = "", status: str = "", answer: str = "",
@@ -849,32 +870,59 @@ class Toolbox:
         return "; ".join(errors + [f"decided: {len(self.decisions)}",
                                    f"undecided: {', '.join(left)}" if left else "all groups decided"])
 
+    ACCESS_FIELDS = ("authentication", "authorization", "permission_mapping", "principals", "shared_protections")
+
     def record_access_model(self, **model: Any) -> str:
-        """The project-wide model of how requests are authenticated and authorized (recon stage)."""
-        need = ("authentication", "authorization", "permission_mapping", "principals", "shared_protections")
-        ladder = [str(x).strip() for x in (model.get("ladder") or []) if str(x).strip()] \
-            if isinstance(model.get("ladder"), list) else []
-        missing = [k for k in need if not str(model.get(k) or "").strip()] + ([] if ladder else ["ladder"])
-        if missing:
-            return f"rejected: missing {', '.join(missing)}"
-        err = verify_evidence(self.root, model.get("evidence") or [])
-        if err:
-            return f"rejected: {err}"
-        powers, err = self._powers(model.get("powers"))
-        if err:
-            return f"rejected: powers: {err}"
-        self.access_model = {k: model.get(k) for k in (*need, "public_by_default", "evidence")}
-        self.access_model["ladder"] = ladder[:12]
-        self.access_model["powers"] = powers
+        """The project-wide model of how requests are authenticated and authorized (recon stage). Parts are
+        accepted: each call sets the fields it gives and keeps the others, so the model is recorded as it is
+        worked out instead of in one long call at the end (where an output limit or one bad field loses it)."""
+        draft = dict(self.access_model or {})
+        problems = []
+        for k in (*self.ACCESS_FIELDS, "public_by_default"):
+            if str(model.get(k) or "").strip():
+                draft[k] = model[k]
+        if model.get("ladder") is not None:
+            ladder = [str(x).strip() for x in model["ladder"] if str(x).strip()] \
+                if isinstance(model["ladder"], list) else []
+            if ladder:
+                draft["ladder"] = ladder[:12]
+            else:
+                problems.append("ladder must be a list of principals, least privileged first")
+        if model.get("evidence"):
+            err = verify_evidence(self.root, model["evidence"])
+            if err:
+                problems.append(f"evidence not recorded: {err}")
+            else:
+                draft["evidence"] = model["evidence"]
+        if model.get("powers") is not None:
+            powers, err = self._powers(model.get("powers"))
+            if err:
+                problems.append(f"powers not recorded: {err}")
+            else:
+                draft["powers"] = powers
         legacy = [str(x).strip() for x in model.get("scoped_roles") or [] if str(x).strip()] \
             if isinstance(model.get("scoped_roles"), list) else []
-        self.access_model["scoped_roles"] = list(dict.fromkeys(
-            [p["principal"] for p in powers if p["held_for_one_object"]] + legacy))[:12]
-        if not powers:
-            return ("access model recorded, but without powers: add them (record_access_model again with "
-                    "the same fields and powers), or reviewers cannot tell a designed capability from an "
-                    "escalation")
-        return "access model recorded"
+        draft["scoped_roles"] = list(dict.fromkeys(
+            [p["principal"] for p in draft.get("powers") or [] if p["held_for_one_object"]]
+            + legacy + list(draft.get("scoped_roles") or [])))[:12]
+        missing = [k for k in self.ACCESS_FIELDS if not str(draft.get(k) or "").strip()] \
+            + ([] if draft.get("ladder") else ["ladder"]) + ([] if draft.get("evidence") else ["evidence"])
+        if len(missing) == len(self.ACCESS_FIELDS) + 2:
+            return "rejected: nothing recorded; " + "; ".join(problems or ["give at least one field"])
+        if missing == ["evidence"] and not problems and not self.access_model:
+            return "rejected: evidence is required (file, line, quote for the statements above)"
+        draft["incomplete"] = missing
+        if not missing:
+            draft.pop("incomplete")
+        self.access_model = draft
+        if missing:
+            out = "access model recorded so far; still to record (later calls add to it): " + ", ".join(missing)
+        elif not draft.get("powers"):
+            out = ("access model recorded, but without powers: add them (record_access_model with powers), or "
+                   "reviewers cannot tell a designed capability from an escalation")
+        else:
+            out = "access model recorded"
+        return out + ("\n" + "; ".join(problems) if problems else "")
 
     def _powers(self, rows: Any) -> tuple[list[dict], str]:
         """What each principal is designed to be able to do, with where the project says so."""
@@ -1088,9 +1136,12 @@ def tool_schemas(role: str) -> list[dict]:
             fn("class_absent", "Say that the project does not perform a class of operation at all, with what "
                "you searched.", {"op_class": {"type": "string", "enum": list(OP_CLASSES)}, "reason": s},
                ["op_class", "reason"]),
+            fn("identity_absent", "Say that the project has no subsystem of one identity kind, with what you "
+               "searched.", {"kind": {"type": "string", "enum": list(IDENTITY_KINDS)}, "reason": s},
+               ["kind", "reason"]),
             fn("record_identity",
-               "Record identity subsystems (an empty list if the project creates no identities). A later record "
-               "with the same name replaces that subsystem: send them one per call to keep each call short.",
+               "Record identity subsystems, one per call (a later record with the same name replaces it). Every "
+               "identity kind is either recorded or declared absent with identity_absent.",
                {"subsystems": {"type": "array", "items": {"type": "object", "properties": {
                    "name": s, "kind": {"type": "string", "enum": list(IDENTITY_KINDS)},
                    "routes": {"type": "array", "items": s, "description": "regular expressions over route "
