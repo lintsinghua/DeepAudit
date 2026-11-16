@@ -1542,3 +1542,33 @@ def test_converge_recon_unions_entries_and_estimates_surface(tmp_path, monkeypat
     ids = [e["id"] for e in json.loads((tmp_path / "out" / "entries.json").read_text())]
     assert ids == ["E1", "E2", "E3"]  # re-numbered over the union
     assert (tmp_path / "out-2" / "entries.json").exists() and (tmp_path / "out-3" / "entries.json").exists()
+
+
+def test_converge_union_matches_entries_spelled_differently_by_two_runs():
+    from app.services.yasa_audit.pipeline import _merge_run
+
+    # the same Matomo door as two independent recon runs wrote it
+    run1 = [{"method": "GET/POST", "route": "index.php?module=API&method=Goals.getGoal",
+             "handler_file": "plugins/Goals/API.php", "handler": "API::getGoal", "handler_line": 95},
+            {"method": "GET", "route": "/a", "handler_file": "app.js", "handler": "app.get", "handler_line": 3},
+            {"method": "GET", "route": "/b", "handler_file": "app.js", "handler": "app.get", "handler_line": 9}]
+    run2 = [{"method": "GET|POST", "route": "index.php?module=API&method=Goals.getGoal",
+             "handler_file": "./plugins/Goals/API.php", "handler": "Goals\\API::getGoal", "handler_line": 96},
+            {"method": "GET", "route": "/a", "handler_file": "app.js", "handler": "app.get", "handler_line": 3},
+            {"method": "GET", "route": "/c", "handler_file": "app.js", "handler": "app.get", "handler_line": 15}]
+    merged: dict = {}
+    k1 = _merge_run(merged, run1)
+    k2 = _merge_run(merged, run2)
+    assert len(merged) == 4  # getGoal once; anonymous callbacks stay apart by line: /a, /b, /c
+    assert len(k1 & k2) == 2
+
+
+def test_converge_union_matches_a_named_handler_whose_route_is_spelled_differently():
+    from app.services.yasa_audit.pipeline import _merge_run
+
+    merged: dict = {}
+    _merge_run(merged, [{"route": "index.php?module=Goals&action=manage", "handler_file": "plugins/Goals/Controller.php",
+                         "handler": "Controller::manage"}])
+    _merge_run(merged, [{"route": "/index.php?module=Goals&action=manage&idSite={idSite}",
+                         "handler_file": "plugins/Goals/Controller.php", "handler": "manage"}])
+    assert len(merged) == 1

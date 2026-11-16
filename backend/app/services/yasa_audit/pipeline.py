@@ -953,9 +953,40 @@ def review(cfg: AuditConfig, root: Path, out: Path, entries: list[dict], deploy:
 
 # ----------------------------------------------------------------- both
 
+_ANON_NAMES = {"", "closure", "anonymous", "lambda", "function", "fn", "handler", "callback", "default"}
+
+
 def _entry_key(e: dict) -> tuple:
-    """What makes two enumerated entries the same door: its code identity and the request that reaches it."""
-    return (_handler_id(e), str(e.get("method", "ANY")).upper(), _resource_key(e.get("route", "")))
+    """What makes entries of two independent recon runs the same door: the code it runs and the request
+    that reaches it. Runs spell the same thing differently (a qualified or bare handler name, the line of
+    the docblock or of the function, 'GET/POST' or 'GET|POST'), so the key keeps only what does not vary:
+    the file, the bare function name and the route. The line stays only for anonymous handlers, where it
+    is the identity."""
+    hf = str(e.get("handler_file") or "").lstrip("./")
+    name = re.sub(r"\(.*$", "", re.split(r"::|->|\\|\.|#|@", str(e.get("handler") or ""))[-1]).strip().lower()
+    anon = name in _ANON_NAMES or not re.fullmatch(r"[a-z_$][\w$]*", name)
+    return ((hf, name, _handler_id(e)[2] if anon else 0), _resource_key(e.get("route", "")))
+
+
+def _merge_run(merged: dict, entries: list[dict]) -> set:
+    """Adds one run's entries to the union; returns the run's keys as matched to the union. A named handler
+    that occurs once in the run and once in the union is the same door even if the two runs spelled its
+    route differently."""
+    code_count = collections.Counter(_entry_key(e)[0] for e in entries)
+    union_by_code: dict[tuple, list[tuple]] = {}
+    for k in merged:
+        union_by_code.setdefault(k[0], []).append(k)
+    keys = set()
+    for e in entries:
+        k = _entry_key(e)
+        if k not in merged:
+            alt = union_by_code.get(k[0], [])
+            if k[0][1] and not k[0][2] and code_count[k[0]] == 1 and len(alt) == 1:
+                k = alt[0]
+        if k not in merged or (e.get("resolved") and not merged[k].get("resolved")):
+            merged[k] = e
+        keys.add(k)
+    return keys
 
 
 def _model_score(rec: dict) -> tuple:
@@ -980,16 +1011,14 @@ def converge_recon(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", pr
     merged: dict[tuple, dict] = {}
     recs: list[dict] = []
     growth: list[dict] = []
+    run_keys: list[set] = []
     for i in range(runs):
         sub = out if i == 0 else out.parent / f"{out.name}-{i + 1}"
         r_deadline = None if deadline is None else time.time() + share
         rec = recon(cfg, root, sub, deploy, product, r_deadline, hard_deadline=hard)
         recs.append(rec)
         before = len(merged)
-        for e in json.loads((sub / "entries.json").read_text()):
-            k = _entry_key(e)
-            if k not in merged or (e.get("resolved") and not merged[k].get("resolved")):
-                merged[k] = e
+        run_keys.append(_merge_run(merged, json.loads((sub / "entries.json").read_text())))
         added = len(merged) - before
         growth.append({"run": i + 1, "run_entries": rec.get("entries", 0), "union": len(merged), "added": added})
         if i and added <= cfg.recon_converge_threshold * before:
@@ -1017,12 +1046,11 @@ def converge_recon(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", pr
         (out / "resolver.py").write_text(resolver_code)
     (out / "entries.json").write_text(json.dumps(entries, indent=1, ensure_ascii=False))
 
-    # capture-recapture: from the overlap of the two largest runs, estimate the true surface size
+    # capture-recapture: from the overlap of the two largest runs, estimate the true surface size (keys
+    # as matched while merging; out/entries.json now holds the union, not the first run)
     estimate = None
-    if len(recs) >= 2:
-        sets = sorted((({_entry_key(e) for e in json.loads(((out if i == 0 else out.parent / f"{out.name}-{i + 1}")
-                        / "entries.json").read_text())}) for i in range(len(recs))), key=len, reverse=True)
-        a, b = sets[0], sets[1]
+    if len(run_keys) >= 2:
+        a, b = sorted(run_keys, key=len, reverse=True)[:2]
         inter = len(a & b)
         estimate = round(len(a) * len(b) / inter) if inter else None
 
