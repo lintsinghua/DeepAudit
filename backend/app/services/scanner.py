@@ -3,6 +3,7 @@
 """
 
 import asyncio
+from collections.abc import Awaitable, Callable
 import httpx
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
@@ -155,6 +156,52 @@ async def gitlab_api(url: str, token: str = None) -> Any:
         return response.json()
 
 
+class ListingTruncatedError(Exception):
+    """列表超过页数上限、结果不完整。
+
+    单独的类型让扫描能区分它和"分支不存在"：后者可以降级到其他分支，
+    而前者说明分支存在只是太大，换分支会扫描错误的代码。
+    """
+
+
+async def fetch_all_pages(
+    api_func: Callable[..., Awaitable[Any]],
+    url: str,
+    token: str | None = None,
+    per_page_param: str = "per_page",
+    per_page: int = 100,
+    max_pages: int = 500,
+) -> list[Any]:
+    """逐页请求列表接口，直到返回空页（GitHub/GitLab/Gitea 列表接口每次只返回一页）
+
+    达到 max_pages 后仍有数据时抛出异常，而不是返回不完整的列表。
+    """
+    items: list[Any] = []
+    sep = "&" if "?" in url else "?"
+    previous = None
+
+    def is_last(data: Any) -> bool:
+        # 空页表示结束；与上一页相同说明服务端忽略了 page 参数，停止以免重复和无限请求
+        return not isinstance(data, list) or not data or data == previous
+
+    for page in range(1, max_pages + 1):
+        data = await api_func(f"{url}{sep}{per_page_param}={per_page}&page={page}", token)
+        if is_last(data):
+            return items
+        items.extend(data)
+        previous = data
+
+    # 已达到页数上限但尚未见到结束页：再探测一页。
+    # 列表恰好在上限处结束时这一页为空，结果完整；否则返回的列表会缺少后面的条目，
+    # 调用方（如扫描）会把它当成完整列表，因此直接报错。
+    data = await api_func(f"{url}{sep}{per_page_param}={per_page}&page={max_pages + 1}", token)
+    if is_last(data):
+        return items
+    raise ListingTruncatedError(
+        f"列表超过 max_pages={max_pages} 页（每页 {per_page} 条），结果不完整: {url}"
+    )
+
+
 async def fetch_file_content(url: str, headers: Dict[str, str] = None) -> Optional[str]:
     """获取文件内容"""
     async with httpx.AsyncClient(timeout=30) as client:
@@ -172,8 +219,8 @@ async def get_github_branches(repo_url: str, token: str = None) -> List[str]:
     repo_info = parse_repository_url(repo_url, "github")
     owner, repo = repo_info['owner'], repo_info['repo']
     
-    branches_url = f"https://api.github.com/repos/{owner}/{repo}/branches?per_page=100"
-    branches_data = await github_api(branches_url, token)
+    branches_url = f"https://api.github.com/repos/{owner}/{repo}/branches"
+    branches_data = await fetch_all_pages(github_api, branches_url, token)
     
     return [b["name"] for b in branches_data]
 
@@ -188,7 +235,7 @@ async def get_gitea_branches(repo_url: str, token: str = None) -> List[str]:
     owner, repo = repo_info['owner'], repo_info['repo']
     
     branches_url = f"{base_url}/repos/{owner}/{repo}/branches"
-    branches_data = await gitea_api(branches_url, token)
+    branches_data = await fetch_all_pages(gitea_api, branches_url, token, per_page_param="limit", per_page=50)
     
     return [b["name"] for b in branches_data]
 
@@ -208,8 +255,8 @@ async def get_gitlab_branches(repo_url: str, token: str = None) -> List[str]:
     base_url = repo_info['base_url']
     project_path = quote(repo_info['project_path'], safe='')
     
-    branches_url = f"{base_url}/projects/{project_path}/repository/branches?per_page=100"
-    branches_data = await gitlab_api(branches_url, extracted_token)
+    branches_url = f"{base_url}/projects/{project_path}/repository/branches"
+    branches_data = await fetch_all_pages(gitlab_api, branches_url, extracted_token)
     
     return [b["name"] for b in branches_data]
 
@@ -255,8 +302,8 @@ async def get_gitlab_files(repo_url: str, branch: str, token: str = None, exclud
     project_path = quote(repo_info['project_path'], safe='')
     
     # 获取仓库文件树
-    tree_url = f"{base_url}/projects/{project_path}/repository/tree?ref={quote(branch)}&recursive=true&per_page=100"
-    tree_data = await gitlab_api(tree_url, extracted_token)
+    tree_url = f"{base_url}/projects/{project_path}/repository/tree?ref={quote(branch)}&recursive=true"
+    tree_data = await fetch_all_pages(gitlab_api, tree_url, extracted_token)
     
     files = []
     for item in tree_data:
@@ -418,6 +465,9 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
                             if try_branch != branch:
                                 print(f"⚠️ 分支 {branch} 不存在或无法访问，已降级到分支 {try_branch}")
                             break
+                    except ListingTruncatedError:
+                        # 分支存在但文件列表不完整：不降级到其他分支，直接让扫描失败
+                        raise
                     except Exception as e:
                         last_error = str(e)
                         print(f"⚠️ 获取分支 {try_branch} 失败: {last_error[:100]}")
