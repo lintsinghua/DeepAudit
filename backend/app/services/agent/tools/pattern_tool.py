@@ -155,7 +155,10 @@ class PatternMatchTool(AgentTool):
                     (r'system\s*\(\s*\$', "system变量"),
                     (r'passthru\s*\(\s*\$', "passthru变量"),
                     (r'shell_exec\s*\(\s*\$', "shell_exec变量"),
+                    (r'proc_open\s*\(\s*\$', "proc_open变量"),
+                    (r'popen\s*\(\s*\$', "popen变量"),
                     (r'`[^`]*\$[^`]*`', "反引号命令执行"),
+                    (r'preg_replace\s*\(\s*["\'][^"\']*e["\']', "preg_replace /e修饰符"),
                 ],
                 "java": [
                     (r'Runtime\.getRuntime\(\)\.exec\s*\([^)]+\+', "Runtime.exec拼接"),
@@ -244,10 +247,27 @@ class PatternMatchTool(AgentTool):
                 ],
                 "php": [
                     (r'unserialize\s*\(\s*\$', "unserialize用户输入"),
+                    (r'unserialize\s*\(\s*\$_', "反序列化超全局变量"),
                 ],
             },
             "severity": "critical",
             "description": "不安全的反序列化：可能导致远程代码执行",
+        },
+        
+        # PHP 弱类型比较 (type juggling)
+        "type_juggling": {
+            "patterns": {
+                "php": [
+                    (r'(?:md5|sha1|hash)\s*\([^)]*\)\s*==', "哈希使用==弱比较"),
+                    (r'==\s*["\']0["\']', "与 '0' 弱类型比较"),
+                    (r'strcmp\s*\(', "strcmp弱比较(数组绕过)"),
+                    (r'(!==)\s*0', "神奇哈希 '0e...' 判定"),
+                    (r'in_array\s*\([^)]*\)\s*(?!.*,\s*true)', "in_array未开启严格模式"),
+                ],
+            },
+            "severity": "medium",
+            "description": "PHP 松脆比较(type juggling)漏洞：== 弱比较可能被 '0'=='abc'、'0e...' 等规则绕过，敏感值应使用 === 或 hash_equals",
+            "cwe_id": "CWE-843",
         },
         
         # 硬编码密钥

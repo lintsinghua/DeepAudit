@@ -202,3 +202,83 @@ export function debounce<T extends (...args: unknown[]) => unknown>(
     timeout = setTimeout(() => func(...args), wait);
   };
 }
+
+/**
+ * 获取日志中出现的所有去重 Agent 名称（用于过滤下拉）
+ * Exclude dashes empty. 按名称排序
+ */
+export function getDistinctAgentNames(logs: LogItem[]): string[] {
+  const names = new Set<string>();
+  logs.forEach(log => {
+    if (log.agentName && log.agentName.trim()) {
+      names.add(log.agentName.trim());
+    }
+  });
+  return Array.from(names).sort((a, b) => a.localeCompare(b, 'zh'));
+}
+
+/**
+ * 将日志列表导出为 JSON 字符串
+ */
+export function exportLogsAsJSON(logs: LogItem[]): string {
+  return JSON.stringify(logs, null, 2);
+}
+
+/**
+ * 将日志列表导出为 Markdown 字符串（M4 新增）
+ */
+export function exportLogsAsMarkdown(logs: LogItem[], taskId?: string): string {
+  const lines: string[] = [];
+  lines.push(`# Agent Audit Log`);
+  lines.push(``);
+  if (taskId) {
+    lines.push(`> **Task:** \`${taskId}\``);
+  }
+  lines.push(`> **Exported:** ${new Date().toISOString()}`);
+  lines.push(`> **Entries:** ${logs.length}`);
+  lines.push(``);
+  lines.push(`---`);
+  lines.push(``);
+
+  if (logs.length === 0) {
+    lines.push(`_No log entries._`);
+    lines.push(``);
+    return lines.join('\n');
+  }
+
+  logs.forEach((log, idx) => {
+    const parts: string[] = [`[${log.time || ''}]`, `\`${log.type.toUpperCase()}\``];
+    if (log.agentName) parts.push(`**Agent:** ${log.agentName}`);
+    if (log.severity) parts.push(`**Severity:** ${log.severity}`);
+    if (log.tool?.name) parts.push(`**Tool:** ${log.tool.name}`);
+
+    lines.push(`### ${idx + 1}. ${parts.join(' · ')}`);
+    lines.push(``);
+    lines.push(`**${log.title || ''}**`);
+    lines.push(``);
+
+    if (log.content) {
+      lines.push(`\`\`\`text`);
+      lines.push(log.content);
+      lines.push(`\`\`\``);
+      lines.push(``);
+    }
+  });
+
+  return lines.join('\n');
+}
+
+/**
+ * 触发浏览器下载文本文件
+ */
+export function downloadTextFile(filename: string, content: string, mime: string): void {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}

@@ -45,6 +45,18 @@ Statement stmt = conn.createStatement();
 stmt.executeQuery(query);
 ```
 
+### PHP
+```php
+// 危险 - 字符串拼接
+$sql = "SELECT * FROM users WHERE id = " . $_GET['id'];
+mysqli_query($conn, "SELECT * FROM users WHERE name = '" . $_POST['name'] . "'");
+mysql_query("SELECT * FROM users WHERE id = $id");
+
+// 危险 - PDO/ORM 原始查询拼接
+$stmt = $pdo->query("SELECT * FROM users WHERE id = " . $id);
+$rows = DB::select("SELECT * FROM users WHERE id = " . $id);   // Laravel
+```
+
 ## 检测关键词
 - execute, query, raw, cursor
 - SELECT, INSERT, UPDATE, DELETE
@@ -68,6 +80,22 @@ User.objects.filter(id=user_id)
 
 # 安全 - SQLAlchemy
 db.query(User).filter(User.id == user_id)
+```
+
+### PHP
+```php
+// 安全 - PDO 预处理
+$stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
+$stmt->execute([$_GET['id']]);
+
+// 安全 - mysqli 预处理
+$stmt = $conn->prepare("SELECT * FROM users WHERE id = ?");
+$stmt->bind_param("i", $userId);
+$stmt->execute();
+
+// 安全 - Laravel 查询构造器/ORM
+$user = DB::table('users')->where('id', $id)->first();
+$user = User::find($id);
 ```
 
 ## 验证方法

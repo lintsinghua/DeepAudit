@@ -230,18 +230,20 @@ async def update_issue(
     return issue
 
 
-@router.get("/{id}/report/pdf")
-async def export_task_report_pdf(
+@router.get("/{id}/report")
+async def export_task_report(
     id: str,
+    format: str = "pdf",
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """
-    Export task audit report as PDF.
+    Export task audit report in multiple formats (pdf/markdown/html/json).
+    Keeps the legacy `/report/pdf` route as an alias.
     """
     from fastapi.responses import Response
     from app.services.report_generator import ReportGenerator
-    
+
     # 获取任务
     result = await db.execute(
         select(AuditTask)
@@ -251,11 +253,11 @@ async def export_task_report_pdf(
     task = result.scalars().first()
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
-    
+
     # 检查权限
     if task.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="无权导出此任务报告")
-    
+
     # 获取问题列表
     issues_result = await db.execute(
         select(AuditIssue)
@@ -263,8 +265,7 @@ async def export_task_report_pdf(
         .order_by(AuditIssue.severity.desc(), AuditIssue.created_at.desc())
     )
     issues = issues_result.scalars().all()
-    
-    # 转换为字典
+
     task_dict = {
         'id': task.id,
         'status': task.status,
@@ -277,7 +278,7 @@ async def export_task_report_pdf(
         'created_at': task.created_at.isoformat() if task.created_at else None,
         'completed_at': task.completed_at.isoformat() if task.completed_at else None,
     }
-    
+
     issues_list = [
         {
             'title': issue.title,
@@ -292,18 +293,42 @@ async def export_task_report_pdf(
         }
         for issue in issues
     ]
-    
+
     project_name = task.project.name if task.project else "Unknown Project"
-    
-    # 生成 PDF
-    pdf_bytes = ReportGenerator.generate_task_report(task_dict, issues_list, project_name)
-    
-    # 返回 PDF 文件
-    filename = f"audit-report-{task.id[:8]}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
+
+    # 规整格式，非法格式抛出 400
+    try:
+        fmt = ReportGenerator._normalize_format(format)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    data = ReportGenerator.generate_task_report(task_dict, issues_list, project_name, fmt)
+
+    media_types = {
+        'pdf': 'application/pdf',
+        'markdown': 'text/markdown; charset=utf-8',
+        'html': 'text/html; charset=utf-8',
+        'json': 'application/json; charset=utf-8',
+    }
+    extensions = {'pdf': 'pdf', 'markdown': 'md', 'html': 'html', 'json': 'json'}
+
+    filename = f"audit-report-{task.id[:8]}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.{extensions[fmt]}"
     return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
+        content=data,
+        media_type=media_types[fmt],
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"'
         }
     )
+
+
+@router.get("/{id}/report/pdf")
+async def export_task_report_pdf(
+    id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """
+    Export task audit report as PDF (legacy alias for compatibility).
+    """
+    return await export_task_report(id=id, format="pdf", db=db, current_user=current_user)

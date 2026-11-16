@@ -59,11 +59,33 @@ export async function exportToJSON(task: AuditTask, issues: AuditIssue[]) {
 // 导出任务审计报告 PDF（后端生成）
 export async function exportToPDF(task: AuditTask, _issues: AuditIssue[]) {
     try {
-        const blob = await api.exportTaskReportPDF(task.id);
+        const blob = await api.exportTaskReport(task.id, "pdf");
         downloadBlob(blob, `audit-report-${task.id.slice(0, 8)}-${Date.now()}.pdf`);
     } catch (error) {
         console.error('Failed to export PDF:', error);
         throw new Error('PDF 导出失败，请稍后重试');
+    }
+}
+
+// 导出任务审计报告 Markdown（后端生成）
+export async function exportToMarkdown(task: AuditTask, _issues: AuditIssue[]) {
+    try {
+        const blob = await api.exportTaskReport(task.id, "markdown");
+        downloadBlob(blob, `audit-report-${task.id.slice(0, 8)}-${Date.now()}.md`);
+    } catch (error) {
+        console.error('Failed to export Markdown:', error);
+        throw new Error('Markdown 导出失败，请稍后重试');
+    }
+}
+
+// 导出任务审计报告 HTML（后端生成）
+export async function exportToHTML(task: AuditTask, _issues: AuditIssue[]) {
+    try {
+        const blob = await api.exportTaskReport(task.id, "html");
+        downloadBlob(blob, `audit-report-${task.id.slice(0, 8)}-${Date.now()}.html`);
+    } catch (error) {
+        console.error('Failed to export HTML:', error);
+        throw new Error('HTML 导出失败，请稍后重试');
     }
 }
 
