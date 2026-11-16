@@ -30,7 +30,7 @@ SKIP_DIRS = {".yasa", ".codegraph", "node_modules", ".git"}
 MAX_OUT = 8000
 ENTRY_KEYS = ("route", "method", "handler_file", "handler", "handler_line", "auth", "exposure", "declared_at",
               "kind")
-EXPOSURES = ("public", "authenticated", "privileged", "unknown")
+EXPOSURES = ("public", "authenticated", "privileged", "operator", "unknown")
 FINDING_REQUIRED = ("vuln_type", "cwe", "sink_file", "sink_line", "source", "entry", "required_privilege", "verdict",
                     "route_evidence", "impact")
 

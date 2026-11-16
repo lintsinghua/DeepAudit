@@ -71,6 +71,7 @@ class AuditConfig:
     reconcile_budget: int = 20  # tool calls of the access agent to settle disagreements with the surface
     assets_budget: int = 40  # tool calls of the sensitive-asset agent (runs in parallel with the surface agent)
     design_budget: int = 36  # tool calls per identity design-review unit
+    component_budget: int = 40  # tool calls per component unit (the entries of one file, side by side)
     design_units_max: int = 10  # identity design units (a large subsystem counts once per part), at most
     operation_every: int = 3  # every n-th review slot goes to an operation unit while both kinds are left
     workers: int = 16  # review units in parallel (a unit spends most of its time in tools, not the LLM)

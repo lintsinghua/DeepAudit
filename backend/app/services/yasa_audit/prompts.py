@@ -37,7 +37,9 @@ There is no list of frameworks to pick from. Work it out from this project's own
    line where it starts), what the declaration says about access (auth), and exposure = the LEAST
    privileged principal that can call it: public (anyone, no login), authenticated (any logged-in user or
    token, whatever their role), privileged (only roles an ordinary user cannot obtain: a global admin, a
-   permission an operator grants), unknown. A role held for one object (admin or owner of a team,
+   permission an operator grants), operator (only someone with shell or deployment access on the server:
+   CLI commands, cron or scheduled jobs, deployment scripts; trusted input unless the product context says
+   otherwise), unknown. A role held for one object (admin or owner of a team,
    organization, project or workspace) is not privileged: an ordinary user can create such an object or be
    made its admin, so an entry such a role can call is authenticated.
    A route must be concrete (a path or a path pattern); resolve placeholders such as group or version
@@ -406,7 +408,42 @@ def verify_prompt(budget: int, deploy: str = "", product: str = "", access_model
                          access_model=_access_model_text(access_model))
 
 
-REVIEW_MODES = {"entry": REVIEW, "operation": OPERATION_REVIEW, "design": DESIGN_REVIEW, "lead": LEAD_REVIEW}
+COMPONENT_REVIEW = """You are an application-security reviewer. You review ONE component of the project at the root: the
+entry points one file serves, side by side. The unit gives a table, one row per entry, computed from the
+code: the checks the entry's code makes (calls whose names check, verify, require or grant, and the
+project's own guard calls from the access model; in the handler and in the same-file helpers it calls),
+the sensitive operations in it, and who can call it. The table covers every entry; your job is to judge it
+and to trace what it cannot show.
+{untrusted}
+
+""" + _ACCESS_BLOCK + """
+
+Method:
+1. What applies to every row: read the file's constructor or init hook, its base class and how the
+   dispatcher reaches these methods. A check made there protects all rows; a check the dispatcher makes
+   only for some (by name, by HTTP method, by an annotation) protects only those.
+2. Read the rows as siblings. For each entry, what it does (reads, changes or exposes which data, of which
+   object, for whom) and the check it needs under the access model. Mark the rows whose check is missing,
+   weaker than what the entry does (a write checked only for read access), weaker than siblings that do
+   the same kind of thing, made on a different object than the one acted on (access checked for one
+   site, team or account while an object is loaded by an id that may belong to another), or made only on
+   some branches or after the effect. A difference that the access model's designed powers explain is not
+   a flaw.
+3. Trace each marked row in the code to a confirmed path or a rejection with evidence; record_card for
+   each (function: that entry's handler; least_privileged_caller), with the hypothesis anchored at the
+   operation or at the missing check. report_finding for each one traced to its effect (entry: that row's
+   request).
+4. Then the rows that store, query, render, fetch or write request values (their operations column):
+   the risks there (injection, stored markup, paths, outbound requests, mass assignment) as in any entry
+   review, as far as your budget allows. A row you could not finish stays an open hypothesis with what is
+   left to read: it is followed up in a fresh context.
+5. add_fact for what applies to the whole component (others rely on it), and finish.
+
+""" + _REPORTING
+
+
+REVIEW_MODES = {"entry": REVIEW, "operation": OPERATION_REVIEW, "design": DESIGN_REVIEW, "lead": LEAD_REVIEW,
+                "component": COMPONENT_REVIEW}
 
 
 def review_prompt(budget: int, deploy: str = "", product: str = "", surface_notes: str = "",

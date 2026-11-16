@@ -26,9 +26,10 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from . import assets as assets_map
+from . import components
 from .agent_loop import run_agent
 from .config import AuditConfig
 from .discovery import codegraph_db, codegraph_routes, snapshot_codegraph
@@ -38,7 +39,7 @@ from .toolbox import EXPOSURES, FactBook, IssueBoard, Toolbox, tool_schemas
 
 MIN_UNIT_S = 60  # do not start a unit with less time left than this
 SKIP_PARTS = {"node_modules", ".git", ".yasa", ".codegraph", "vendor", "venv", ".venv", "__pycache__"}
-EXPOSURE_RANK = {"public": 0, "unknown": 1, "authenticated": 2, "privileged": 3}
+EXPOSURE_RANK = {"public": 0, "unknown": 1, "authenticated": 2, "privileged": 3, "operator": 4}
 PEERS_MAX = 12
 
 
@@ -763,9 +764,11 @@ class _Shared:
         self.facts, self.issues, self.coverage = FactBook(root), IssueBoard(), assets_map.Coverage()
         self.leads = assets_map.LeadBoard()
         self.reach = assets_map.Reach(root, entries)
-        self.systems = {k: review_prompt(cfg.review_budget if k != "design" else cfg.design_budget, deploy,
+        self.vocab = components.guard_vocabulary(access_model)
+        self.systems = {k: review_prompt({"design": cfg.design_budget, "component": cfg.component_budget}.get(
+                                             k, cfg.review_budget), deploy,
                                          product, surface_notes, access_model, k)
-                        for k in ("entry", "operation", "design", "lead")}
+                        for k in ("entry", "operation", "design", "lead", "component")}
         self.known = {(str(e.get("method") or "GET").upper(), str(e.get("route"))): e for e in entries}
         self.recipes = {r["name"]: r for r in assets.get("recipes") or []}
         self.guarded: dict[str, list[dict]] = collections.defaultdict(list)  # recipe -> sites with its guard
@@ -806,8 +809,16 @@ def _unit_view(root: Path, unit: dict, sh: _Shared) -> tuple[str, str, str]:
         return f"design:{unit['handler']}", assets_map.design_brief(unit), ""
     if kind == "lead":
         return f"lead:{unit['handler']}", assets_map.lead_brief(unit), ""
+    if kind == "component":
+        index = sh.reach.get()[0]
+        rows = [components.guard_row(index, e, unit.get("operations") or [], sh.vocab) for e in unit["entries"]]
+        return f"comp:{unit['part']}", components.brief(unit, rows), ""
     return (",".join(e["id"] for e in unit["entries"][:5]), _entry_brief(root, unit, sh.entries, sh.guarded),
             _handler_snippet(root, unit))
+
+
+def _tail_name(handler: Any) -> str:
+    return re.split(r"::|->|\\|\.|#|@", str(handler or ""))[-1] or "\0"
 
 
 _SNIPPET_SPAN: Final = re.compile(r"^(\S+) lines (\d+)-(\d+) of ")
@@ -825,11 +836,11 @@ def _review_unit(cfg: AuditConfig, root: Path, out: Path, unit: dict, sh: _Share
     tb = Toolbox(cfg, root, out, facts=sh.facts, unit=uid, issues=sh.issues)
     tb.resolver_code, tb.known_entries, tb.coverage = sh.resolver, sh.known, sh.coverage
     tb.reach = sh.reach
-    if kind == "entry":  # what an entry reviewer reads counts as reviewed for the operations in it
+    if kind in ("entry", "component"):  # what an entry reviewer reads counts as reviewed for its operations
         tb.records_reads = True
         if (shown := _SNIPPET_SPAN.match(code)) is not None:
             sh.coverage.read(uid, shown.group(1), int(shown.group(2)), int(shown.group(3)))
-    budget = cfg.review_budget
+    budget = cfg.component_budget if kind == "component" else cfg.review_budget
     if kind == "design":
         budget = cfg.design_budget
         left = lambda t: [k for k in assets_map.IDENTITY_CHECKLIST if k not in t.design]  # noqa: E731
@@ -854,6 +865,12 @@ def _review_unit(cfg: AuditConfig, root: Path, out: Path, unit: dict, sh: _Share
         f"lead:{unit['handler']}" if kind == "lead" else f"{unit['handler_file']}::{unit['handler']}"
     for x in tb.findings + tb.cards:
         x["entries"], x["handler"], x["unit_kind"] = ids, where, kind
+        if kind == "component":  # the entries of the row it is about, when it names one
+            said = f"{x.get('function') or ''} {x.get('entry') or ''}"
+            mine = [e["id"] for e in unit["entries"] if re.search(
+                rf"\b{re.escape(_tail_name(e.get('handler')))}\b", said) or str(e.get("route")) in said]
+            if mine:
+                x["entries"] = mine
     out_extra: dict = {}
     if kind == "design":
         g = unit["subsystem"]
@@ -862,7 +879,7 @@ def _review_unit(cfg: AuditConfig, root: Path, out: Path, unit: dict, sh: _Share
                                 "files": g["files"], "settings": g["settings"], "complete": not left(tb),
                                 "items": answers}]
         out_extra["followups"] = assets_map.follow_ups(unit, answers, reported=bool(tb.findings))
-    if kind in ("entry", "operation"):  # what this review left open is settled next, in a fresh context
+    if kind in ("entry", "operation", "component"):  # what this review left open is settled next, afresh
         out_extra["followups"] = sh.leads.follow_ups(unit, tb.cards)
     if kind == "lead" and "answer" in unit:
         out_extra["lead_of"] = {"unit": unit["handler"].rsplit(": ", 1)[0], "item": unit["answer"]["item"],
@@ -900,9 +917,16 @@ def review(cfg: AuditConfig, root: Path, out: Path, entries: list[dict], deploy:
     out.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
     assets = assets or {}
-    units = [{**u, "kind": "entry"} for u in _units(entries)]
+    # entries only an operator can invoke (CLI, scheduled jobs) are trusted input: no unit of their own; a
+    # value they read that a web user wrote is reached backward by the operation units
+    trusted = [e["id"] for e in entries if e.get("exposure") == "operator"]
+    units = [{**u, "kind": "entry"} for u in _units([e for e in entries if e.get("exposure") != "operator"])]
     sites = assets.get("sites") or []
     ops = assets_map.operation_units(sites, entries, units, EXPOSURE_RANK)
+    # siblings side by side: files with many authenticated or privileged entries become component units
+    units, comps = components.component_units(units, EXPOSURE_RANK)
+    units = sorted(units + comps, key=lambda u: (EXPOSURE_RANK.get(u.get("exposure", "unknown"), 1),
+                                                 u["kind"] != "component"))
     designs = assets_map.design_units(assets.get("identity") or [], entries, sites, cfg.design_units_max)
     order = designs + assets_map.interleave(units, ops, cfg.operation_every)
     sh = _Shared(cfg, root, entries, deploy, product, surface_notes, access_model, resolver, assets, deadline)
@@ -920,7 +944,7 @@ def review(cfg: AuditConfig, root: Path, out: Path, entries: list[dict], deploy:
     left = collections.defaultdict(list)
     for u in skipped:
         left[u.get("kind", "entry")].append(u)
-    not_reviewed = [e["id"] for u in left["entry"] for e in u["entries"]]
+    not_reviewed = [e["id"] for k in ("entry", "component") for u in left[k] for e in u["entries"]]
     # Suspicions a reviewer could not verify within its budget: kept apart from findings, for follow-up.
     open_leads = [{"entries": c.get("entries"), "handler": c.get("handler"), "lead": str(lead)[:500]}
                   for c in cards for lead in (c.get("open_leads") or []) if str(lead).strip()]
@@ -936,6 +960,9 @@ def review(cfg: AuditConfig, root: Path, out: Path, entries: list[dict], deploy:
     kinds = collections.Counter(r.get("kind", "entry") for r in results if not r.get("covered"))
     m = {"stage": "review", "entries": len(entries), "units": len(units), "reviewed_units": kinds["entry"],
          "skipped_units": len(left["entry"]), "not_reviewed_entries": len(not_reviewed),
+         "component_units": len(comps), "reviewed_component_units": kinds["component"],
+         "operator_entries": len(trusted),
+         "entries_in_component_units": sum(len(c["entries"]) for c in comps),
          "operation_units": len(ops), "reviewed_operation_units": kinds["operation"],
          "operation_units_covered_by_entry_review": sum(1 for r in results if r.get("covered")),
          "design_units": len(designs), "reviewed_design_units": kinds["design"],
