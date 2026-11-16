@@ -29,6 +29,7 @@ const LLM_PROVIDERS = [
   { value: 'qwen', label: '通义千问', icon: '🟠', category: 'litellm', hint: 'qwen3-max-instruct, qwen3-plus 等' },
   { value: 'zhipu', label: '智谱AI (GLM)', icon: '🔴', category: 'litellm', hint: 'glm-4.6, glm-4.5-flash 等' },
   { value: 'moonshot', label: 'Moonshot (Kimi)', icon: '🌙', category: 'litellm', hint: 'kimi-k2, kimi-k1.5 等' },
+  { value: 'atlascloud', label: 'Atlas Cloud', icon: '☁️', category: 'litellm', hint: 'deepseek-ai/DeepSeek-V3.1-Terminus, zai-org/glm-4.7 等' },
   { value: 'ollama', label: 'Ollama 本地', icon: '🖥️', category: 'litellm', hint: 'llama3.3-70b, qwen3-8b 等' },
   { value: 'baidu', label: '百度文心', icon: '📘', category: 'native', hint: 'ernie-4.5 (需要 API_KEY:SECRET_KEY)' },
   { value: 'minimax', label: 'MiniMax', icon: '⚡', category: 'native', hint: 'minimax-m2, minimax-m1 等' },
@@ -38,6 +39,7 @@ const LLM_PROVIDERS = [
 const DEFAULT_MODELS: Record<string, string> = {
   openai: 'gpt-5', claude: 'claude-sonnet-4.5', gemini: 'gemini-3-pro',
   deepseek: 'deepseek-v3.1-terminus', qwen: 'qwen3-max-instruct', zhipu: 'glm-4.6', moonshot: 'kimi-k2',
+  atlascloud: 'deepseek-ai/DeepSeek-V3.1-Terminus',
   ollama: 'llama3.3-70b', baidu: 'ernie-4.5', minimax: 'minimax-m2', doubao: 'doubao-1.6-pro',
 };
 

@@ -396,7 +396,7 @@ async def get_user_config_dict(db: AsyncSession, user_id: str) -> dict:
     # 需要解密的敏感字段列表（与 config.py 保持一致）
     SENSITIVE_LLM_FIELDS = [
         'llmApiKey', 'geminiApiKey', 'openaiApiKey', 'claudeApiKey',
-        'qwenApiKey', 'deepseekApiKey', 'zhipuApiKey', 'moonshotApiKey',
+        'qwenApiKey', 'deepseekApiKey', 'zhipuApiKey', 'moonshotApiKey', 'atlascloudApiKey',
         'baiduApiKey', 'minimaxApiKey', 'doubaoApiKey'
     ]
     SENSITIVE_OTHER_FIELDS = ['githubToken', 'gitlabToken']

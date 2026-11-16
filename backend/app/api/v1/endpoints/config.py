@@ -22,6 +22,7 @@ router = APIRouter()
 SENSITIVE_LLM_FIELDS = [
     'llmApiKey', 'geminiApiKey', 'openaiApiKey', 'claudeApiKey',
     'qwenApiKey', 'deepseekApiKey', 'zhipuApiKey', 'moonshotApiKey',
+    'atlascloudApiKey',
     'baiduApiKey', 'minimaxApiKey', 'doubaoApiKey'
 ]
 SENSITIVE_OTHER_FIELDS = ['githubToken', 'gitlabToken']
@@ -71,6 +72,7 @@ class LLMConfigSchema(BaseModel):
     deepseekApiKey: Optional[str] = None
     zhipuApiKey: Optional[str] = None
     moonshotApiKey: Optional[str] = None
+    atlascloudApiKey: Optional[str] = None
     baiduApiKey: Optional[str] = None
     minimaxApiKey: Optional[str] = None
     doubaoApiKey: Optional[str] = None
@@ -132,6 +134,7 @@ def get_default_config() -> dict:
             "deepseekApiKey": settings.DEEPSEEK_API_KEY or "",
             "zhipuApiKey": settings.ZHIPU_API_KEY or "",
             "moonshotApiKey": settings.MOONSHOT_API_KEY or "",
+            "atlascloudApiKey": settings.ATLASCLOUD_API_KEY or "",
             "baiduApiKey": settings.BAIDU_API_KEY or "",
             "minimaxApiKey": settings.MINIMAX_API_KEY or "",
             "doubaoApiKey": settings.DOUBAO_API_KEY or "",
@@ -383,6 +386,7 @@ async def test_llm_connection(
             'deepseek': LLMProvider.DEEPSEEK,
             'zhipu': LLMProvider.ZHIPU,
             'moonshot': LLMProvider.MOONSHOT,
+            'atlascloud': LLMProvider.ATLASCLOUD,
             'baidu': LLMProvider.BAIDU,
             'minimax': LLMProvider.MINIMAX,
             'doubao': LLMProvider.DOUBAO,
