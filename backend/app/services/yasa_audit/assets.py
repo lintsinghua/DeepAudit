@@ -90,7 +90,11 @@ IDENTITY_CHECKLIST: dict[str, str] = {
     "record_claiming": "Can an existing record that is not an active, credentialed account (deactivated, "
                        "guest, pending, invited, imported, soft-deleted, unverified) be claimed by "
                        "registration, login, SSO or recovery, and what does the claimant inherit (groups, "
-                       "roles, data, history)?",
+                       "roles, data, history)? Answer for the whole time the record stays unclaimed, not only "
+                       "at its creation: who besides the intended person holds or can obtain what claims it "
+                       "(the inviter or an admin who can re-issue or read the link or code, whoever can change "
+                       "the address it goes to), and can other principals add roles, groups or access to the "
+                       "record meanwhile, which that claimant then inherits?",
     "token_lifecycle": "For each secret the subsystem issues (reset codes, activation and invitation links, "
                        "API or access tokens, remember-me, sessions, MFA codes): does it expire, is it "
                        "single-use, bound to the account and purpose, stored hashed, compared in constant "
