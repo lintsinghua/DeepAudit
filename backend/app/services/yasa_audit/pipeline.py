@@ -765,10 +765,11 @@ class _Shared:
         self.leads = assets_map.LeadBoard()
         self.reach = assets_map.Reach(root, entries)
         self.vocab = components.guard_vocabulary(access_model)
-        self.systems = {k: review_prompt({"design": cfg.design_budget, "component": cfg.component_budget}.get(
+        self.systems = {k: review_prompt({"design": cfg.design_budget, "component": cfg.component_budget,
+                                          "optable": cfg.component_budget}.get(
                                              k, cfg.review_budget), deploy,
                                          product, surface_notes, access_model, k)
-                        for k in ("entry", "operation", "design", "lead", "component")}
+                        for k in ("entry", "operation", "design", "lead", "component", "optable")}
         self.known = {(str(e.get("method") or "GET").upper(), str(e.get("route"))): e for e in entries}
         self.recipes = {r["name"]: r for r in assets.get("recipes") or []}
         self.guarded: dict[str, list[dict]] = collections.defaultdict(list)  # recipe -> sites with its guard
@@ -809,6 +810,10 @@ def _unit_view(root: Path, unit: dict, sh: _Shared) -> tuple[str, str, str]:
         return f"design:{unit['handler']}", assets_map.design_brief(unit), ""
     if kind == "lead":
         return f"lead:{unit['handler']}", assets_map.lead_brief(unit), ""
+    if kind == "optable":
+        cls = unit["op_class"]
+        return (f"ops:{unit['part']}", components.table_brief(unit, sh.recipes.get(unit["recipe"]),
+                                                             assets_map.OP_CLASSES.get(cls, cls)), "")
     if kind == "component":
         index = sh.reach.get()[0]
         rows = [components.guard_row(index, e, unit.get("operations") or [], sh.vocab) for e in unit["entries"]]
@@ -840,7 +845,7 @@ def _review_unit(cfg: AuditConfig, root: Path, out: Path, unit: dict, sh: _Share
         tb.records_reads = True
         if (shown := _SNIPPET_SPAN.match(code)) is not None:
             sh.coverage.read(uid, shown.group(1), int(shown.group(2)), int(shown.group(3)))
-    budget = cfg.component_budget if kind == "component" else cfg.review_budget
+    budget = cfg.component_budget if kind in ("component", "optable") else cfg.review_budget
     if kind == "design":
         budget = cfg.design_budget
         left = lambda t: [k for k in assets_map.IDENTITY_CHECKLIST if k not in t.design]  # noqa: E731
@@ -879,7 +884,7 @@ def _review_unit(cfg: AuditConfig, root: Path, out: Path, unit: dict, sh: _Share
                                 "files": g["files"], "settings": g["settings"], "complete": not left(tb),
                                 "items": answers}]
         out_extra["followups"] = assets_map.follow_ups(unit, answers, reported=bool(tb.findings))
-    if kind in ("entry", "operation", "component"):  # what this review left open is settled next, afresh
+    if kind in ("entry", "operation", "component", "optable"):  # left open: settled next, afresh
         out_extra["followups"] = sh.leads.follow_ups(unit, tb.cards)
     if kind == "lead" and "answer" in unit:
         out_extra["lead_of"] = {"unit": unit["handler"].rsplit(": ", 1)[0], "item": unit["answer"]["item"],
@@ -927,8 +932,10 @@ def review(cfg: AuditConfig, root: Path, out: Path, entries: list[dict], deploy:
     units, comps = components.component_units(units, EXPOSURE_RANK)
     units = sorted(units + comps, key=lambda u: (EXPOSURE_RANK.get(u.get("exposure", "unknown"), 1),
                                                  u["kind"] != "component"))
+    # one kind of operation across the project, side by side: a table unit per recipe
+    ops, tables = components.operation_tables(ops, EXPOSURE_RANK)
     designs = assets_map.design_units(assets.get("identity") or [], entries, sites, cfg.design_units_max)
-    order = designs + assets_map.interleave(units, ops, cfg.operation_every)
+    order = designs + assets_map.interleave(units, tables + ops, cfg.operation_every)
     sh = _Shared(cfg, root, entries, deploy, product, surface_notes, access_model, resolver, assets, deadline)
     results, skipped = _schedule(order, lambda i, u: _review_unit(cfg, root, out / f"unit-{i:04d}", u, sh),
                                  cfg.workers, deadline, cfg.stopped)
@@ -951,7 +958,8 @@ def review(cfg: AuditConfig, root: Path, out: Path, entries: list[dict], deploy:
     (out / "findings.json").write_text(json.dumps({
         "findings": findings, "open_leads": open_leads, "design_worksheet": worksheet,
         "not_reviewed": not_reviewed,
-        "not_reviewed_operations": [assets_map.site_key(x) for u in left["operation"] for x in u["sites"]],
+        "not_reviewed_operations": [assets_map.site_key(x) for k in ("operation", "optable") for u in left[k]
+                                    for x in u["sites"]],
         "not_reviewed_design": [u["handler"] for u in left["design"]]}, indent=1, ensure_ascii=False))
     (out / "cards.json").write_text(json.dumps(cards, indent=1, ensure_ascii=False))
     (out / "facts.json").write_text(json.dumps(sh.facts.facts, indent=1, ensure_ascii=False))
@@ -962,6 +970,7 @@ def review(cfg: AuditConfig, root: Path, out: Path, entries: list[dict], deploy:
          "skipped_units": len(left["entry"]), "not_reviewed_entries": len(not_reviewed),
          "component_units": len(comps), "reviewed_component_units": kinds["component"],
          "operator_entries": len(trusted),
+         "operation_table_units": len(tables), "reviewed_operation_table_units": kinds["optable"],
          "entries_in_component_units": sum(len(c["entries"]) for c in comps),
          "operation_units": len(ops), "reviewed_operation_units": kinds["operation"],
          "operation_units_covered_by_entry_review": sum(1 for r in results if r.get("covered")),

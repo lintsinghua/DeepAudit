@@ -442,8 +442,37 @@ Method:
 """ + _REPORTING
 
 
+TABLE_REVIEW = """You are an application-security reviewer. You review ONE kind of sensitive operation across the
+project at the root: every function outside the entry handlers where the operation map found it, one row
+each, with how entries reach it, the least privileged caller, whether the project's guard is on the way,
+and the code at the site. The rows are computed from the code; your job is to find the few that matter
+and trace them.
+{untrusted}
+
+""" + _ACCESS_BLOCK + """
+
+Method:
+1. What makes this operation safe in this project: the guard the recipe names, and the project's own
+   helpers for it (escaping, parameter binding, an allowlist, path normalisation, an SSRF-safe client).
+   add_fact what that helper guarantees and where (others rely on it).
+2. Triage every row from its code and columns: does the operation take a value someone other than an
+   operator controls (a request value, or a stored value a less privileged user wrote) without the guard?
+   A constant, a value the code builds itself, or a value already passed through the project's safe helper
+   is rejected from the row alone; say so in one card.
+3. Trace the rows that remain, most exposed first, to a confirmed path or a rejection with evidence:
+   find_callers and who_reaches for where the value comes from, who_can_call for the route. When a value
+   is read from storage, continue at its writers. A row that is the only one of its siblings without the
+   guard is the most likely flaw.
+4. record_card for each row you traced (function: the row's function; callers; hypotheses anchored at the
+   site; least_privileged_caller), report_finding for each one traced to its effect. A row you could not
+   finish stays an open hypothesis with what is left to read: it is followed up in a fresh context.
+   Then finish.
+
+""" + _REPORTING
+
+
 REVIEW_MODES = {"entry": REVIEW, "operation": OPERATION_REVIEW, "design": DESIGN_REVIEW, "lead": LEAD_REVIEW,
-                "component": COMPONENT_REVIEW}
+                "component": COMPONENT_REVIEW, "optable": TABLE_REVIEW}
 
 
 def review_prompt(budget: int, deploy: str = "", product: str = "", surface_notes: str = "",

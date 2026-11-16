@@ -109,3 +109,24 @@ def test_large_groups_are_split_without_splitting_a_file_that_fits():
              for f in range(3) for i in range(15)]  # 3 files x 15 entries, 40 rows per part
     _keep, comps = components.component_units(units, rank)
     assert [len(c["entries"]) for c in comps] == [30, 15] and comps[1]["files"] == ["p2/API.php"]
+
+
+def test_operation_units_become_one_table_per_recipe_with_hubs_and_small_recipes_kept():
+    rank = {"public": 0, "unknown": 1, "authenticated": 2, "privileged": 3}
+
+    def op(fn, recipe, exposure="authenticated", unguarded=False, hub=False):
+        site = {"file": "lib/x.php", "line": 10, "op_class": "raw_markup_output", "recipe": recipe,
+                "code": f"echo $v; // {fn}", **({"guard_at": None} if unguarded else {})}
+        return {"kind": "operation", "handler_file": "lib/x.php", "handler": fn, "span": (5, 20), "sites": [site],
+                "entries": [{"id": f"E-{fn}"}], "exposure": exposure, "reach": "entry", "unguarded": unguarded,
+                "hub": hub}
+    ops = [op(f"r{i}", "raw-echo", unguarded=i == 3) for i in range(5)]
+    ops += [op("q0", "query"), op("q1", "query")]          # too few for a table
+    ops += [op("db", "raw-echo", hub=True)]                 # shared infrastructure: its own contract unit
+    keep, tables = components.operation_tables(ops, rank)
+    assert len(tables) == 1 and tables[0]["kind"] == "optable" and len(tables[0]["rows"]) == 5
+    assert tables[0]["unguarded"] and tables[0]["recipe"] == "raw-echo"
+    assert sorted(u["handler"] for u in keep) == ["db", "q0", "q1"]
+    text = components.table_brief(tables[0], {"pattern": "echo", "guard": "escape\\(", "why": "templates"},
+                                  "writes data into HTML")
+    assert "the project's guard 'escape\\\\('" in text and "guard NOT on the way" in text and "L10: echo" in text

@@ -205,3 +205,59 @@ def brief(unit: dict, rows: list[dict]) -> str:
         out += ["", f"{len(no_guard)} of {len(rows)} rows make no check in their own code while their siblings do: "
                 "start with them, then the rows whose check is weaker than what they do."]
     return "\n".join(out)
+
+
+# ----------------------------------------------------------------- operation tables
+
+def operation_tables(ops: list[dict], rank: dict[str, int]) -> tuple[list[dict], list[dict]]:
+    """Operation units (one per function outside the handlers) grouped by the recipe that found them: one
+    kind of operation across the project, side by side, the most exposed and unguarded rows first (the
+    order operation_units gives). Shared infrastructure (hub units, reviewed for its contract) and recipes
+    with few functions stay operation units. Returns (operation units kept, table units)."""
+    keep = [u for u in ops if u.get("hub")]
+    groups: dict[str, list[dict]] = collections.defaultdict(list)
+    for u in ops:
+        if not u.get("hub"):
+            lead = next((s for s in u["sites"] if "guard_at" in s and not s["guard_at"]), u["sites"][0])
+            groups[str(lead.get("recipe"))].append(u)
+    tables: list[dict] = []
+    for recipe, us in groups.items():
+        if len(us) < COMPONENT_MIN:
+            keep += us
+            continue
+        parts = [us[i:i + COMPONENT_ROWS] for i in range(0, len(us), COMPONENT_ROWS)]
+        for n, part in enumerate(parts):
+            reached = {id(e): e for u in part for e in u["entries"]}
+            tables.append({"kind": "optable", "recipe": recipe, "op_class": part[0]["sites"][0]["op_class"],
+                           "handler_file": recipe, "part": f"{recipe}:{n + 1}/{len(parts)}",
+                           "handler": f"{len(part)} functions found by recipe {recipe}"
+                                      + (f", part {n + 1} of {len(parts)}" if len(parts) > 1 else ""),
+                           "rows": part, "sites": [s for u in part for s in u["sites"]],
+                           "entries": list(reached.values()),
+                           "exposure": min((u["exposure"] for u in part), key=lambda x: rank.get(x, 1)),
+                           "unguarded": any(u["unguarded"] for u in part)})
+    tables.sort(key=lambda t: (rank.get(t["exposure"], 1), not t["unguarded"], t["part"]))
+    keep.sort(key=lambda u: (rank.get(u["exposure"], 1), not u["unguarded"]))
+    return keep, tables
+
+
+def table_brief(unit: dict, recipe: dict | None, class_text: str) -> str:
+    """The user message of an operation-table unit."""
+    r = recipe or {}
+    out = [f"Operation to review across the project: class {unit['op_class']} ({class_text}).",
+           f"Recipe {unit['recipe']}: pattern {r.get('pattern', '?')!r}"
+           + (f", the project's guard {r['guard']!r}" if r.get("guard") else ", no guard pattern")
+           + (f". Why: {r['why']}" if r.get("why") else "."),
+           f"{len(unit['rows'])} functions perform it outside the entry handlers (the most exposed and "
+           "unguarded first). Each row: the function, how entries reach it and the least privileged caller, "
+           "whether the project's guard is on the way, and the code at each site.", ""]
+    for u in unit["rows"]:
+        ids = [e.get("id") for e in u["entries"][:4]]
+        more = f" +{len(u['entries']) - 4}" if len(u["entries"]) > 4 else ""
+        guard = "" if not any("guard_at" in s for s in u["sites"]) else \
+            "  guard NOT on the way" if u["unguarded"] else "  guarded"
+        out.append(f"- {u['handler_file']}::{u['handler']} L{u['span'][0]}-{u['span'][1]} reach={u['reach']} "
+                   f"[{u['exposure']}] entries {', '.join(map(str, ids)) or 'none'}{more}{guard}")
+        for s in u["sites"][:2]:
+            out.append(f"    L{s['line']}: {str(s.get('code') or '')[:140]}")
+    return "\n".join(out)
