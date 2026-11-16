@@ -1572,3 +1572,27 @@ def test_converge_union_matches_a_named_handler_whose_route_is_spelled_different
     _merge_run(merged, [{"route": "/index.php?module=Goals&action=manage&idSite={idSite}",
                          "handler_file": "plugins/Goals/Controller.php", "handler": "manage"}])
     assert len(merged) == 1
+
+
+def test_converge_unions_the_asset_maps_of_all_runs():
+    from app.services.yasa_audit.pipeline import _union_assets
+
+    run1 = {"recipes": [{"name": "outbound", "op_class": "outbound_request", "pattern": "Http::send"}],
+            "identity": [{"name": "mfa", "files": ["plugins/TwoFactorAuth/TwoFactorAuth.php"], "routes": [],
+                          "entry_ids": ["E1"], "site_keys": []}],
+            "absent": {"file_write": "searched", "bulk_field_assignment": "searched"}}
+    run2 = {"recipes": [{"name": "outbound", "op_class": "outbound_request", "pattern": "curl_exec"},
+                        {"name": "writes", "op_class": "file_write", "pattern": "file_put_contents"}],
+            "identity": [{"name": "two_factor_auth", "routes": ["TwoFactorAuth"],
+                          "files": ["plugins/TwoFactorAuth/TwoFactorAuth.php", "plugins/TwoFactorAuth/Controller.php"]},
+                         {"name": "user_invitation", "routes": ["acceptInvitation"],
+                          "files": ["plugins/Login/Controller.php", "plugins/UsersManager/API.php"]},
+                         {"name": "user_management", "routes": ["UsersManager"],
+                          "files": ["plugins/UsersManager/API.php", "plugins/UsersManager/Model.php"]}],
+            "absent": {}}
+    recipes, subsystems, absent = _union_assets([run1, run2])
+    assert sorted(recipes) == ["outbound", "outbound~2", "writes"]
+    assert [s["name"] for s in subsystems] == ["two_factor_auth", "user_invitation", "user_management"]
+    # mfa (run 1) is two_factor_auth (run 2); one run's overlapping subsystems stay apart
+    assert "entry_ids" not in subsystems[0]
+    assert absent == {"bulk_field_assignment": "searched"}  # file_write has a recipe in run 2

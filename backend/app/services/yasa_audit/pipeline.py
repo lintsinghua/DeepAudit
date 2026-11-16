@@ -989,6 +989,48 @@ def _merge_run(merged: dict, entries: list[dict]) -> set:
     return keys
 
 
+def _same_subsystem(a: dict, b: dict) -> bool:
+    """Two runs' records of one identity subsystem: the same name, or mostly the same files."""
+    fa, fb = set(a.get("files") or []), set(b.get("files") or [])
+    return a.get("name") == b.get("name") or bool(fa and fb and len(fa & fb) * 2 >= min(len(fa), len(fb)))
+
+
+def _union_assets(maps: list[dict]) -> tuple[dict, list[dict], dict]:
+    """Recipes, identity subsystems and absent classes of several runs' asset maps, as one agent's record.
+    Recipes are kept per run (a name two runs used for different patterns gets a suffix). Runs name the
+    same subsystem differently ('mfa', 'two_factor_auth'), so subsystems whose files mostly overlap are
+    one, the richer record kept. A class is absent only if no run has a recipe for it."""
+    recipes: dict[str, dict] = {}
+    subsystems: list[dict] = []
+    origin: list[int] = []  # which run each kept subsystem came from
+    absent: dict[str, str] = {}
+    for i, a in enumerate(maps):
+        for r in a.get("recipes") or []:
+            name = r.get("name") or f"recipe-{len(recipes) + 1}"
+            if name in recipes and recipes[name].get("pattern") != r.get("pattern"):
+                name = f"{name}~{i + 1}"
+            recipes.setdefault(name, {**r, "name": name})
+        # a run's own subsystems are kept apart as it recorded them; only another run's can be the same
+        taken: set[int] = set()
+        for s in a.get("identity") or []:
+            raw = {k: v for k, v in s.items() if k not in ("entry_ids", "site_keys")}
+            files = set(raw.get("files") or [])
+            same = next((j for j, o in enumerate(subsystems)
+                         if origin[j] != i and j not in taken and _same_subsystem(raw, o)), None)
+            size = len(files) + len(raw.get("routes") or [])
+            if same is None:
+                subsystems.append(raw)
+                origin.append(i)
+                taken.add(len(subsystems) - 1)
+            else:
+                taken.add(same)
+                if size > len(subsystems[same].get("files") or []) + len(subsystems[same].get("routes") or []):
+                    subsystems[same], origin[same] = raw, i
+        absent.update(a.get("absent") or {})
+    covered = {r.get("op_class") for r in recipes.values()}
+    return recipes, subsystems, {c: why for c, why in absent.items() if c not in covered}
+
+
 def _model_score(rec: dict) -> tuple:
     """How complete a recon's access model is, to choose which run's model and resolver lead the merge."""
     am = rec.get("access_model") or {}
@@ -1046,6 +1088,22 @@ def converge_recon(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", pr
         (out / "resolver.py").write_text(resolver_code)
     (out / "entries.json").write_text(json.dumps(entries, indent=1, ensure_ascii=False))
 
+    # the asset map (recipes, identity subsystems) of every run, expanded again against the union
+    maps = []
+    for i in range(len(recs)):
+        af = (out if i == 0 else out.parent / f"{out.name}-{i + 1}") / "assets.json"
+        if af.exists():
+            maps.append(json.loads(af.read_text()))
+    assets_summary = None
+    if maps:
+        recipes, subsystems, absent = _union_assets(maps)
+        try:
+            data = assets_map.build(tb, recipes, subsystems, absent, entries)
+            assets_map.dump(data, out / "assets.json")
+            assets_summary = data["summary"]
+        except Exception as e:  # keep the first run's map rather than none
+            assets_summary = {"error": f"{type(e).__name__}: {e}"}
+
     # capture-recapture: from the overlap of the two largest runs, estimate the true surface size (keys
     # as matched while merging; out/entries.json now holds the union, not the first run)
     estimate = None
@@ -1058,6 +1116,7 @@ def converge_recon(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", pr
     tok = lambda k: sum(r.get(k, 0) or 0 for r in recs)  # noqa: E731
     m.update({"entries": len(entries), "by_exposure": dict(collections.Counter(e["exposure"] for e in entries)),
               "resolved": sum(e["resolved"] for e in entries), "resolver": resolver,
+              **({"assets": assets_summary} if assets_summary is not None else {}),
               "converge": {"runs": len(recs), "growth": growth, "union": len(entries),
                            "primary_run": primary + 1, "estimated_surface": estimate},
               "prompt_tokens": tok("prompt_tokens"), "completion_tokens": tok("completion_tokens"),
