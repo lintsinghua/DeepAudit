@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.services.yasa_audit.assets import OP_CLASSES
+from app.services.yasa_audit.assets import IDENTITY_KINDS, OP_CLASSES
 from app.services.yasa_audit.config import AuditConfig
 from app.services.yasa_audit.toolbox import FactBook, Toolbox, tool_schemas
 
@@ -55,7 +55,7 @@ def _role(system):
 
 # The asset agent of a test project that has none of the operations: every class absent, no identity.
 ASSETS_NONE = [("class_absent", {"op_class": c, "reason": "not in this test project"}) for c in OP_CLASSES] + [
-    ("record_identity", {"subsystems": []}), ("finish", {})]
+    ("identity_absent", {"kind": k, "reason": "not in this test project"}) for k in IDENTITY_KINDS] + [("finish", {})]
 
 
 def _script(scripts, key):
@@ -1204,15 +1204,21 @@ def test_access_notes_reach_reviewers_when_no_model_was_recorded():
     assert text.startswith("(the access agent ran out of budget") and "canThis(...)" in text
 
 
-def test_access_model_requires_ladder_and_shared_protections(tmp_path):
+def test_access_model_is_recorded_in_parts_until_complete(tmp_path):
     _write(tmp_path, {"a.js": "x\n"})
     tb = Toolbox(AuditConfig(), tmp_path, tmp_path / "out")
+    assert tb.record_access_model().startswith("rejected: nothing recorded")
     base = {"authentication": "a", "authorization": "b", "permission_mapping": "c", "principals": "d",
             "evidence": [{"file": "a.js", "line": 1, "quote": "x"}]}
-    assert tb.record_access_model(**base) == "rejected: missing shared_protections, ladder"
-    assert tb.record_access_model(**base, shared_protections="s", ladder="anon < admin") == "rejected: missing ladder"
-    assert tb.record_access_model(**base, shared_protections="s", ladder=["anon", "admin"]) \
-        .startswith("access model recorded")
+    out = tb.record_access_model(**base)
+    assert "still to record" in out and "shared_protections, ladder" in out
+    assert tb.access_model["authentication"] == "a"  # kept: a later failure cannot lose it
+    out = tb.record_access_model(shared_protections="s", ladder="anon < admin")
+    assert "ladder must be a list" in out and tb.access_model["shared_protections"] == "s"
+    out = tb.record_access_model(ladder=["anon", "admin"],
+                                 powers=[{"principal": "admin", "power": "manages users"}])
+    assert out == "access model recorded" and "incomplete" not in tb.access_model
+    assert tb.access_model["authorization"] == "b" and tb.access_model["ladder"] == ["anon", "admin"]
 
 
 
@@ -1395,8 +1401,8 @@ def test_access_model_records_designed_powers_and_shows_them(tmp_path):
             "principals": "apps", "shared_protections": "joi", "ladder": ["anonymous", "app", "admin"],
             "evidence": [{"file": "docs/scopes.md", "line": 1, "quote": "crons: may edit"}]}
     assert "without powers" in tb.record_access_model(**base)
-    assert tb.record_access_model(**base, powers=[{"principal": "app:crons"}]) == \
-        "rejected: powers: each row needs principal and power"
+    out = tb.record_access_model(**base, powers=[{"principal": "app:crons"}])
+    assert "powers not recorded: each row needs principal and power" in out and tb.access_model["ladder"]
     assert "quote not found" in tb.record_access_model(**base, powers=[
         {"principal": "app:envs", "power": "data", "evidence": {"file": "docs/scopes.md", "line": 2, "quote": "runs"}}])
     assert tb.record_access_model(**base, powers=[

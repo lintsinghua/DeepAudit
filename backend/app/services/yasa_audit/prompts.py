@@ -37,7 +37,9 @@ There is no list of frameworks to pick from. Work it out from this project's own
    line where it starts), what the declaration says about access (auth), and exposure = the LEAST
    privileged principal that can call it: public (anyone, no login), authenticated (any logged-in user or
    token, whatever their role), privileged (only roles an ordinary user cannot obtain: a global admin, a
-   permission an operator grants), unknown. A role held for one object (admin or owner of a team,
+   permission an operator grants), operator (only someone with shell or deployment access on the server:
+   CLI commands, cron or scheduled jobs, deployment scripts; trusted input unless the product context says
+   otherwise), unknown. A role held for one object (admin or owner of a team,
    organization, project or workspace) is not privileged: an ordinary user can create such an object or be
    made its admin, so an entry such a role can call is authenticated.
    A route must be concrete (a path or a path pattern); resolve placeholders such as group or version
@@ -88,7 +90,8 @@ Find and read, with the navigation tools:
   and option formats are enforced; do object-level checks (ownership, model permission hooks) also
   run for collection routes without an id; which output fields are removed for which caller.
   Reviewers judge each handler with these in mind.
-Then call record_access_model (each statement backed by evidence quotes from the code).
+Record it with record_access_model as you establish it, not in one call at the end: each call sets the
+fields it gives and keeps the others (each statement backed by evidence quotes from the code).
 If the decision can be computed from the request, its handler and the code or configuration (route
 tables, role and permission definitions, middleware or filter order, annotations, the checks a handler
 makes), write it as a program with write_access_resolver and test it on sample requests of every
@@ -306,10 +309,11 @@ are added to the map. The product context says who is trusted; it does not take 
 Part 2: identity subsystems. Find the code that creates or proves an identity or changes what it may do:
 registration, login, password recovery, SSO / OAuth / SAML / LDAP, API or access tokens, account
 linking, invitations, multi-factor, sessions, user and role management. Record them with
-record_identity, one per call: for each, its routes (regular expressions over route paths), files, models, and the
+record_identity, one per call, as you find them (not all at the end): for each, its routes (regular expressions over route paths), files, models, and the
 settings that change its behaviour with their defaults (file:line). A reviewer checks each subsystem's
 design against a fixed checklist (identity binding, claiming of existing records, token lifecycle,
-defaults, privilege ceiling): give them what they need for it.
+defaults, privilege ceiling): give them what they need for it. Every identity kind is either recorded or
+declared absent with identity_absent (what you searched).
 
 Then finish. Spend at most half of your budget before your first run_recipe.
 Use at most {budget} tool calls.
@@ -404,7 +408,71 @@ def verify_prompt(budget: int, deploy: str = "", product: str = "", access_model
                          access_model=_access_model_text(access_model))
 
 
-REVIEW_MODES = {"entry": REVIEW, "operation": OPERATION_REVIEW, "design": DESIGN_REVIEW, "lead": LEAD_REVIEW}
+COMPONENT_REVIEW = """You are an application-security reviewer. You review ONE component of the project at the root: the
+entry points one file serves, side by side. The unit gives a table, one row per entry, computed from the
+code: the checks the entry's code makes (calls whose names check, verify, require or grant, and the
+project's own guard calls from the access model; in the handler and in the same-file helpers it calls),
+the sensitive operations in it, and who can call it. The table covers every entry; your job is to judge it
+and to trace what it cannot show.
+{untrusted}
+
+""" + _ACCESS_BLOCK + """
+
+Method:
+1. What applies to every row: read the file's constructor or init hook, its base class and how the
+   dispatcher reaches these methods. A check made there protects all rows; a check the dispatcher makes
+   only for some (by name, by HTTP method, by an annotation) protects only those.
+2. Read the rows as siblings. For each entry, what it does (reads, changes or exposes which data, of which
+   object, for whom) and the check it needs under the access model. Mark the rows whose check is missing,
+   weaker than what the entry does (a write checked only for read access), weaker than siblings that do
+   the same kind of thing, made on a different object than the one acted on (access checked for one
+   site, team or account while an object is loaded by an id that may belong to another), or made only on
+   some branches or after the effect. A difference that the access model's designed powers explain is not
+   a flaw.
+3. Trace each marked row in the code to a confirmed path or a rejection with evidence; record_card for
+   each (function: that entry's handler; least_privileged_caller), with the hypothesis anchored at the
+   operation or at the missing check. report_finding for each one traced to its effect (entry: that row's
+   request).
+4. Then the rows that store, query, render, fetch or write request values (their operations column):
+   the risks there (injection, stored markup, paths, outbound requests, mass assignment) as in any entry
+   review, as far as your budget allows. A row you could not finish stays an open hypothesis with what is
+   left to read: it is followed up in a fresh context.
+5. add_fact for what applies to the whole component (others rely on it), and finish.
+
+""" + _REPORTING
+
+
+TABLE_REVIEW = """You are an application-security reviewer. You review ONE kind of sensitive operation across the
+project at the root: every function outside the entry handlers where the operation map found it, one row
+each, with how entries reach it, the least privileged caller, whether the project's guard is on the way,
+and the code at the site. The rows are computed from the code; your job is to find the few that matter
+and trace them.
+{untrusted}
+
+""" + _ACCESS_BLOCK + """
+
+Method:
+1. What makes this operation safe in this project: the guard the recipe names, and the project's own
+   helpers for it (escaping, parameter binding, an allowlist, path normalisation, an SSRF-safe client).
+   add_fact what that helper guarantees and where (others rely on it).
+2. Triage every row from its code and columns: does the operation take a value someone other than an
+   operator controls (a request value, or a stored value a less privileged user wrote) without the guard?
+   A constant, a value the code builds itself, or a value already passed through the project's safe helper
+   is rejected from the row alone; say so in one card.
+3. Trace the rows that remain, most exposed first, to a confirmed path or a rejection with evidence:
+   find_callers and who_reaches for where the value comes from, who_can_call for the route. When a value
+   is read from storage, continue at its writers. A row that is the only one of its siblings without the
+   guard is the most likely flaw.
+4. record_card for each row you traced (function: the row's function; callers; hypotheses anchored at the
+   site; least_privileged_caller), report_finding for each one traced to its effect. A row you could not
+   finish stays an open hypothesis with what is left to read: it is followed up in a fresh context.
+   Then finish.
+
+""" + _REPORTING
+
+
+REVIEW_MODES = {"entry": REVIEW, "operation": OPERATION_REVIEW, "design": DESIGN_REVIEW, "lead": LEAD_REVIEW,
+                "component": COMPONENT_REVIEW, "optable": TABLE_REVIEW}
 
 
 def review_prompt(budget: int, deploy: str = "", product: str = "", surface_notes: str = "",
