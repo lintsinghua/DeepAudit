@@ -1,0 +1,28 @@
+{
+  "project": "ghost", "repo": "https://github.com/TryGhost/Ghost", "ref": "v6.75.0",
+  "note": "Not CVEs: the 22 root causes of the full run, hand-verified against the code (see entry-first-redesign.md). verdict=real: holds in code; verdict=false_positive: a check one layer down stops it; verdict=non_finding: reported but not a vulnerability. Used to score the refutation check, not recall.",
+  "root_causes": [
+    {"id": "I21", "verdict": "real", "title": "newsletter/email/conversion stats gated by posts:browse, readable by Contributor"},
+    {"id": "I1", "verdict": "real", "title": "/.well-known/recommendations.json served before the private-site gate"},
+    {"id": "I17", "verdict": "real", "title": "password reset 404 vs 200 staff-email oracle"},
+    {"id": "I18", "verdict": "real", "title": "unauthenticated invitation-existence oracle"},
+    {"id": "I8", "verdict": "false_positive", "title": "Author bulk-deletes pages (model permissible rejects without id)"},
+    {"id": "I7", "verdict": "false_positive", "title": "Contributor copies any post (add requires authors in body)"},
+    {"id": "I9", "verdict": "false_positive", "title": "decoy posts body key (AJV removeAdditional strips it)"},
+    {"id": "I19", "verdict": "false_positive", "title": "NQL via feedback id (global id validator 24-hex)"},
+    {"id": "I3", "verdict": "false_positive", "title": "hidden comment html to anonymous (output mapper nulls it)"},
+    {"id": "I15", "verdict": "false_positive", "title": "media endpoints permissions:false (by design, like images/files)"},
+    {"id": "I2", "verdict": "false_positive", "title": "member comment readable by id regardless of tier (by design read path)"},
+    {"id": "I5", "verdict": "non_finding", "title": "preview links show gated content (documented design)"},
+    {"id": "I4", "verdict": "non_finding", "title": "reported with no vulnerability"},
+    {"id": "I10", "verdict": "non_finding", "title": "reported with no vulnerability"},
+    {"id": "I12", "verdict": "non_finding", "title": "reported with no vulnerability"},
+    {"id": "I13", "verdict": "non_finding", "title": "reported with no vulnerability"},
+    {"id": "I16", "verdict": "non_finding", "title": "reported with no vulnerability"},
+    {"id": "I22", "verdict": "non_finding", "title": "reported with no vulnerability"},
+    {"id": "I6", "verdict": "unverified", "title": "comment unlike skips post-access checks"},
+    {"id": "I11", "verdict": "unverified", "title": "slug collision oracle across authors"},
+    {"id": "I14", "verdict": "unverified", "title": "Super Editor/Admin integration creates Stripe subscription with client price"},
+    {"id": "I20", "verdict": "unverified", "title": "Featurebase token for Contributors"}
+  ]
+}

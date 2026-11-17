@@ -37,6 +37,10 @@ class AuditConfig:
     llm_base_url: str = field(default_factory=lambda: os.environ.get("LLM_BASE_URL", ""))
     llm_api_key: str = field(default_factory=lambda: os.environ.get("LLM_API_KEY", ""))
     llm_model: str = field(default_factory=lambda: os.environ.get("LLM_MODEL", ""))
+    # A stronger model for the stages that decide what everything downstream sees (surface, access
+    # model, reconcile, refutation check): a small share of the tokens. Empty: llm_model everywhere.
+    llm_strong_model: str = field(default_factory=lambda: os.environ.get("LLM_STRONG_MODEL", ""))
+    strong_stages: tuple = ("recon", "access", "reconcile", "verify")
     llm_temperature: float = field(
         default_factory=lambda: float(os.environ.get("LLM_TEMPERATURE", "0.1"))
     )
@@ -57,6 +61,8 @@ class AuditConfig:
     # Budgets. Wall time is the hard constraint: one audit should finish within time_budget_s.
     time_budget_s: int = 1800
     recon_share: float = 0.25  # route reconnaissance may use this share of the budget
+    recon_runs: int = 1  # independent recon runs to union; >1 converges the surface (see converge_recon)
+    recon_converge_threshold: float = 0.05  # stop adding runs when one grows the union by less than this
     recon_budget: int = 60  # tool calls of the surface agent
     access_budget: int = 40  # tool calls of the access-control agent (runs in parallel with it)
     review_budget: int = 24  # tool calls per entry review
@@ -76,6 +82,10 @@ class AuditConfig:
 
     def stopped(self) -> bool:
         return bool(self.should_stop and self.should_stop())
+
+    def model_for(self, stage: str) -> str:
+        """The model a stage runs on."""
+        return self.llm_strong_model if self.llm_strong_model and stage in self.strong_stages else self.llm_model
 
     def require_llm(self) -> None:
         missing = [

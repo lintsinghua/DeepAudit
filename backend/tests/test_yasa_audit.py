@@ -69,7 +69,7 @@ class ByRole:
     def __init__(self, **roles):
         self.roles = roles
 
-    def __call__(self, cfg):
+    def __call__(self, cfg, **kw):
         roles = self.roles
 
         class Proxy:
@@ -227,7 +227,7 @@ def test_handler_snippet_starts_at_the_handler(tmp_path):
 def test_recon_falls_back_to_codegraph_when_agent_finds_nothing(tmp_path, monkeypatch):
     from app.services.yasa_audit import pipeline
 
-    monkeypatch.setattr(pipeline, "LLM", lambda cfg: ScriptedLLM([]))
+    monkeypatch.setattr(pipeline, "LLM", lambda cfg, **kw: ScriptedLLM([]))
     monkeypatch.setattr(pipeline, "codegraph_db", lambda root: Path("x"))
     monkeypatch.setattr(pipeline, "codegraph_routes", lambda db, root: [
         {"route": "/orders/:id", "method": "GET", "file": "r.ts", "handler": "show"}])
@@ -308,7 +308,7 @@ def test_run_recon_then_review_end_to_end(tmp_path, monkeypatch):
                 self.script = _script(scripts, key)
             return super().chat(messages, tools)
 
-    monkeypatch.setattr(pipeline, "LLM", lambda cfg: Router([]))
+    monkeypatch.setattr(pipeline, "LLM", lambda cfg, **kw: Router([]))
     cfg = _cfg(workers=1)
     m = pipeline.run(cfg, proj, tmp_path / "out", deadline=time.time() + 600)
     assert m["recon"]["entries"] == 2 and m["recon"]["resolved"] == 2
@@ -451,7 +451,7 @@ async def test_execute_yasa_task_saves_findings(tmp_path, monkeypatch):
     from app.services.yasa_audit import task as ytask
 
     monkeypatch.setattr(ytask, "RUNS_DIR", tmp_path / "runs")
-    monkeypatch.setattr(ytask, "check_tools", lambda cfg: [])
+    monkeypatch.setattr(ytask, "check_tools", lambda cfg, **kw: [])
     monkeypatch.setattr(ytask, "init_navigation", lambda *a, **k: None)
     seen = {}
 
@@ -951,7 +951,7 @@ def test_reconcile_lets_the_access_agent_fix_its_resolver(tmp_path, monkeypatch)
                 self.script = _script(scripts, key)
             return super().chat(messages, tools)
 
-    monkeypatch.setattr(pipeline, "LLM", lambda cfg: Router([]))
+    monkeypatch.setattr(pipeline, "LLM", lambda cfg, **kw: Router([]))
     m = pipeline.recon(_cfg(), proj, tmp_path / "out", deadline=time.time() + 900)
     msg = next(u for u in users if "independently of you" in u)
     assert "G1: 1 entries, declared privileged, resolver public (rule: no gate)" in msg
@@ -1125,7 +1125,7 @@ def test_reconcile_shows_new_groups_after_the_resolver_changes(tmp_path, monkeyp
             seen.extend(m.get("content") or "" for m in messages if m.get("role") == "tool")
             return super().chat(messages, tools)
 
-    monkeypatch.setattr(pipeline, "LLM", lambda cfg: Router([]))
+    monkeypatch.setattr(pipeline, "LLM", lambda cfg, **kw: Router([]))
     m = pipeline.recon(_cfg(), proj, tmp_path / "out", deadline=time.time() + 900)
     assert any("Settle these too" in t and "- G2: 1 entries, declared public, resolver privileged" in t for t in seen)
     rc = m["reconcile"]
@@ -1247,7 +1247,7 @@ def test_refutation_check_moves_refuted_findings_out_and_marks_the_rest(tmp_path
                 self.script = [plan[iid]]
             return super().chat(messages, tools)
 
-    monkeypatch.setattr(pipeline, "LLM", lambda cfg: Checker([]))
+    monkeypatch.setattr(pipeline, "LLM", lambda cfg, **kw: Checker([]))
     m = verify(_cfg(workers=1), tmp_path, review, deadline=time.time() + 300)
     assert seen == ["I2", "I1", "I3"]  # public first, then the most repeated
     assert m["verdicts"] == {"uncertain": 2, "refuted": 1} and m["findings_refuted"] == 2
@@ -1347,7 +1347,7 @@ def test_recon_follows_up_on_dispatchers_left_unenumerated(tmp_path, monkeypatch
                 self.script = _script(scripts, key)
             return super().chat(messages, tools)
 
-    monkeypatch.setattr(pipeline, "LLM", lambda cfg: Router([]))
+    monkeypatch.setattr(pipeline, "LLM", lambda cfg, **kw: Router([]))
     now = time.time()
     m = pipeline.recon(_cfg(), proj, tmp_path / "out", deadline=now + 900, hard_deadline=now + 1800)
     follow = [u for u in users if "ONE dispatcher they left out" in u]
@@ -1427,7 +1427,7 @@ def test_a_designed_capability_leaves_the_report_as_by_design(tmp_path, monkeypa
     tb = Toolbox(AuditConfig(), tmp_path, tmp_path / "x")
     assert tb.conclude("by_design", "crons runs commands").startswith("rejected: by_design needs power")
     grant = {"principal": "app:crons", "file": "docs/scopes.md", "line": 1, "quote": "may edit and run"}
-    monkeypatch.setattr(pipeline, "LLM", lambda cfg: ScriptedLLM([
+    monkeypatch.setattr(pipeline, "LLM", lambda cfg, **kw: ScriptedLLM([
         ("conclude", {"verdict": "by_design", "reason": "the crons scope is meant to run commands", "power": grant})]))
     m = verify(_cfg(workers=1), tmp_path, review, deadline=time.time() + 300)
     assert m["verdicts"] == {"by_design": 1} and m["findings_by_design"] == 1 and m["findings_kept"] == 0
@@ -1475,3 +1475,124 @@ def test_a_unit_whose_model_keeps_replying_with_nothing_is_counted(tmp_path):
     assert res["ended_silent"] and not res["finished"]
     rows = [json.loads(x) for x in (tmp_path / "log.jsonl").read_text().splitlines()]
     assert rows[0]["finish_reason"] == "length"
+
+
+def test_stages_run_on_their_configured_models(monkeypatch):
+    from app.services.yasa_audit.llm import LLM, limiter_for
+
+    cfg = AuditConfig(llm_base_url="http://localhost:1", llm_api_key="k", llm_model="fast")
+    assert {s: cfg.model_for(s) for s in ("recon", "review", "verify")} == \
+        {"recon": "fast", "review": "fast", "verify": "fast"}
+    cfg.llm_strong_model = "strong"
+    assert [cfg.model_for(s) for s in ("recon", "access", "reconcile", "review", "verify")] == \
+        ["strong", "strong", "strong", "fast", "strong"]
+    assert LLM(cfg, stage="verify").model == "strong" and LLM(cfg).model == "fast"
+    assert limiter_for(cfg, "strong") is not limiter_for(cfg, "fast")  # each model has its own limit
+
+
+def test_converge_recon_unions_entries_and_estimates_surface(tmp_path, monkeypatch):
+    from app.services.yasa_audit import pipeline
+
+    proj = tmp_path / "p"
+    _write(proj, {"a.php": "<?php\nfunction a() { echo $_GET['x']; }\n",
+                  "b.php": "<?php\nfunction b() { echo $_GET['y']; }\n",
+                  "c.php": "<?php\nfunction c() { echo $_GET['z']; }\n"})
+
+    def ext(name, routes):
+        rows = [{"route": r, "handler_file": f, "handler": h, "exposure": "public"} for r, f, h in routes]
+        return "import json\nprint(json.dumps(" + repr(rows) + "))"
+
+    # three fresh recons that each see a different, overlapping slice of a 3-route surface
+    slices = {
+        1: [("/a", "a.php", "a"), ("/b", "b.php", "b")],
+        2: [("/a", "a.php", "a"), ("/c", "c.php", "c")],
+        3: [("/a", "a.php", "a"), ("/b", "b.php", "b"), ("/c", "c.php", "c")],
+    }
+    seq = iter([1, 2, 3])
+    model = {"authentication": "n", "authorization": "n", "permission_mapping": "n", "principals": "anyone",
+             "ladder": ["anyone"], "shared_protections": "none",
+             "evidence": [{"file": "a.php", "line": 2, "quote": "function a()"}]}
+
+    class Router(ScriptedLLM):
+        def chat(self, messages, tools=None):
+            if not self.script and len(messages) == 2:
+                role = _role(messages[0]["content"])
+                if role == "access":
+                    self.script = [("record_access_model", model), ("finish", {"notes": "m"})]
+                elif role == "assets":
+                    self.script = list(ASSETS_NONE)
+                else:
+                    which = next(seq)
+                    self.script = [("run_extractor", {"name": "r", "code": ext("r", slices[which])}),
+                                   ("check_coverage", {"request_read_pattern": r"\$_GET"}),
+                                   ("finish", {"notes": f"slice {which}"})]
+            return super().chat(messages, tools)
+
+    monkeypatch.setattr(pipeline, "LLM", lambda cfg, **kw: Router([]))
+    cfg = _cfg()
+    cfg.recon_runs = 3
+    cfg.recon_converge_threshold = 0.05
+    now = time.time()
+    m = pipeline.converge_recon(cfg, proj, tmp_path / "out", deadline=now + 1200, hard_deadline=now + 1800)
+    assert m["entries"] == 3  # union of the three slices
+    assert [g["added"] for g in m["converge"]["growth"]] == [2, 1, 0]
+    assert m["converge"]["runs"] == 3  # the third run added 0 (<=5%); loop stops after it
+    # capture-recapture on the two largest runs (run3 has 3, run1 has 2, overlap 2) -> 3*2/2 = 3
+    assert m["converge"]["estimated_surface"] == 3
+    ids = [e["id"] for e in json.loads((tmp_path / "out" / "entries.json").read_text())]
+    assert ids == ["E1", "E2", "E3"]  # re-numbered over the union
+    assert (tmp_path / "out-2" / "entries.json").exists() and (tmp_path / "out-3" / "entries.json").exists()
+
+
+def test_converge_union_matches_entries_spelled_differently_by_two_runs():
+    from app.services.yasa_audit.pipeline import _merge_run
+
+    # the same Matomo door as two independent recon runs wrote it
+    run1 = [{"method": "GET/POST", "route": "index.php?module=API&method=Goals.getGoal",
+             "handler_file": "plugins/Goals/API.php", "handler": "API::getGoal", "handler_line": 95},
+            {"method": "GET", "route": "/a", "handler_file": "app.js", "handler": "app.get", "handler_line": 3},
+            {"method": "GET", "route": "/b", "handler_file": "app.js", "handler": "app.get", "handler_line": 9}]
+    run2 = [{"method": "GET|POST", "route": "index.php?module=API&method=Goals.getGoal",
+             "handler_file": "./plugins/Goals/API.php", "handler": "Goals\\API::getGoal", "handler_line": 96},
+            {"method": "GET", "route": "/a", "handler_file": "app.js", "handler": "app.get", "handler_line": 3},
+            {"method": "GET", "route": "/c", "handler_file": "app.js", "handler": "app.get", "handler_line": 15}]
+    merged: dict = {}
+    k1 = _merge_run(merged, run1)
+    k2 = _merge_run(merged, run2)
+    assert len(merged) == 4  # getGoal once; anonymous callbacks stay apart by line: /a, /b, /c
+    assert len(k1 & k2) == 2
+
+
+def test_converge_union_matches_a_named_handler_whose_route_is_spelled_differently():
+    from app.services.yasa_audit.pipeline import _merge_run
+
+    merged: dict = {}
+    _merge_run(merged, [{"route": "index.php?module=Goals&action=manage", "handler_file": "plugins/Goals/Controller.php",
+                         "handler": "Controller::manage"}])
+    _merge_run(merged, [{"route": "/index.php?module=Goals&action=manage&idSite={idSite}",
+                         "handler_file": "plugins/Goals/Controller.php", "handler": "manage"}])
+    assert len(merged) == 1
+
+
+def test_converge_unions_the_asset_maps_of_all_runs():
+    from app.services.yasa_audit.pipeline import _union_assets
+
+    run1 = {"recipes": [{"name": "outbound", "op_class": "outbound_request", "pattern": "Http::send"}],
+            "identity": [{"name": "mfa", "files": ["plugins/TwoFactorAuth/TwoFactorAuth.php"], "routes": [],
+                          "entry_ids": ["E1"], "site_keys": []}],
+            "absent": {"file_write": "searched", "bulk_field_assignment": "searched"}}
+    run2 = {"recipes": [{"name": "outbound", "op_class": "outbound_request", "pattern": "curl_exec"},
+                        {"name": "writes", "op_class": "file_write", "pattern": "file_put_contents"}],
+            "identity": [{"name": "two_factor_auth", "routes": ["TwoFactorAuth"],
+                          "files": ["plugins/TwoFactorAuth/TwoFactorAuth.php", "plugins/TwoFactorAuth/Controller.php"]},
+                         {"name": "user_invitation", "routes": ["acceptInvitation"],
+                          "files": ["plugins/Login/Controller.php", "plugins/UsersManager/API.php"]},
+                         {"name": "user_management", "routes": ["UsersManager"],
+                          "files": ["plugins/UsersManager/API.php", "plugins/UsersManager/Model.php"]}],
+            "absent": {}}
+    recipes, subsystems, absent = _union_assets([run1, run2])
+    assert sorted(recipes) == ["outbound", "outbound~2", "writes"]
+    assert [s["name"] for s in subsystems] == ["two_factor_auth", "user_invitation", "user_management"]
+    # mfa (run 1) is two_factor_auth (run 2); one run's overlapping subsystems stay apart
+    assert "entry_ids" not in subsystems[0]
+    assert absent == {"bulk_field_assignment": "searched"}  # file_write has a recipe in run 2

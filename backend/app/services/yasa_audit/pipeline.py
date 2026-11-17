@@ -116,7 +116,7 @@ def _access_agent(cfg: AuditConfig, root: Path, out: Path, deploy: str, product:
     tb.finish_gates = [(lambda t: t.access_model is None,
                         "record_access_model first (how requests are authenticated and authorized)",
                         ["record_access_model"])]
-    llm = LLM(cfg)
+    llm = LLM(cfg, stage="access")
 
     def missing(t: Toolbox) -> list[str]:
         return [x for x, done in (("record_access_model", t.access_model is not None),
@@ -160,7 +160,7 @@ def _assets_agent(cfg: AuditConfig, root: Path, out: Path, deploy: str, product:
     except Exception:
         unseen = ""
     user = f"{user}\n\n{unseen}" if unseen else user
-    llm, t0 = LLM(cfg), time.time()
+    llm, t0 = LLM(cfg, stage="recon"), time.time()
     no_recipe = (lambda steps, t: not t.recipes and (steps >= cfg.assets_budget // 2 or (
                      deadline is not None and time.time() >= t0 + (deadline - t0) / 2)),
                  "Half of your time or tool budget is used and no recipe has run. Write recipes now for the "
@@ -390,7 +390,7 @@ def _reconcile(cfg: AuditConfig, out: Path, entries: list[dict], holder: dict, a
                         lambda t: "settle every group first; undecided: "
                                   + ", ".join(g for g in t.reconcile_groups if g not in t.decisions),
                         ["settle"])]
-    llm = holder.get("llm") or LLM(cfg)
+    llm = LLM(cfg, stage="reconcile")
     settle_now = (lambda steps, t: steps >= cfg.reconcile_budget // 2 and any(g not in t.decisions
                                                                                for g in t.reconcile_groups),
                   lambda t: "Half of your budget is used: settle the undecided groups now, in one call: "
@@ -429,7 +429,7 @@ def _followup(cfg: AuditConfig, root: Path, out: Path, tb: Toolbox, left: list[s
     taken = sorted(tb.extractors)
 
     def one(i: int, disp: str):
-        sub, sub_llm, t0 = Toolbox(cfg, root, out, unit="recon"), LLM(cfg), time.time()
+        sub, sub_llm, t0 = Toolbox(cfg, root, out, unit="recon"), LLM(cfg, stage="recon"), time.time()
         msg = (f"Earlier passes enumerated {len(tb.entries())} entries with the extractors "
                f"{', '.join(taken) or '(none)'}. Enumerate ONE dispatcher they left out:\n- {disp}\n\n"
                f"Notes of the earlier passes:\n{tb.notes}\n\n"
@@ -509,7 +509,7 @@ def recon(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", product: st
                         ["check_coverage"]),
                        (regressed, lambda t: "; ".join(regressions) + ". Fix the regression and run the extractor "
                         "again, or finish again if the smaller result is the right one.")]
-    llm = LLM(cfg)
+    llm = LLM(cfg, stage="recon")
     no_extractor_yet = (_past_half(t_recon, deadline, cfg.recon_budget),
                         "Half of your time or tool budget is used and no extractor has run. Stop reading: write an "
                         "extractor for the dispatcher you understand best and run it now, then refine.")
@@ -826,7 +826,7 @@ def _review_unit(cfg: AuditConfig, root: Path, out: Path, unit: dict, sh: _Share
         left = lambda t: [k for k in assets_map.IDENTITY_CHECKLIST if k not in t.design]  # noqa: E731
         tb.finish_gates = [(lambda t: bool(left(t)), lambda t: "answer with record_design: " + ", ".join(left(t)),
                             ["record_design"])]
-    llm = LLM(cfg)
+    llm = LLM(cfg, stage="review")
     user = "\n\n".join(x for x in (brief, sh.facts.prompt_block(), sh.issues.prompt_block(), code) if x)
     seen_facts = {f["id"] for f in sh.facts.facts}
     seen_issues = {i["id"] for i in sh.issues.issues}
@@ -953,6 +953,178 @@ def review(cfg: AuditConfig, root: Path, out: Path, entries: list[dict], deploy:
 
 # ----------------------------------------------------------------- both
 
+_ANON_NAMES = {"", "closure", "anonymous", "lambda", "function", "fn", "handler", "callback", "default"}
+
+
+def _entry_key(e: dict) -> tuple:
+    """What makes entries of two independent recon runs the same door: the code it runs and the request
+    that reaches it. Runs spell the same thing differently (a qualified or bare handler name, the line of
+    the docblock or of the function, 'GET/POST' or 'GET|POST'), so the key keeps only what does not vary:
+    the file, the bare function name and the route. The line stays only for anonymous handlers, where it
+    is the identity."""
+    hf = str(e.get("handler_file") or "").lstrip("./")
+    name = re.sub(r"\(.*$", "", re.split(r"::|->|\\|\.|#|@", str(e.get("handler") or ""))[-1]).strip().lower()
+    anon = name in _ANON_NAMES or not re.fullmatch(r"[a-z_$][\w$]*", name)
+    return ((hf, name, _handler_id(e)[2] if anon else 0), _resource_key(e.get("route", "")))
+
+
+def _merge_run(merged: dict, entries: list[dict]) -> set:
+    """Adds one run's entries to the union; returns the run's keys as matched to the union. A named handler
+    that occurs once in the run and once in the union is the same door even if the two runs spelled its
+    route differently."""
+    code_count = collections.Counter(_entry_key(e)[0] for e in entries)
+    union_by_code: dict[tuple, list[tuple]] = {}
+    for k in merged:
+        union_by_code.setdefault(k[0], []).append(k)
+    keys = set()
+    for e in entries:
+        k = _entry_key(e)
+        if k not in merged:
+            alt = union_by_code.get(k[0], [])
+            if k[0][1] and not k[0][2] and code_count[k[0]] == 1 and len(alt) == 1:
+                k = alt[0]
+        if k not in merged or (e.get("resolved") and not merged[k].get("resolved")):
+            merged[k] = e
+        keys.add(k)
+    return keys
+
+
+def _same_subsystem(a: dict, b: dict) -> bool:
+    """Two runs' records of one identity subsystem: the same name, or mostly the same files."""
+    fa, fb = set(a.get("files") or []), set(b.get("files") or [])
+    return a.get("name") == b.get("name") or bool(fa and fb and len(fa & fb) * 2 >= min(len(fa), len(fb)))
+
+
+def _union_assets(maps: list[dict]) -> tuple[dict, list[dict], dict]:
+    """Recipes, identity subsystems and absent classes of several runs' asset maps, as one agent's record.
+    Recipes are kept per run (a name two runs used for different patterns gets a suffix). Runs name the
+    same subsystem differently ('mfa', 'two_factor_auth'), so subsystems whose files mostly overlap are
+    one, the richer record kept. A class is absent only if no run has a recipe for it."""
+    recipes: dict[str, dict] = {}
+    subsystems: list[dict] = []
+    origin: list[int] = []  # which run each kept subsystem came from
+    absent: dict[str, str] = {}
+    for i, a in enumerate(maps):
+        for r in a.get("recipes") or []:
+            name = r.get("name") or f"recipe-{len(recipes) + 1}"
+            if name in recipes and recipes[name].get("pattern") != r.get("pattern"):
+                name = f"{name}~{i + 1}"
+            recipes.setdefault(name, {**r, "name": name})
+        # a run's own subsystems are kept apart as it recorded them; only another run's can be the same
+        taken: set[int] = set()
+        for s in a.get("identity") or []:
+            raw = {k: v for k, v in s.items() if k not in ("entry_ids", "site_keys")}
+            files = set(raw.get("files") or [])
+            same = next((j for j, o in enumerate(subsystems)
+                         if origin[j] != i and j not in taken and _same_subsystem(raw, o)), None)
+            size = len(files) + len(raw.get("routes") or [])
+            if same is None:
+                subsystems.append(raw)
+                origin.append(i)
+                taken.add(len(subsystems) - 1)
+            else:
+                taken.add(same)
+                if size > len(subsystems[same].get("files") or []) + len(subsystems[same].get("routes") or []):
+                    subsystems[same], origin[same] = raw, i
+        absent.update(a.get("absent") or {})
+    covered = {r.get("op_class") for r in recipes.values()}
+    return recipes, subsystems, {c: why for c, why in absent.items() if c not in covered}
+
+
+def _model_score(rec: dict) -> tuple:
+    """How complete a recon's access model is, to choose which run's model and resolver lead the merge."""
+    am = rec.get("access_model") or {}
+    return (bool((rec.get("resolver") or {}).get("installed")), bool(am.get("ladder")),
+            bool(am.get("shared_protections")), len(json.dumps(am)), rec.get("entries", 0))
+
+
+def converge_recon(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", product: str = "",
+                   deadline: float | None = None, hard_deadline: float | None = None) -> dict:
+    """Run recon several times (each a fresh context) and union the entries they enumerate: a single
+    run sees only part of a large surface and the misses are what the review never gets to see. Stops
+    adding runs once one grows the union by less than recon_converge_threshold, or the budget runs low.
+    The access model and resolver are taken from the most complete run and re-applied to the whole
+    union, so exposure, who_can_call and least_principal are consistent across it."""
+    runs = max(1, cfg.recon_runs)
+    if runs == 1:
+        return recon(cfg, root, out, deploy, product, deadline, hard_deadline)
+    hard = hard_deadline or deadline
+    share = cfg.recon_share if deadline is None else (deadline - time.time()) / max(1, runs)
+    merged: dict[tuple, dict] = {}
+    recs: list[dict] = []
+    growth: list[dict] = []
+    run_keys: list[set] = []
+    for i in range(runs):
+        sub = out if i == 0 else out.parent / f"{out.name}-{i + 1}"
+        r_deadline = None if deadline is None else time.time() + share
+        rec = recon(cfg, root, sub, deploy, product, r_deadline, hard_deadline=hard)
+        recs.append(rec)
+        before = len(merged)
+        run_keys.append(_merge_run(merged, json.loads((sub / "entries.json").read_text())))
+        added = len(merged) - before
+        growth.append({"run": i + 1, "run_entries": rec.get("entries", 0), "union": len(merged), "added": added})
+        if i and added <= cfg.recon_converge_threshold * before:
+            break  # converged: the last run barely grew the union
+        if hard is not None and time.time() > hard - 2 * share:
+            break  # not enough budget left for another full run
+
+    entries = list(merged.values())
+    primary = max(range(len(recs)), key=lambda i: _model_score(recs[i]))
+    pdir = out if primary == 0 else out.parent / f"{out.name}-{primary + 1}"
+    model = recs[primary].get("access_model")
+    rf = pdir / "resolver.py"
+    resolver_code = rf.read_text() if rf.exists() else None
+
+    # re-number, re-check, and re-apply the chosen resolver to the full union
+    tb = Toolbox(cfg, root, out, unit="merge")
+    for i, e in enumerate(entries):
+        e["id"] = f"E{i + 1}"
+        e["resolved"] = tb._check_entry(e) is None
+        e.pop("exposure_declared", None)
+    resolver = _apply_resolver(tb, entries, resolver_code, out) if resolver_code else {}
+    _rank_principals(entries, (model or {}).get("ladder"))
+    resolver = {k: v for k, v in resolver.items() if not k.startswith("_")}
+    if resolver_code:
+        (out / "resolver.py").write_text(resolver_code)
+    (out / "entries.json").write_text(json.dumps(entries, indent=1, ensure_ascii=False))
+
+    # the asset map (recipes, identity subsystems) of every run, expanded again against the union
+    maps = []
+    for i in range(len(recs)):
+        af = (out if i == 0 else out.parent / f"{out.name}-{i + 1}") / "assets.json"
+        if af.exists():
+            maps.append(json.loads(af.read_text()))
+    assets_summary = None
+    if maps:
+        recipes, subsystems, absent = _union_assets(maps)
+        try:
+            data = assets_map.build(tb, recipes, subsystems, absent, entries)
+            assets_map.dump(data, out / "assets.json")
+            assets_summary = data["summary"]
+        except Exception as e:  # keep the first run's map rather than none
+            assets_summary = {"error": f"{type(e).__name__}: {e}"}
+
+    # capture-recapture: from the overlap of the two largest runs, estimate the true surface size (keys
+    # as matched while merging; out/entries.json now holds the union, not the first run)
+    estimate = None
+    if len(run_keys) >= 2:
+        a, b = sorted(run_keys, key=len, reverse=True)[:2]
+        inter = len(a & b)
+        estimate = round(len(a) * len(b) / inter) if inter else None
+
+    m = dict(recs[primary])
+    tok = lambda k: sum(r.get(k, 0) or 0 for r in recs)  # noqa: E731
+    m.update({"entries": len(entries), "by_exposure": dict(collections.Counter(e["exposure"] for e in entries)),
+              "resolved": sum(e["resolved"] for e in entries), "resolver": resolver,
+              **({"assets": assets_summary} if assets_summary is not None else {}),
+              "converge": {"runs": len(recs), "growth": growth, "union": len(entries),
+                           "primary_run": primary + 1, "estimated_surface": estimate},
+              "prompt_tokens": tok("prompt_tokens"), "completion_tokens": tok("completion_tokens"),
+              "cached_tokens": tok("cached_tokens"), "llm_calls": tok("llm_calls")})
+    (out / "recon.json").write_text(json.dumps(m, indent=1, ensure_ascii=False))
+    return m
+
+
 def run(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", product: str = "",
         start: float | None = None, deadline: float | None = None) -> dict:
     """recon (reused when out/recon/entries.json exists, with its assets.json when there is one), review,
@@ -965,8 +1137,8 @@ def run(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", product: str 
         rec = json.loads((out / "recon" / "recon.json").read_text()) if (out / "recon" / "recon.json").exists() else {}
         rec.setdefault("reused", True)
     else:
-        rec = recon(cfg, root, out / "recon", deploy, product, start + cfg.recon_share * (deadline - start),
-                    hard_deadline=deadline)
+        rec = converge_recon(cfg, root, out / "recon", deploy, product,
+                             start + cfg.recon_share * (deadline - start), hard_deadline=deadline)
     entries = json.loads(ef.read_text())
     rf = out / "recon" / "resolver.py"
     resolver = rf.read_text() if rf.exists() else None
@@ -979,6 +1151,7 @@ def run(cfg: AuditConfig, root: Path, out: Path, deploy: str = "", product: str 
     vf = verify(cfg, root, out / "review", deploy, product, rec.get("access_model"), resolver, deadline)
     tok = lambda m, k: (m or {}).get(k, 0) or 0  # noqa: E731
     m = {"recon": rec, "review": rv, "verify": vf,
+         "models": {s: cfg.model_for(s) for s in ("recon", "access", "reconcile", "review", "verify")},
          "total_tokens": sum(tok(x, "prompt_tokens") + tok(x, "completion_tokens") for x in (rec, rv, vf)),
          "total_cached_tokens": sum(tok(x, "cached_tokens") for x in (rec, rv, vf)),
          "total_wall_s": round(time.time() - start, 1), "time_budget_s": round(deadline - start)}

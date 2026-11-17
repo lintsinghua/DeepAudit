@@ -276,7 +276,7 @@ def test_run_maps_assets_and_reviews_operations_and_identity_design(tmp_path, mo
                 self.script = list(scripts[key])
             return super().chat(messages, tools)
 
-    monkeypatch.setattr(pipeline, "LLM", lambda cfg: Router([]))
+    monkeypatch.setattr(pipeline, "LLM", lambda cfg, **kw: Router([]))
     m = pipeline.run(_cfg(workers=1), proj, tmp_path / "out", deadline=time.time() + 600)
     a = m["recon"]["assets"]
     assert a["sites"] == 3 and a["by_class"] == {"credential_or_privilege_write": 2, "file_write": 1}
@@ -530,7 +530,7 @@ def test_review_sends_a_fresh_reviewer_to_settle_an_open_design_flaw(tmp_path, m
                 self.script = list(scripts[key])
             return super().chat(messages, tools)
 
-    monkeypatch.setattr(pipeline, "LLM", lambda cfg: Router([]))
+    monkeypatch.setattr(pipeline, "LLM", lambda cfg, **kw: Router([]))
     m = pipeline.review(_cfg(workers=1), tmp_path, tmp_path / "review", entries,
                         deadline=time.time() + 600, assets={"identity": [g], "sites": [], "recipes": []})
     assert m["reviewed_design_units"] == 1 and m["follow_up_units"] == 1 and m["reviewed_units"] == 1

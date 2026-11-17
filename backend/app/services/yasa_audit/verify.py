@@ -57,7 +57,7 @@ def _check(cfg: AuditConfig, root: Path, out: Path, iid: str, fs: list[dict], sy
     tb.resolver_code = resolver
     tb.finish_gates = [(lambda t: t.conclusion is None, "conclude first (upheld, refuted, by_design or uncertain)",
                         ["conclude"])]
-    llm = pipeline.LLM(cfg)  # resolved at call time (tests replace it)
+    llm = pipeline.LLM(cfg, stage="verify")  # resolved at call time (tests replace it)
     res = run_agent(llm, tb, tool_schemas("verify"), system, _claim(iid, fs), cfg.verify_budget,
                     out / "transcript.jsonl", deadline=deadline)
     u = llm.usage

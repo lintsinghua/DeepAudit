@@ -1,0 +1,26 @@
+{
+  "project": "gogs", "repo": "https://github.com/gogs/gogs", "ref": "v0.13.4",
+  "advisories": [
+    {"id": "CVE-2026-25229", "title": "Cross-repository label modification", "kind": "authz",
+     "files": ["internal/route/repo/issue.go", "internal/db/issue_label.go"], "functions": ["UpdateLabel"],
+     "entry": {"routes": ["labels/edit"]}},
+    {"id": "CVE-2026-25120", "title": "Cross-repository comment deletion", "kind": "authz",
+     "files": ["internal/route/repo/issue.go", "internal/db/comment.go"], "functions": ["DeleteComment"],
+     "entry": {"routes": ["comments/:id/delete"]}},
+    {"id": "CVE-2026-25242", "title": "Unauthenticated attachment upload", "kind": "authn",
+     "files": ["internal/route/repo/issue.go", "internal/route/repo/release.go"], "functions": ["uploadAttachment", "UploadIssueAttachment", "UploadReleaseAttachment"],
+     "entry": {"routes": ["/issues/attachments", "/releases/attachments"]}},
+    {"id": "CVE-2026-25232", "title": "Protected branch deletion through the web handler", "kind": "authz",
+     "files": ["internal/route/repo/branch.go"], "functions": ["DeleteBranchPost"],
+     "entry": {"routes": ["branches/delete"]}},
+    {"id": "CVE-2026-52797", "title": "Diff preview path reaches git as an option", "kind": "injection",
+     "files": ["internal/route/repo/editor.go"], "functions": ["DiffPreviewPost"],
+     "entry": {"routes": ["_preview"]}},
+    {"id": "CVE-2026-25921", "title": "Cross-repository LFS object overwrite", "kind": "authz",
+     "files": ["internal/route/lfs/basic.go", "internal/route/lfs/route.go"], "functions": ["serveUpload", "authenticate"],
+     "entry": {"routes": ["lfs"]}},
+    {"id": "CVE-2026-26194", "title": "Release tag name reaches git as an option", "kind": "injection",
+     "files": ["internal/route/repo/release.go", "internal/db/release.go"], "functions": ["DeleteRelease", "DeleteReleaseOfRepoByID"],
+     "entry": {"routes": ["releases/delete"]}}
+  ]
+}
