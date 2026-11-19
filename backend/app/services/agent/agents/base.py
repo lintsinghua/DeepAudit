@@ -1044,10 +1044,19 @@ class BaseAgent(ABC):
                         # 🔥 CRITICAL: 让出控制权给事件循环，让 SSE 有机会发送事件
                         await asyncio.sleep(0)
 
+                    elif chunk["type"] == "keepalive":
+                        first_token_received = True
+                        last_activity = time.time()
+
                     elif chunk["type"] == "done":
                         accumulated = chunk["content"]
                         if chunk.get("usage"):
                             total_tokens = chunk["usage"].get("total_tokens", 0)
+                        # 🔥 记录推理模型的 reasoning 统计
+                        reasoning = chunk.get("reasoning_content", "")
+                        reasoning_tokens_est = chunk.get("reasoning_tokens", 0)
+                        if reasoning:
+                            logger.debug(f"[{self.name}] reasoning_content: {len(reasoning)} chars, ~{reasoning_tokens_est} tokens")
                         break
 
                     elif chunk["type"] == "error":
