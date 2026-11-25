@@ -50,14 +50,12 @@ RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
     tar -C /usr/local -xzf go.tar.gz && \
     rm go.tar.gz
 
-# 安装 Rust (使用 rsproxy 镜像)
+# 安装 Rust
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
-    PATH=/usr/local/cargo/bin:$PATH \
-    RUSTUP_DIST_SERVER=https://rsproxy.cn \
-    RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup
+    PATH=/usr/local/cargo/bin:$PATH
 RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    curl --proto '=https' --tlsv1.2 -sSf https://rsproxy.cn/rustup-init.sh | sh -s -- -y --default-toolchain stable --profile minimal && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal && \
     chmod -R a+w /usr/local/cargo
 
 # 安装 Python 安全工具
