@@ -13,10 +13,12 @@ from .litellm_adapter import LiteLLMAdapter
 from .baidu_adapter import BaiduAdapter
 from .minimax_adapter import MinimaxAdapter
 from .doubao_adapter import DoubaoAdapter
+from .lazyllm_adapter import LazyLLMAdapter
 
 __all__ = [
     "LiteLLMAdapter",
     "BaiduAdapter",
     "MinimaxAdapter",
     "DoubaoAdapter",
+    "LazyLLMAdapter",
 ]

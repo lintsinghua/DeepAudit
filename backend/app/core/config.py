@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     MINIMAX_API_KEY: Optional[str] = None
     DOUBAO_API_KEY: Optional[str] = None
     OLLAMA_BASE_URL: Optional[str] = "http://localhost:11434/v1"
+    SILICONFLOW_API_KEY: Optional[str] = None
+    SENSENOVA_API_KEY: Optional[str] = None
+    AIPING_API_KEY: Optional[str] = None
+    PPIO_API_KEY: Optional[str] = None
     
     # GitHub配置
     GITHUB_TOKEN: Optional[str] = None

@@ -20,6 +20,10 @@ class LLMProvider(str, Enum):
     MINIMAX = "minimax"      # MiniMax
     DOUBAO = "doubao"        # 字节豆包
     OLLAMA = "ollama"        # Ollama 本地大模型
+    SILICONFLOW = "siliconflow"  # SiliconFlow
+    SENSENOVA = "sensenova"  # SenseNova
+    AIPING = "aiping"        # AI PING
+    PPIO = "ppio"            # PPIO AI
 
 
 @dataclass
@@ -102,6 +106,10 @@ DEFAULT_MODELS: Dict[LLMProvider, str] = {
     LLMProvider.MINIMAX: "minimax-m2",
     LLMProvider.DOUBAO: "doubao-1.6-pro",
     LLMProvider.OLLAMA: "llama3.3-70b",
+    LLMProvider.SILICONFLOW: "deepseek-ai/DeepSeek-V3.2",
+    LLMProvider.SENSENOVA: "SenseChat-5",
+    LLMProvider.AIPING: "DeepSeek-V3.2",
+    LLMProvider.PPIO: "deepseek/deepseek-v3.2",
 }
 
 
@@ -118,6 +126,10 @@ DEFAULT_BASE_URLS: Dict[LLMProvider, str] = {
     LLMProvider.OLLAMA: "http://localhost:11434/v1",
     LLMProvider.GEMINI: "https://generativelanguage.googleapis.com/v1beta",
     LLMProvider.CLAUDE: "https://api.anthropic.com/v1",
+    LLMProvider.SENSENOVA: "https://api.sensenova.com/v1",
+    LLMProvider.SILICONFLOW: "https://api.siliconflow.cn/v1",
+    LLMProvider.AIPING: "https://api.aiping.cloud/v1",
+    LLMProvider.PPIO: "https://api.ppio.ai/v1",
 }
 
 

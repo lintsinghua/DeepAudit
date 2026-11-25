@@ -13,6 +13,7 @@ from .adapters import (
     BaiduAdapter,
     MinimaxAdapter,
     DoubaoAdapter,
+    LazyLLMAdapter,
 )
 
 
@@ -48,7 +49,14 @@ class LLMFactory:
 
     @classmethod
     def _instantiate_adapter(cls, config: LLMConfig) -> BaseLLMAdapter:
-        """根据提供商类型实例化适配器"""
+        """根据提供商类型实例化适配器
+        
+        优先级策略:
+        1. 必须使用原生适配器的提供商（API 格式特殊）
+        2. LiteLLM 支持的提供商
+        3. LazyLLM 支持的提供商
+        4. 不支持的提供商
+        """
         # 如果未指定模型，使用默认模型
         if not config.model:
             config.model = DEFAULT_MODELS.get(config.provider, "gpt-4o-mini")
@@ -57,9 +65,13 @@ class LLMFactory:
         if config.provider in NATIVE_ONLY_PROVIDERS:
             return cls._create_native_adapter(config)
 
-        # 其他提供商使用 LiteLLM
+        # 其他提供商优先使用 LiteLLM
         if LiteLLMAdapter.supports_provider(config.provider):
             return LiteLLMAdapter(config)
+        
+        # 使用 LazyLLM 适配器
+        if LazyLLMAdapter.supports_provider(config.provider):
+            return LazyLLMAdapter(config)
 
         # 不支持的提供商
         raise ValueError(f"不支持的LLM提供商: {config.provider}")
