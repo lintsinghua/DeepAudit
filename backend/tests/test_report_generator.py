@@ -3,9 +3,38 @@ Tests for ReportGenerator._escape_html and _process_issues
 """
 
 import html
+from html.parser import HTMLParser
+from unittest.mock import patch
 import pytest
 
 from app.services.report_generator import ReportGenerator
+
+
+def test_task_pdf_renders_untrusted_values_as_text_and_only_fetches_its_logo():
+    from weasyprint import HTML
+
+    class ReportText(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.text = []
+
+        def handle_data(self, data):
+            self.text.append(data)
+
+    project, branch, issue = "R&D <project>", "feature/<branch>", "A < B & C"
+    with patch("app.services.report_generator.HTML", wraps=HTML) as render:
+        pdf = ReportGenerator.generate_task_report(
+            {"branch_name": branch}, [{"title": issue}], project
+        )
+    assert pdf.startswith(b"%PDF-")
+    args = render.call_args.kwargs
+    parser = ReportText()
+    parser.feed(args["string"])
+    assert f"项目: {project} | 分支: {branch}" in parser.text
+    assert f"1. {issue}" in parser.text
+    for url in ("file:///example.png", "https://example.invalid/logo.png"):
+        with pytest.raises(ValueError):
+            args["url_fetcher"](url)
 
 
 class TestEscapeHtml:

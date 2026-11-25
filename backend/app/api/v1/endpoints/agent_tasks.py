@@ -35,6 +35,7 @@ from app.models.user_config import UserConfig
 from app.services.agent.event_manager import EventManager
 from app.services.agent.streaming import StreamHandler, StreamEvent, StreamEventType
 from app.services.git_ssh_service import GitSSHOperations
+from app.utils.repo_utils import parse_repository_url
 from app.core.encryption import decrypt_sensitive_data
 
 logger = logging.getLogger(__name__)
@@ -2403,7 +2404,8 @@ async def _get_project_root(
     import zipfile
     import subprocess
     import shutil
-    from urllib.parse import urlparse, urlunparse
+    from base64 import b64encode
+    from urllib.parse import quote, unquote, urlparse
 
     # 辅助函数：发送事件
     async def emit(message: str, level: str = "info"):
@@ -2464,22 +2466,24 @@ async def _get_project_root(
 
         # 🔥 安全验证：检查 Git URL 是否安全
         if not validate_git_url(repo_url):
-            logger.error(f"❌ 无效的 Git URL: {repo_url}")
+            logger.error("无效的 Git URL")
             await emit(f"❌ 无效的仓库 URL", "error")
-            raise RuntimeError(f"无效的仓库 URL: {repo_url}")
-
-        await emit(f"🔄 正在获取仓库: {repo_url}")
+            raise RuntimeError("无效的仓库 URL")
 
         # 检测是否为SSH URL（SSH链接不支持ZIP下载）
         is_ssh_url = GitSSHOperations.is_ssh_url(repo_url)
 
         # 解析仓库 URL 获取 owner/repo
-        parsed = urlparse(repo_url)
-        path_parts = parsed.path.strip('/').replace('.git', '').split('/')
-        if len(path_parts) >= 2:
-            owner, repo = path_parts[0], path_parts[1]
-        else:
-            owner, repo = None, None
+        repo_info = None
+        url_credentials = None
+        if not is_ssh_url and repo_type in ("github", "gitlab", "gitea"):
+            repo_info = parse_repository_url(repo_url, repo_type)
+            origin = repo_info["server_url"]
+            parsed = urlparse(repo_url)
+            if parsed.username is not None:
+                url_credentials = f"{unquote(parsed.username)}:{unquote(parsed.password or '')}"
+            repo_url = parsed._replace(netloc=urlparse(origin).netloc).geturl()
+        await emit(f"🔄 正在获取仓库: {repo_url}")
 
         # 构建分支尝试顺序
         branches_to_try = []
@@ -2507,7 +2511,7 @@ async def _get_project_root(
             logger.info(f"检测到SSH URL，跳过ZIP下载，直接使用Git克隆")
             await emit(f"🔑 检测到SSH认证，使用Git克隆...")
 
-        if owner and repo and not is_ssh_url:
+        if repo_info and repo_type in ("github", "gitlab"):
             import httpx
 
             for branch in branches_to_try:
@@ -2519,24 +2523,20 @@ async def _get_project_root(
                 os.makedirs(base_path, exist_ok=True)
 
                 # 构建 ZIP 下载 URL
-                if repo_type == "github" or "github.com" in repo_url:
+                if repo_type == "github":
                     # GitHub ZIP 下载 URL
+                    owner, repo = repo_info["owner"], repo_info["repo"]
                     zip_url = f"https://github.com/{owner}/{repo}/archive/refs/heads/{branch}.zip"
                     headers = {}
                     if github_token:
                         headers["Authorization"] = f"token {github_token}"
-                elif repo_type == "gitlab" or "gitlab" in repo_url:
+                else:
                     # GitLab ZIP 下载 URL（需要对 owner/repo 进行 URL 编码）
-                    import urllib.parse
-                    project_path = urllib.parse.quote(f"{owner}/{repo}", safe='')
-                    gitlab_host = parsed.netloc
-                    zip_url = f"https://{gitlab_host}/api/v4/projects/{project_path}/repository/archive.zip?sha={branch}"
+                    project_path = quote(repo_info["project_path"], safe="")
+                    zip_url = f"{origin}/api/v4/projects/{project_path}/repository/archive.zip?sha={branch}"
                     headers = {}
                     if gitlab_token:
                         headers["PRIVATE-TOKEN"] = gitlab_token
-                else:
-                    # 其他平台，跳过 ZIP 下载
-                    break
 
                 logger.info(f"📦 尝试下载 ZIP 归档 (分支: {branch})...")
                 await emit(f"📦 尝试下载 ZIP 归档 (分支: {branch})")
@@ -2545,8 +2545,13 @@ async def _get_project_root(
                     zip_temp_path = f"/tmp/repo_{task_id}_{branch}.zip"
 
                     async def download_zip():
-                        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                        async with httpx.AsyncClient(timeout=60.0, follow_redirects=False) as client:
                             resp = await client.get(zip_url, headers=headers)
+                            redirect = resp.next_request
+                            if (repo_type == "github" and redirect is not None and
+                                    redirect.url.scheme == "https" and redirect.url.host == "codeload.github.com" and
+                                    redirect.url.port is None and not redirect.url.userinfo):
+                                resp = await client.get(redirect.url)
                             if resp.status_code == 200:
                                 with open(zip_temp_path, 'wb') as f:
                                     f.write(resp.content)
@@ -2623,41 +2628,21 @@ async def _get_project_root(
                 await emit(f"❌ Git 检测超时", "error")
                 raise RuntimeError("Git 检测超时")
 
-            # 构建带认证的 URL
-            auth_url = repo_url
-            if repo_type == "github" and github_token:
-                auth_url = urlunparse((
-                    parsed.scheme,
-                    f"{github_token}@{parsed.netloc}",
-                    parsed.path,
-                    parsed.params,
-                    parsed.query,
-                    parsed.fragment
-                ))
-                await emit(f"🔐 使用 GitHub Token 认证")
-            elif repo_type == "gitlab" and gitlab_token:
-                auth_url = urlunparse((
-                    parsed.scheme,
-                    f"oauth2:{gitlab_token}@{parsed.netloc}",
-                    parsed.path,
-                    parsed.params,
-                    parsed.query,
-                    parsed.fragment
-                ))
-                await emit(f"🔐 使用 GitLab Token 认证")
-            elif repo_type == "gitea" and gitea_token:
-                auth_url = urlunparse((
-                    parsed.scheme,
-                    f"{gitea_token}@{parsed.netloc}",
-                    parsed.path,
-                    parsed.params,
-                    parsed.query,
-                    parsed.fragment
-                ))
-                await emit(f"🔐 使用 Gitea Token 认证")
-            elif is_ssh_url and ssh_private_key:
-                await emit(f"🔐 使用 SSH Key 认证")
-                
+            git_command = ["git"]
+            git_env = None
+            if repo_info:
+                git_command += ["-c", "http.followRedirects=false"]
+                credentials = {
+                    "github": f"x-access-token:{github_token}" if github_token else None,
+                    "gitlab": f"oauth2:{gitlab_token}" if gitlab_token else None,
+                    "gitea": f"{gitea_token}:" if gitea_token else None,
+                }
+                credential = credentials[repo_type] or url_credentials
+                if credential:
+                    basic = b64encode(credential.encode()).decode("ascii")
+                    git_env = {**os.environ, "DEEPAUDIT_GIT_AUTH": f"Authorization: Basic {basic}"}
+                    git_command.append(f"--config-env=http.{origin}/.extraHeader=DEEPAUDIT_GIT_AUTH")
+
             for branch in branches_to_try:
                 check_cancelled()
 
@@ -2704,7 +2689,8 @@ async def _get_project_root(
                         async def run_clone():
                             return await asyncio.to_thread(
                                 subprocess.run,
-                                ["git", "clone", "--depth", "1", "--branch", branch, auth_url, base_path],
+                                [*git_command, "clone", "--depth", "1", "--branch", branch, repo_url, base_path],
+                                env=git_env,
                                 capture_output=True,
                                 text=True,
                                 timeout=120,
@@ -2780,7 +2766,8 @@ async def _get_project_root(
                         async def run_default_clone():
                             return await asyncio.to_thread(
                                 subprocess.run,
-                                ["git", "clone", "--depth", "1", auth_url, base_path],
+                                [*git_command, "clone", "--depth", "1", repo_url, base_path],
+                                env=git_env,
                                 capture_output=True,
                                 text=True,
                                 timeout=120,

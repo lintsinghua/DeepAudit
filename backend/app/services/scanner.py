@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse, quote
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.utils.repo_utils import parse_repository_url
+from app.utils.repo_utils import parse_repository_url, trusted_repository_origin
 from app.models.audit import AuditTask, AuditIssue
 from app.models.project import Project
 from app.services.llm.service import LLMService
@@ -121,6 +121,7 @@ async def github_api(url: str, token: str = None) -> Any:
 
 async def gitea_api(url: str, token: str = None) -> Any:
     """调用Gitea API"""
+    trusted_repository_origin(url, "gitea")
     headers = {"Content-Type": "application/json"}
     t = token or settings.GITEA_TOKEN
     if t:
@@ -139,6 +140,7 @@ async def gitea_api(url: str, token: str = None) -> Any:
 
 async def gitlab_api(url: str, token: str = None) -> Any:
     """调用GitLab API"""
+    trusted_repository_origin(url, "gitlab")
     headers = {"Content-Type": "application/json"}
     t = token or settings.GITLAB_TOKEN
     if t:
