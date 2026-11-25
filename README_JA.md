@@ -6,7 +6,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-3.0.4-blue.svg)](https://github.com/lintsinghua/DeepAudit/releases)
+[![Version](https://img.shields.io/badge/version-3.8.2-blue.svg)](https://github.com/lintsinghua/DeepAudit/releases)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![React](https://img.shields.io/badge/React-18-61dafb.svg)](https://reactjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178c6.svg)](https://www.typescriptlang.org/)
@@ -245,6 +245,8 @@ DeepAudit/
 
 ビルド済み Docker イメージを使用。コードのクローン不要、1 コマンドで起動できます：
 
+初回起動前に、Compose を実行するシェルで `BOOTSTRAP_ADMIN_EMAIL` と `BOOTSTRAP_ADMIN_PASSWORD` をエクスポートしてください。未登録のメールアドレスと、12 文字以上かつ UTF-8 で 72 バイト以内の専用パスワードを指定します。旧デモアカウントが唯一の管理者で、初期パスワードを使っている場合も、アップグレード前に設定してください。
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/lintsinghua/DeepAudit/v3.0.0/docker-compose.prod.yml | docker compose -f - up -d
 ```
@@ -319,7 +321,7 @@ git clone https://github.com/lintsinghua/DeepAudit.git && cd DeepAudit
 
 # 2. 環境変数を設定
 cp backend/env.example backend/.env
-# backend/.env を編集し、あなたの LLM API Key を入力
+# backend/.env に管理者の初期設定と LLM API キーを入力
 
 # 3. ワンクリック起動
 docker compose up -d
@@ -352,12 +354,14 @@ docker compose up -d redis db adminer
 cd backend
 # 環境設定
 cp env.example .env
+# .env に管理者の初期設定を入力
 
 # uv で環境を管理（推奨）
 uv sync
 source .venv/bin/activate
 
 # API サービスを起動
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 

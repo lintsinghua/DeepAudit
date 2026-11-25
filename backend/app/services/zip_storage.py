@@ -3,8 +3,11 @@ ZIP文件存储服务
 用于管理项目的ZIP文件持久化存储
 """
 
+import json
 import os
 import shutil
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 from datetime import datetime, timezone
@@ -19,14 +22,35 @@ def get_zip_storage_path() -> Path:
     return path
 
 
+def is_valid_project_id(project_id: str) -> bool:
+    """兼容旧项目 ID，但仅允许单个文件名组件。"""
+    return (isinstance(project_id, str) and bool(project_id.strip()) and
+            project_id not in (".", "..") and
+            not any(c in "/\\:" or ord(c) < 32 or ord(c) == 127 for c in project_id))
+
+
 def get_project_zip_path(project_id: str) -> Path:
     """获取项目ZIP文件路径"""
+    if not is_valid_project_id(project_id):
+        raise ValueError("无效的项目 ID")
     return get_zip_storage_path() / f"{project_id}.zip"
 
 
 def get_project_zip_meta_path(project_id: str) -> Path:
     """获取项目ZIP文件元数据路径"""
-    return get_zip_storage_path() / f"{project_id}.meta"
+    return get_project_zip_path(project_id).with_suffix(".meta")
+
+
+@contextmanager
+def _atomic_file(path: Path, mode: str):
+    # 替换目录项，避免写入旧文件或符号链接的目标。
+    tmp = tempfile.NamedTemporaryFile(mode=mode, dir=path.parent, delete=False)
+    try:
+        with tmp:
+            yield tmp
+        os.replace(tmp.name, path)
+    finally:
+        Path(tmp.name).unlink(missing_ok=True)
 
 
 async def save_project_zip(project_id: str, file_path: str, original_filename: str) -> dict:
@@ -45,10 +69,9 @@ async def save_project_zip(project_id: str, file_path: str, original_filename: s
     meta_path = get_project_zip_meta_path(project_id)
     
     # 复制文件到存储目录
-    shutil.copy2(file_path, target_path)
-    
-    # 获取文件大小
-    file_size = os.path.getsize(target_path)
+    with open(file_path, "rb") as source, _atomic_file(target_path, "wb") as dest:
+        shutil.copyfileobj(source, dest)
+        file_size = dest.tell()
     
     # 保存元数据
     meta = {
@@ -58,8 +81,7 @@ async def save_project_zip(project_id: str, file_path: str, original_filename: s
         "project_id": project_id
     }
     
-    import json
-    with open(meta_path, 'w') as f:
+    with _atomic_file(meta_path, "w") as f:
         json.dump(meta, f)
     
     print(f"✓ ZIP文件已保存: {project_id} ({file_size / 1024 / 1024:.2f} MB)")
@@ -77,9 +99,11 @@ async def load_project_zip(project_id: str) -> Optional[str]:
     Returns:
         ZIP文件路径，如果不存在返回None
     """
+    if not is_valid_project_id(project_id):
+        return None
     zip_path = get_project_zip_path(project_id)
     
-    if zip_path.exists():
+    if not zip_path.is_symlink() and zip_path.is_file():
         return str(zip_path)
     
     return None
@@ -95,12 +119,13 @@ async def get_project_zip_meta(project_id: str) -> Optional[dict]:
     Returns:
         元数据字典，如果不存在返回None
     """
+    if not is_valid_project_id(project_id):
+        return None
     meta_path = get_project_zip_meta_path(project_id)
     
-    if not meta_path.exists():
+    if meta_path.is_symlink() or not meta_path.is_file():
         return None
     
-    import json
     with open(meta_path, 'r') as f:
         return json.load(f)
 
@@ -115,6 +140,8 @@ async def delete_project_zip(project_id: str) -> bool:
     Returns:
         是否成功删除
     """
+    if not is_valid_project_id(project_id):
+        return False
     zip_path = get_project_zip_path(project_id)
     meta_path = get_project_zip_meta_path(project_id)
     
@@ -141,5 +168,4 @@ async def has_project_zip(project_id: str) -> bool:
     Returns:
         是否存在ZIP文件
     """
-    zip_path = get_project_zip_path(project_id)
-    return zip_path.exists()
+    return await load_project_zip(project_id) is not None

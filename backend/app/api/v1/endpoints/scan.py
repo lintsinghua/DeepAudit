@@ -21,7 +21,7 @@ from app.models.analysis import InstantAnalysis
 from app.models.user_config import UserConfig
 from app.services.llm.service import LLMService
 from app.services.scanner import task_control, is_text_file, should_exclude, get_language_from_path, get_analysis_config
-from app.services.zip_storage import load_project_zip, save_project_zip, has_project_zip
+from app.services.zip_storage import is_valid_project_id, load_project_zip, save_project_zip, has_project_zip
 from app.core.config import settings
 
 router = APIRouter()
@@ -239,6 +239,8 @@ async def scan_zip(
     Upload and scan a ZIP file.
     上传ZIP文件并启动扫描，同时将ZIP文件保存到持久化存储
     """
+    if not is_valid_project_id(project_id):
+        raise HTTPException(status_code=400, detail="无效的项目 ID")
     # Verify project exists
     project = await db.get(Project, project_id)
     if not project:

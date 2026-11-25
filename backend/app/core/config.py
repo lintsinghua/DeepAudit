@@ -1,5 +1,5 @@
 from typing import List, Union, Optional
-from pydantic import AnyHttpUrl, validator
+from pydantic import AnyHttpUrl, EmailStr, SecretStr, validator
 from pydantic_settings import BaseSettings
 
 
@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
     
+    BOOTSTRAP_ADMIN_EMAIL: EmailStr | None = None
+    BOOTSTRAP_ADMIN_PASSWORD: SecretStr | None = None
+
     # CORS
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
 
@@ -71,9 +74,11 @@ class Settings(BaseSettings):
     
     # GitLab配置
     GITLAB_TOKEN: Optional[str] = None
+    GITLAB_ORIGIN: str = "https://gitlab.com"
     
     # Gitea配置
     GITEA_TOKEN: Optional[str] = None
+    GITEA_ORIGIN: Optional[str] = None
     
     # 扫描配置
     MAX_ANALYZE_FILES: int = 0  # 最大分析文件数，0表示无限制

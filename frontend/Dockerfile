@@ -19,7 +19,7 @@ ENV NO_PROXY="*"
 
 # 配置国内 npm 镜像源
 RUN npm config set registry https://registry.npmmirror.com && \
-    npm install -g pnpm && \
+    npm install -g pnpm@9 && \
     pnpm config set registry https://registry.npmmirror.com
 
 # 复制依赖文件

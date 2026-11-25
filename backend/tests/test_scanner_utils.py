@@ -357,6 +357,11 @@ class TestGitlabApi:
 
 class TestGiteaApi:
 
+    @pytest.fixture(autouse=True)
+    def trusted_gitea(self, monkeypatch):
+        from app.utils.repo_utils import settings
+        monkeypatch.setattr(settings, "GITEA_ORIGIN", "https://gitea.example.com")
+
     async def test_success_with_token(self):
         mock_response = MagicMock()
         mock_response.status_code = 200

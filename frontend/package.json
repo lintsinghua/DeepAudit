@@ -1,6 +1,6 @@
 {
 	"name": "deep-audit",
-	"version": "3.0.4",
+	"version": "3.8.2",
 	"type": "module",
 	"scripts": {
 		"dev": "vite",

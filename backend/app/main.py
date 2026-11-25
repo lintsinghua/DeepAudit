@@ -53,23 +53,13 @@ async def check_agent_services():
 async def lifespan(app: FastAPI):
     """
     应用生命周期管理
-    启动时初始化数据库（创建默认账户等）
+    启动时检查旧版演示凭据并初始化系统模板
     """
     logger.info("DeepAudit 后端服务启动中...")
 
-    # 初始化数据库（创建默认账户）
-    # 注意：需要先运行 alembic upgrade head 创建表结构
-    try:
-        async with AsyncSessionLocal() as db:
-            await init_db(db)
-        logger.info("  - 数据库初始化完成")
-    except Exception as e:
-        # 表不存在时静默跳过，等待用户运行数据库迁移
-        error_msg = str(e)
-        if "does not exist" in error_msg or "UndefinedTableError" in error_msg:
-            logger.info("数据库表未创建，请先运行: alembic upgrade head")
-        else:
-            logger.warning(f"数据库初始化跳过: {e}")
+    # 先完成凭据升级，再开始接受请求。
+    async with AsyncSessionLocal() as db:
+        await init_db(db)
 
     # 检查 Agent 服务
     logger.info("检查 Agent 核心服务...")
@@ -87,8 +77,6 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 50)
     logger.info("DeepAudit 后端服务已启动")
     logger.info(f"API 文档: http://localhost:8000/docs")
-    logger.info("=" * 50)
-    logger.info("演示账户: demo@example.com / demo123")
     logger.info("=" * 50)
 
     yield
@@ -124,8 +112,4 @@ async def root():
     return {
         "message": "Welcome to DeepAudit API",
         "docs": "/docs",
-        "demo_account": {
-            "email": "demo@example.com",
-            "password": "demo123"
-        }
     }

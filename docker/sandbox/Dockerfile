@@ -8,12 +8,12 @@ LABEL maintainer="XCodeReviewer Team"
 LABEL description="Secure sandbox environment for vulnerability verification and security scanning"
 
 # 安装基本工具
-# 安装基本工具
-# 使用阿里云镜像加速 apt
 RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
-    sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
-    apt-get update && apt-get install -y --no-install-recommends \
+    sed -i 's|http://deb.debian.org/debian-security|https://snapshot.debian.org/archive/debian-security/20260901T000000Z|g' /etc/apt/sources.list && \
+    sed -i 's|http://deb.debian.org/debian|https://snapshot.debian.org/archive/debian/20260901T000000Z|g' /etc/apt/sources.list && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=5 update && \
+    apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
     curl \
     wget \
     netcat-openbsd \
@@ -32,11 +32,13 @@ RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
     llvm \
     && rm -rf /var/lib/apt/lists/*
 
+ARG TARGETARCH
+
 # 安装 Node.js (用于 JavaScript/TypeScript 代码执行 和 npm audit)
-# 使用淘宝/阿里云镜像加速
 RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
+    case "$TARGETARCH" in amd64) node_arch=x64 ;; arm64) node_arch=arm64 ;; *) exit 1 ;; esac \
+    && curl -fsSL "https://nodejs.org/dist/v20.20.2/node-v20.20.2-linux-${node_arch}.tar.gz" \
+        | tar -xz -C /usr/local --strip-components=1 \
     && npm config set registry https://registry.npmmirror.com \
     && rm -rf /var/lib/apt/lists/*
 
@@ -44,18 +46,16 @@ RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
 ENV PATH=$PATH:/usr/local/go/bin
 ENV GOPROXY=https://goproxy.cn,direct
 RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    curl -L https://mirrors.aliyun.com/golang/go1.21.6.linux-amd64.tar.gz -o go.tar.gz && \
+    curl -L "https://mirrors.aliyun.com/golang/go1.21.6.linux-${TARGETARCH}.tar.gz" -o go.tar.gz && \
     tar -C /usr/local -xzf go.tar.gz && \
     rm go.tar.gz
 
-# 安装 Rust (使用 rsproxy 镜像)
+# 安装 Rust
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
-    PATH=/usr/local/cargo/bin:$PATH \
-    RUSTUP_DIST_SERVER=https://rsproxy.cn \
-    RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup
+    PATH=/usr/local/cargo/bin:$PATH
 RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    curl --proto '=https' --tlsv1.2 -sSf https://rsproxy.cn/rustup-init.sh | sh -s -- -y --default-toolchain stable --profile minimal && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal && \
     chmod -R a+w /usr/local/cargo
 
 # 安装 Python 安全工具
@@ -77,7 +77,8 @@ RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
 
 # 安装 Gitleaks
 RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    curl -L https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz -o gitleaks.tar.gz && \
+    case "$TARGETARCH" in amd64) gitleaks_arch=x64 ;; arm64) gitleaks_arch=arm64 ;; *) exit 1 ;; esac && \
+    curl -L "https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_${gitleaks_arch}.tar.gz" -o gitleaks.tar.gz && \
     tar -xzf gitleaks.tar.gz && \
     mv gitleaks /usr/local/bin/ && \
     rm gitleaks.tar.gz
@@ -88,7 +89,7 @@ RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
 
 # 安装 OSV-Scanner
 RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    curl -L https://github.com/google/osv-scanner/releases/download/v1.6.2/osv-scanner_1.6.2_linux_amd64 -o /usr/local/bin/osv-scanner && \
+    curl -L "https://github.com/google/osv-scanner/releases/download/v1.6.2/osv-scanner_1.6.2_linux_${TARGETARCH}" -o /usr/local/bin/osv-scanner && \
     chmod +x /usr/local/bin/osv-scanner
 
 # 创建非 root 用户

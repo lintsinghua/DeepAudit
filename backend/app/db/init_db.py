@@ -1,14 +1,17 @@
 """
 数据库初始化模块
-在应用启动时创建默认演示账户和演示数据
+检查旧版演示凭据并初始化系统模板
 """
 import json
 import logging
+import secrets
 from datetime import datetime, timedelta, timezone
+from sqlalchemy import or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.security import get_password_hash
+from app.core.config import settings
+from app.core.security import get_password_hash, verify_password
 from app.models.user import User
 from app.models.project import Project, ProjectMember
 from app.models.audit import AuditTask, AuditIssue
@@ -16,36 +19,9 @@ from app.models.analysis import InstantAnalysis
 
 logger = logging.getLogger(__name__)
 
-# 默认演示账户配置
-DEFAULT_DEMO_EMAIL = "demo@example.com"
-DEFAULT_DEMO_PASSWORD = "demo123"
-DEFAULT_DEMO_NAME = "演示用户"
-
-
-async def create_demo_user(db: AsyncSession) -> User | None:
-    """
-    创建演示用户账户
-    - demo@example.com / demo123
-    """
-    result = await db.execute(select(User).where(User.email == DEFAULT_DEMO_EMAIL))
-    demo_user = result.scalars().first()
-    
-    if not demo_user:
-        demo_user = User(
-            email=DEFAULT_DEMO_EMAIL,
-            hashed_password=get_password_hash(DEFAULT_DEMO_PASSWORD),
-            full_name=DEFAULT_DEMO_NAME,
-            is_active=True,
-            is_superuser=True,  # 演示用户拥有管理员权限以便体验所有功能
-            role="admin",
-        )
-        db.add(demo_user)
-        await db.flush()
-        logger.info(f"✓ 创建演示账户: {DEFAULT_DEMO_EMAIL}")
-        return demo_user
-    else:
-        logger.info(f"演示账户已存在: {DEFAULT_DEMO_EMAIL}")
-        return demo_user
+# 仅用于识别升级前生成的账户。
+LEGACY_DEMO_EMAIL = "demo@example.com"
+LEGACY_DEMO_PASSWORD = "demo123"
 
 
 async def create_demo_data(db: AsyncSession, user: User) -> None:
@@ -259,21 +235,57 @@ async def create_demo_data(db: AsyncSession, user: User) -> None:
     logger.info("✓ 演示数据创建完成")
 
 
-async def init_db(db: AsyncSession) -> None:
-    """
-    初始化数据库
-    """
-    logger.info("开始初始化数据库...")
-    
-    # 创建演示用户
-    demo_user = await create_demo_user(db)
-    
-    # 创建演示数据
-    if demo_user:
-        await create_demo_data(db, demo_user)
-    
+async def disable_legacy_credentials(db: AsyncSession) -> None:
+    # 管理员可以修改邮箱，因此也检查已改名的旧版演示管理员。
+    users = await db.scalars(
+        select(User).where(
+            or_(User.email == LEGACY_DEMO_EMAIL, User.is_superuser.is_(True)),
+        ).order_by(User.id).with_for_update()
+    )
+    for user in users:
+        if verify_password(LEGACY_DEMO_PASSWORD, user.hashed_password):
+            user.is_active = False
+            user.hashed_password = get_password_hash(secrets.token_urlsafe(32))
+            logger.warning("已禁用沿用旧版默认密码的账户")
+    # 即使部署者还未配置新管理员，也要先使旧凭据失效。
     await db.commit()
-    
+
+
+async def ensure_admin(db: AsyncSession) -> None:
+    async with db.begin():
+        # PostgreSQL 默认使用 READ COMMITTED。串行化多个后端副本的首次初始化。
+        await db.execute(text("LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE"))
+        active_admin = await db.scalar(
+            select(User.id).where(User.is_active.is_(True), User.is_superuser.is_(True)).limit(1)
+        )
+        if active_admin is not None:
+            return
+
+        email = settings.BOOTSTRAP_ADMIN_EMAIL
+        secret = settings.BOOTSTRAP_ADMIN_PASSWORD
+        if not email or not secret:
+            raise RuntimeError("缺少可用管理员，请配置 BOOTSTRAP_ADMIN_EMAIL 和 BOOTSTRAP_ADMIN_PASSWORD")
+        password = secret.get_secret_value()
+        if len(password.strip()) < 12 or len(password.encode("utf-8")) > 72:
+            raise RuntimeError("管理员初始密码至少需要 12 个字符，且不能超过 72 个 UTF-8 字节")
+        if await db.scalar(select(User.id).where(User.email == email)) is not None:
+            raise RuntimeError("管理员初始化邮箱已被占用，请为 BOOTSTRAP_ADMIN_EMAIL 选择新邮箱")
+
+        db.add(User(
+            email=email,
+            hashed_password=get_password_hash(password),
+            full_name="Administrator",
+            role="admin",
+            is_active=True,
+            is_superuser=True,
+        ))
+
+
+async def init_db(db: AsyncSession) -> None:
+    """初始化管理员、系统模板和规则。"""
+    await disable_legacy_credentials(db)
+    await ensure_admin(db)
+
     # 初始化系统模板和规则
     try:
         from app.services.init_templates import init_templates_and_rules

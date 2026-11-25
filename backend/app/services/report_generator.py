@@ -18,6 +18,7 @@ if sys.platform == 'darwin':
 from weasyprint import HTML, CSS
 from weasyprint.text.fonts import FontConfiguration
 from jinja2 import Template
+from markupsafe import Markup
 
 class ReportGenerator:
     """
@@ -403,7 +404,7 @@ class ReportGenerator:
         """安全转义 HTML 特殊字符"""
         if text is None:
             return None
-        return html.escape(str(text))
+        return Markup(html.escape(str(text)))
 
     @classmethod
     def _process_issues(cls, issues: List[Dict]) -> List[Dict]:
@@ -453,13 +454,19 @@ class ReportGenerator:
     @classmethod
     def _render_pdf(cls, context: Dict[str, Any]) -> bytes:
         # 注入 Logo
-        context['logo_b64'] = cls._get_logo_base64()
+        logo_b64 = cls._get_logo_base64()
+        context['logo_b64'] = logo_b64
+
+        def fetch_report_resource(url):
+            if logo_b64 and url == f"data:image/png;base64,{logo_b64}":
+                return {"string": base64.b64decode(logo_b64), "mime_type": "image/png"}
+            raise ValueError("报告仅支持内嵌的项目 Logo")
         
-        template = Template(cls._TEMPLATE)
+        template = Template(cls._TEMPLATE, autoescape=True)
         html_content = template.render(**context)
         font_config = FontConfiguration()
         pdf_file = io.BytesIO()
-        HTML(string=html_content).write_pdf(
+        HTML(string=html_content, url_fetcher=fetch_report_resource).write_pdf(
             pdf_file,
             font_config=font_config,
             presentational_hints=True

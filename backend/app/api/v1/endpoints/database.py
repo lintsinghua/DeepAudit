@@ -19,6 +19,7 @@ from app.models.project import Project, ProjectMember
 from app.models.audit import AuditTask, AuditIssue
 from app.models.analysis import InstantAnalysis
 from app.models.user_config import UserConfig
+from app.services.zip_storage import is_valid_project_id
 
 router = APIRouter()
 
@@ -233,6 +234,8 @@ async def import_database(
         # 1. 导入项目（跳过已存在的）
         if "projects" in data:
             for p_data in data["projects"]:
+                if p_data.get("id") is not None and not is_valid_project_id(p_data["id"]):
+                    raise HTTPException(status_code=400, detail="无效的项目 ID")
                 existing = await db.get(Project, p_data.get("id"))
                 if not existing:
                     project = Project(
@@ -364,6 +367,9 @@ async def import_database(
         
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="无效的 JSON 文件格式")
+    except HTTPException:
+        await db.rollback()
+        raise
     except Exception as e:
         print(f"导入数据失败: {e}")
         await db.rollback()

@@ -3,7 +3,7 @@
 创建 Agent 审计任务演示数据
 用于生成 HTML 报告示例展示
 
-运行方式:
+先注册专用演示账户 demo@example.com 并自行设置密码，再运行:
 cd backend && python -m scripts.create_agent_demo_data
 """
 
@@ -22,6 +22,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.future import select
 
 from app.core.config import settings
+from app.db.init_db import create_demo_data
 from app.models.user import User
 from app.models.project import Project
 from app.models.agent_task import (
@@ -1247,12 +1248,14 @@ async def main():
             result = await db.execute(select(User).where(User.email == "demo@example.com"))
             demo_user = result.scalars().first()
 
-            if not demo_user:
-                print("❌ 未找到演示用户 (demo@example.com)")
-                print("请先运行应用初始化数据库")
+            if not demo_user or not demo_user.is_active:
+                print("❌ 未找到启用的演示用户 (demo@example.com)")
+                print("请先注册专用演示账户并自行设置密码")
                 return
 
             print(f"使用演示用户: {demo_user.email}")
+
+            await create_demo_data(db, demo_user)
 
             # 创建或获取演示项目
             project = await get_or_create_demo_project(db, demo_user.id)

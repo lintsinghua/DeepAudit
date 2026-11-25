@@ -24,7 +24,7 @@ cd DeepAudit
 
 # 2. 配置后端环境变量
 cp backend/env.example backend/.env
-# 编辑 backend/.env，配置 LLM API Key
+# 编辑 backend/.env，设置 BOOTSTRAP_ADMIN_EMAIL、BOOTSTRAP_ADMIN_PASSWORD 和 LLM API Key
 
 # 3. 启动所有服务
 docker compose up -d
@@ -34,14 +34,13 @@ docker compose up -d
 # 后端 API: http://localhost:8000/docs
 ```
 
-### 演示账户
+### 初始化管理员
 
-系统启动时会自动创建演示账户，包含示例项目和审计数据，可直接体验完整功能：
+首次启动前，在 `backend/.env` 中设置 `BOOTSTRAP_ADMIN_EMAIL` 和 `BOOTSTRAP_ADMIN_PASSWORD`。使用未注册的邮箱和专用密码，密码至少 12 个字符，最多 72 个 UTF-8 字节。使用预构建镜像时，在运行 Compose 的 shell 中导出这两个变量，或使用 Compose 的 `--env-file` 传入。启动后用这组凭据登录。公开注册的账户均为普通成员。
 
-- 📧 邮箱：`demo@example.com`
-- 🔑 密码：`demo123`
+升级会停用仍使用旧默认密码的演示账户，保留其项目和审计记录。旧账户已签发的令牌也会因停用而失效。如果这是唯一管理员，请在升级前配置一个新邮箱及密码。已有可用管理员时，启动会保留其密码并跳过创建。
 
-> ⚠️ **安全提示**: 生产环境部署后，请删除演示账户或修改密码。
+首次登录成功后即可从部署配置移除这两个变量，并重新创建后端容器。以后请在账户设置中修改密码。
 
 ---
 
@@ -231,7 +230,6 @@ Docker Compose 默认配置已适用于生产环境：
 4. **数据库安全**：修改默认数据库密码，限制访问 IP
 5. **API 限流**：配置 Nginx 或应用层限流
 6. **日志监控**：配置日志收集和监控告警
-7. **删除演示账户**：生产环境请删除或禁用 demo 账户
 
 ### Nginx 反向代理配置（可选）
 
@@ -325,7 +323,7 @@ uv sync
 
 # 4. 配置环境变量
 cp env.example .env
-# 编辑 .env 文件，配置数据库和 LLM 参数
+# 编辑 .env，配置数据库、LLM 和首次启动所需的管理员邮箱及密码
 
 # 5. 初始化数据库
 uv run alembic upgrade head
