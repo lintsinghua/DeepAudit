@@ -9,8 +9,10 @@ LABEL description="Secure sandbox environment for vulnerability verification and
 
 # 安装基本工具
 RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
+    sed -i 's|http://deb.debian.org/debian-security|https://snapshot.debian.org/archive/debian-security/20261124T000000Z|g' /etc/apt/sources.list && \
+    sed -i 's|http://deb.debian.org/debian|https://snapshot.debian.org/archive/debian/20261124T000000Z|g' /etc/apt/sources.list && \
     rm -rf /var/lib/apt/lists/* && \
-    apt-get -o Acquire::Retries=5 -o Acquire::http::No-Cache=true update && \
+    apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=5 update && \
     apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
     curl \
     wget \
