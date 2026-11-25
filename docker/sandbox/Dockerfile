@@ -32,11 +32,13 @@ RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
     llvm \
     && rm -rf /var/lib/apt/lists/*
 
+ARG TARGETARCH
+
 # 安装 Node.js (用于 JavaScript/TypeScript 代码执行 和 npm audit)
-# 使用淘宝/阿里云镜像加速
 RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
+    case "$TARGETARCH" in amd64) node_arch=x64 ;; arm64) node_arch=arm64 ;; *) exit 1 ;; esac \
+    && curl -fsSL "https://nodejs.org/dist/v20.20.2/node-v20.20.2-linux-${node_arch}.tar.gz" \
+        | tar -xz -C /usr/local --strip-components=1 \
     && npm config set registry https://registry.npmmirror.com \
     && rm -rf /var/lib/apt/lists/*
 
