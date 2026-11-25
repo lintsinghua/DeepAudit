@@ -1,6 +1,6 @@
 [project]
 name = "deepaudit-backend"
-version = "3.8.1"
+version = "3.8.2"
 description = "DeepAudit Backend API - AI-Powered Code Security Audit Platform"
 requires-python = ">=3.11"
 readme = "README.md"

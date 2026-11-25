@@ -12,7 +12,7 @@
 
 环境要求：
     - 后端服务运行在 http://localhost:8000
-    - 需要有效的用户认证 token
+    - 通过 AUTH_TOKEN 提供测试账户的有效 token
 """
 
 import httpx
@@ -26,10 +26,6 @@ from pathlib import Path
 
 # 配置 - 使用 127.0.0.1 避免 IPv6 问题
 BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000/api/v1")
-# 演示账户
-DEMO_EMAIL = "demo@example.com"
-DEMO_PASSWORD = "demo123"
-# 如果没有设置 token，会尝试用演示账户登录
 AUTH_TOKEN = os.getenv("AUTH_TOKEN", "")
 
 # 测试数据
@@ -92,28 +88,6 @@ def get_headers(token: str = None):
     return headers
 
 
-def login_demo_account() -> str | None:
-    """使用演示账户登录获取 token"""
-    try:
-        with httpx.Client(timeout=10.0, proxy=None, trust_env=False) as client:
-            response = client.post(
-                f"{BASE_URL}/auth/login",
-                data={
-                    "username": DEMO_EMAIL,
-                    "password": DEMO_PASSWORD,
-                },
-                headers={"Content-Type": "application/x-www-form-urlencoded"}
-            )
-            if response.status_code == 200:
-                data = response.json()
-                return data.get("access_token")
-            else:
-                print(f"⚠️ 登录失败: {response.status_code} - {response.text}")
-    except Exception as e:
-        print(f"⚠️ 登录请求失败: {e}")
-    return None
-
-
 class FileSelectionE2ETest:
     """端到端测试类"""
     
@@ -165,16 +139,10 @@ class FileSelectionE2ETest:
             print(f"❌ 无法连接服务: {e}")
             return False
         
-        # 如果没有 token，尝试用演示账户登录
         if not self.token:
-            print("\n[测试] 使用演示账户登录...")
-            self.token = login_demo_account()
-            if self.token:
-                print(f"✅ 登录成功，获取到 token")
-            else:
-                print("❌ 登录失败，无法继续测试")
-                return False
-        
+            print("❌ 请设置测试账户的 AUTH_TOKEN")
+            return False
+
         return True
     
     def test_create_project(self) -> bool:

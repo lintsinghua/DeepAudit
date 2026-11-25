@@ -6,7 +6,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-3.8.1-blue.svg)](https://github.com/lintsinghua/DeepAudit/releases)
+[![Version](https://img.shields.io/badge/version-3.8.2-blue.svg)](https://github.com/lintsinghua/DeepAudit/releases)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![React](https://img.shields.io/badge/React-18-61dafb.svg)](https://reactjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178c6.svg)](https://www.typescriptlang.org/)
@@ -247,6 +247,8 @@ DeepAudit/
 
 使用预构建的 Docker 镜像，无需克隆代码，一行命令即可启动：
 
+首次部署前，在运行 Compose 的 shell 中导出 `BOOTSTRAP_ADMIN_EMAIL` 和 `BOOTSTRAP_ADMIN_PASSWORD`。使用未注册的邮箱和至少 12 个字符、最多 72 个 UTF-8 字节的专用密码。升级旧演示账户请参阅[管理员初始化说明](docs/DEPLOYMENT.md#初始化管理员)。
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/lintsinghua/DeepAudit/v3.0.0/docker-compose.prod.yml | docker compose -f - up -d
 ```
@@ -321,7 +323,7 @@ git clone https://github.com/lintsinghua/DeepAudit.git && cd DeepAudit
 
 # 2. 配置环境变量
 cp backend/env.example backend/.env
-# 编辑 backend/.env 填入你的 LLM API Key
+# 编辑 backend/.env，填入管理员初始化配置和 LLM API Key
 
 # 3. 一键启动
 docker compose up -d
@@ -356,12 +358,14 @@ docker compose up -d redis db adminer
 cd backend
 # 配置环境
 cp env.example .env
+# 在 .env 中填写管理员初始化配置
 
 # 使用 uv 管理环境（推荐）
 uv sync
 source .venv/bin/activate
 
 # 启动 API 服务
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 

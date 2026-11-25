@@ -6,7 +6,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-3.8.1-blue.svg)](https://github.com/lintsinghua/DeepAudit/releases)
+[![Version](https://img.shields.io/badge/version-3.8.2-blue.svg)](https://github.com/lintsinghua/DeepAudit/releases)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![React](https://img.shields.io/badge/React-18-61dafb.svg)](https://reactjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178c6.svg)](https://www.typescriptlang.org/)
@@ -248,6 +248,8 @@ DeepAudit/
 
 Use the prebuilt Docker images. You do not need to clone the repository:
 
+Before the first launch, export `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` in the shell running Compose. Use an unused email address and a unique password of at least 12 characters and at most 72 UTF-8 bytes. Also set these variables when upgrading an instance whose only administrator still uses the old demo password.
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/lintsinghua/DeepAudit/v3.0.0/docker-compose.prod.yml | docker compose -f - up -d
 ```
@@ -324,7 +326,7 @@ git clone https://github.com/lintsinghua/DeepAudit.git && cd DeepAudit
 
 # 2. Configure environment variables
 cp backend/env.example backend/.env
-# Edit backend/.env and fill in your LLM API key
+# Set the bootstrap administrator credentials and LLM API key in backend/.env
 
 # 3. Start everything
 docker compose up -d
@@ -356,12 +358,14 @@ docker compose up -d redis db adminer
 cd backend
 # Configure environment variables
 cp env.example .env
+# Set the bootstrap administrator credentials in .env
 
 # Use uv to manage the environment (recommended)
 uv sync
 source .venv/bin/activate
 
 # Start the API service
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 

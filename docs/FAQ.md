@@ -26,7 +26,7 @@ cd DeepAudit
 
 # 2. 配置 LLM API Key
 cp backend/env.example backend/.env
-# 编辑 backend/.env，填入你的 API Key
+# 编辑 backend/.env，填写管理员初始化配置和 LLM API Key
 
 # 3. 启动服务
 docker-compose up -d
@@ -34,14 +34,9 @@ docker-compose up -d
 # 4. 访问 http://localhost:5173
 ```
 
-### Q: 演示账户是什么？
+### Q: 首次登录使用哪个账户？
 
-系统启动时会自动创建演示账户，包含示例项目和审计数据：
-
-- 📧 邮箱：`demo@example.com`
-- 🔑 密码：`demo123`
-
-演示账户拥有管理员权限，可体验所有功能。生产环境请删除或修改密码。
+使用部署者通过 `BOOTSTRAP_ADMIN_EMAIL` 和 `BOOTSTRAP_ADMIN_PASSWORD` 创建的管理员账户。公开注册会创建普通成员。旧版演示账户的升级步骤见[部署指南](DEPLOYMENT.md#初始化管理员)。
 
 ### Q: 不想用 Docker，如何本地运行？
 

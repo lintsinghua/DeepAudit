@@ -1,5 +1,5 @@
 from typing import List, Union, Optional
-from pydantic import AnyHttpUrl, validator
+from pydantic import AnyHttpUrl, EmailStr, SecretStr, validator
 from pydantic_settings import BaseSettings
 
 
@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
     
+    BOOTSTRAP_ADMIN_EMAIL: EmailStr | None = None
+    BOOTSTRAP_ADMIN_PASSWORD: SecretStr | None = None
+
     # CORS
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
 
