@@ -9,7 +9,9 @@ LABEL description="Secure sandbox environment for vulnerability verification and
 
 # 安装基本工具
 RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    apt-get update && apt-get install -y --no-install-recommends \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get -o Acquire::Retries=5 -o Acquire::http::No-Cache=true update && \
+    apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
     curl \
     wget \
     netcat-openbsd \
