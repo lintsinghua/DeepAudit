@@ -70,9 +70,11 @@ class Settings(BaseSettings):
     
     # GitLab配置
     GITLAB_TOKEN: Optional[str] = None
+    GITLAB_ORIGIN: str = "https://gitlab.com"
     
     # Gitea配置
     GITEA_TOKEN: Optional[str] = None
+    GITEA_ORIGIN: Optional[str] = None
     
     # 扫描配置
     MAX_ANALYZE_FILES: int = 0  # 最大分析文件数，0表示无限制

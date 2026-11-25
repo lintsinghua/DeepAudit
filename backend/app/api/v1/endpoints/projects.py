@@ -22,7 +22,7 @@ import zipfile
 from app.services.scanner import scan_repo_task, get_github_files, get_gitlab_files, get_github_branches, get_gitlab_branches, get_gitea_branches, should_exclude, is_text_file
 from app.services.zip_storage import (
     save_project_zip, load_project_zip, get_project_zip_meta,
-    delete_project_zip, has_project_zip
+    delete_project_zip, has_project_zip, is_valid_project_id
 )
 
 router = APIRouter()
@@ -621,6 +621,8 @@ async def upload_project_zip(
     """
     上传或更新项目ZIP文件
     """
+    if not is_valid_project_id(id):
+        raise HTTPException(status_code=400, detail="无效的项目 ID")
     project = await db.get(Project, id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")

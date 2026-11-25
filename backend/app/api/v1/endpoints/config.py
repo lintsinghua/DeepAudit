@@ -111,7 +111,7 @@ def get_default_config() -> dict:
     return {
         "llmConfig": {
             "llmProvider": settings.LLM_PROVIDER,
-            "llmApiKey": "",
+            **dict.fromkeys(SENSITIVE_LLM_FIELDS, ""),
             "llmModel": settings.LLM_MODEL or "",
             "llmBaseUrl": settings.LLM_BASE_URL or "",
             "llmTimeout": settings.LLM_TIMEOUT * 1000,  # 转换为毫秒
@@ -125,21 +125,10 @@ def get_default_config() -> dict:
             "subAgentTimeout": getattr(settings, 'SUB_AGENT_TIMEOUT_SECONDS', 600),
             "toolTimeout": getattr(settings, 'TOOL_TIMEOUT_SECONDS', 60),
             # 平台专用配置
-            "geminiApiKey": settings.GEMINI_API_KEY or "",
-            "openaiApiKey": settings.OPENAI_API_KEY or "",
-            "claudeApiKey": settings.CLAUDE_API_KEY or "",
-            "qwenApiKey": settings.QWEN_API_KEY or "",
-            "deepseekApiKey": settings.DEEPSEEK_API_KEY or "",
-            "zhipuApiKey": settings.ZHIPU_API_KEY or "",
-            "moonshotApiKey": settings.MOONSHOT_API_KEY or "",
-            "baiduApiKey": settings.BAIDU_API_KEY or "",
-            "minimaxApiKey": settings.MINIMAX_API_KEY or "",
-            "doubaoApiKey": settings.DOUBAO_API_KEY or "",
             "ollamaBaseUrl": settings.OLLAMA_BASE_URL or "http://localhost:11434/v1",
         },
         "otherConfig": {
-            "githubToken": settings.GITHUB_TOKEN or "",
-            "gitlabToken": settings.GITLAB_TOKEN or "",
+            **dict.fromkeys(SENSITIVE_OTHER_FIELDS, ""),
             "maxAnalyzeFiles": settings.MAX_ANALYZE_FILES,
             "llmConcurrency": settings.LLM_CONCURRENCY,
             "llmGapMs": settings.LLM_GAP_MS,
