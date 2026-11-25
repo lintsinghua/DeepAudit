@@ -8,11 +8,7 @@ LABEL maintainer="XCodeReviewer Team"
 LABEL description="Secure sandbox environment for vulnerability verification and security scanning"
 
 # 安装基本工具
-# 安装基本工具
-# 使用阿里云镜像加速 apt
 RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
-    sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
     apt-get update && apt-get install -y --no-install-recommends \
     curl \
     wget \
