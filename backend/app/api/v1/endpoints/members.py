@@ -64,6 +64,13 @@ async def get_project_members(
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     
+    if project.owner_id != current_user.id and not current_user.is_superuser:
+        member_id = await db.scalar(select(ProjectMember.id).where(
+            ProjectMember.project_id == project_id, ProjectMember.user_id == current_user.id
+        ))
+        if member_id is None:
+            raise HTTPException(status_code=403, detail="无权查看项目成员")
+
     result = await db.execute(
         select(ProjectMember)
         .options(selectinload(ProjectMember.user))

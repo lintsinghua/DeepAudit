@@ -200,6 +200,8 @@ async def update_prompt_template(
     
     # 系统模板不允许修改核心内容，只能修改启用状态
     if template.is_system:
+        if not current_user.is_superuser:
+            raise HTTPException(status_code=403, detail="仅管理员可修改系统模板")
         if template_in.is_active is not None:
             template.is_active = template_in.is_active
         else:

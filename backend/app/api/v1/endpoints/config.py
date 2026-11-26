@@ -15,7 +15,7 @@ from app.db.session import get_db
 from app.models.user_config import UserConfig
 from app.models.user import User
 from app.core.config import settings
-from app.core.encryption import encrypt_sensitive_data, decrypt_sensitive_data
+from app.core.encryption import encrypt_sensitive_data, decrypt_sensitive_data, without_embedding_key
 
 router = APIRouter()
 
@@ -186,7 +186,7 @@ async def get_my_config(
     print(f"  - llmModel: {user_llm_config.get('llmModel')}")
     
     merged_llm_config = {**default_config["llmConfig"], **user_llm_config}
-    merged_other_config = {**default_config["otherConfig"], **user_other_config}
+    merged_other_config = {**default_config["otherConfig"], **without_embedding_key(user_other_config)}
     
     return UserConfigResponse(
         id=config.id,
@@ -255,7 +255,7 @@ async def update_my_config(
     user_other_config = decrypt_config(user_other_config, SENSITIVE_OTHER_FIELDS)
     
     merged_llm_config = {**default_config["llmConfig"], **user_llm_config}
-    merged_other_config = {**default_config["otherConfig"], **user_other_config}
+    merged_other_config = {**default_config["otherConfig"], **without_embedding_key(user_other_config)}
     
     return UserConfigResponse(
         id=config.id,

@@ -212,7 +212,8 @@ async def update_issue(
     """
     result = await db.execute(
         select(AuditIssue)
-        .where(AuditIssue.id == issue_id, AuditIssue.task_id == task_id)
+        .join(AuditTask, AuditTask.id == AuditIssue.task_id)
+        .where(AuditIssue.id == issue_id, AuditIssue.task_id == task_id, AuditTask.created_by == current_user.id)
     )
     issue = result.scalars().first()
     if not issue:

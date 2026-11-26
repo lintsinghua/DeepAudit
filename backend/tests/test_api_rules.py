@@ -360,7 +360,7 @@ class TestUpdateRuleSet:
         db = AsyncMock()
         db.execute.return_value = _scalar_one_or_none(rs)
 
-        user = _make_user()
+        user = _make_user(is_superuser=True)
         update = AuditRuleSetUpdate(is_active=False)
 
         result = await update_rule_set(

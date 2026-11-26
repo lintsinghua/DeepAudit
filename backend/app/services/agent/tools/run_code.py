@@ -19,6 +19,8 @@ import tempfile
 from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field
 
+from app.utils.project_paths import resolve_project_path
+
 from .base import AgentTool, ToolResult
 from .sandbox_tool import SandboxManager, SandboxConfig
 
@@ -314,7 +316,7 @@ class ExtractFunctionTool(AgentTool):
         import ast
         import re
 
-        full_path = os.path.join(self.project_root, file_path)
+        full_path = resolve_project_path(self.project_root, file_path)
         if not os.path.exists(full_path):
             return ToolResult(success=False, error=f"文件不存在: {file_path}")
 

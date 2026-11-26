@@ -12,6 +12,8 @@ from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 from dataclasses import dataclass
 
+from app.utils.project_paths import resolve_project_path
+
 from .base import AgentTool, ToolResult
 from .sandbox_tool import SandboxManager
 
@@ -47,7 +49,7 @@ class BaseLanguageTestTool(AgentTool):
 
     def _read_file(self, file_path: str) -> Optional[str]:
         """读取文件内容"""
-        full_path = os.path.join(self.project_root, file_path)
+        full_path = resolve_project_path(self.project_root, file_path)
         if not os.path.exists(full_path):
             return None
         with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:

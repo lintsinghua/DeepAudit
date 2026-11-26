@@ -14,6 +14,8 @@ from pydantic import BaseModel, Field
 from dataclasses import dataclass
 from enum import Enum
 
+from app.utils.project_paths import resolve_project_path
+
 from .base import AgentTool, ToolResult
 from .sandbox_tool import SandboxManager
 
@@ -144,7 +146,7 @@ class CommandInjectionTestTool(AgentTool):
             return ToolResult(success=False, error="沙箱环境不可用")
 
         # 读取目标文件
-        full_path = os.path.join(self.project_root, target_file)
+        full_path = resolve_project_path(self.project_root, target_file)
         if not os.path.exists(full_path):
             return ToolResult(success=False, error=f"文件不存在: {target_file}")
 
@@ -521,7 +523,7 @@ class SqlInjectionTestTool(AgentTool):
             return ToolResult(success=False, error="沙箱环境不可用")
 
         # 读取目标文件
-        full_path = os.path.join(self.project_root, target_file)
+        full_path = resolve_project_path(self.project_root, target_file)
         if not os.path.exists(full_path):
             return ToolResult(success=False, error=f"文件不存在: {target_file}")
 
@@ -724,7 +726,7 @@ class XssTestTool(AgentTool):
             return ToolResult(success=False, error="沙箱环境不可用")
 
         # 读取目标文件
-        full_path = os.path.join(self.project_root, target_file)
+        full_path = resolve_project_path(self.project_root, target_file)
         if not os.path.exists(full_path):
             return ToolResult(success=False, error=f"文件不存在: {target_file}")
 
@@ -936,7 +938,7 @@ class PathTraversalTestTool(AgentTool):
             return ToolResult(success=False, error="沙箱环境不可用")
 
         # 读取目标文件
-        full_path = os.path.join(self.project_root, target_file)
+        full_path = resolve_project_path(self.project_root, target_file)
         if not os.path.exists(full_path):
             return ToolResult(success=False, error=f"文件不存在: {target_file}")
 
@@ -1151,7 +1153,7 @@ class SstiTestTool(AgentTool):
             return ToolResult(success=False, error="沙箱环境不可用")
 
         # 读取目标文件
-        full_path = os.path.join(self.project_root, target_file)
+        full_path = resolve_project_path(self.project_root, target_file)
         if not os.path.exists(full_path):
             return ToolResult(success=False, error=f"文件不存在: {target_file}")
 
@@ -1339,7 +1341,7 @@ class DeserializationTestTool(AgentTool):
     ) -> ToolResult:
         """执行反序列化漏洞检测"""
         # 读取目标文件
-        full_path = os.path.join(self.project_root, target_file)
+        full_path = resolve_project_path(self.project_root, target_file)
         if not os.path.exists(full_path):
             return ToolResult(success=False, error=f"文件不存在: {target_file}")
 

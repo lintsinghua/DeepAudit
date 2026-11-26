@@ -301,7 +301,7 @@ class TestUpdatePromptTemplate:
         db = AsyncMock()
         db.execute.return_value = _scalar_one_or_none(tmpl)
 
-        user = _make_user()
+        user = _make_user(is_superuser=True)
         update = PromptTemplateUpdate(is_active=False)
 
         result = await update_prompt_template(

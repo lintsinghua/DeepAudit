@@ -39,6 +39,8 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 from pathlib import Path
 
+from app.utils.project_paths import resolve_project_path
+
 from .base import AgentTool, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -255,10 +257,7 @@ Kunlun-M 是一款专注于代码安全审计的工具，特别擅长 PHP 和 Ja
             )
 
         # 构建完整目标路径
-        if target_path.startswith("/"):
-            full_target = target_path
-        else:
-            full_target = os.path.join(self.project_root, target_path)
+        full_target = resolve_project_path(self.project_root, target_path)
 
         if not os.path.exists(full_target):
             return ToolResult(
@@ -660,10 +659,7 @@ class KunlunPluginTool(AgentTool):
             )
 
         # 构建完整目标路径
-        if target_path.startswith("/"):
-            full_target = target_path
-        else:
-            full_target = os.path.join(self.project_root, target_path)
+        full_target = resolve_project_path(self.project_root, target_path)
 
         if not os.path.exists(full_target):
             return ToolResult(

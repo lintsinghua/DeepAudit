@@ -18,6 +18,8 @@ import re
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
+from app.utils.project_paths import resolve_project_path
+
 from .base import BaseAgent, AgentConfig, AgentResult, AgentType, AgentPattern, TaskHandoff
 from ..json_parser import AgentJsonParser
 from ..prompts import MULTI_AGENT_RULES, CORE_SECURITY_PRINCIPLES
@@ -1105,16 +1107,10 @@ Action Input: {{"参数": "值"}}
         # 清理路径（移除可能的行号）
         clean_path = file_path.split(":")[0].strip() if ":" in file_path else file_path.strip()
 
-        # 尝试相对路径
-        full_path = os.path.join(project_root, clean_path)
-        if os.path.isfile(full_path):
-            return True
-
-        # 尝试绝对路径
-        if os.path.isabs(clean_path) and os.path.isfile(clean_path):
-            return True
-
-        return False
+        try:
+            return os.path.isfile(resolve_project_path(project_root, clean_path))
+        except ValueError:
+            return False
 
     def _normalize_finding(self, finding: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """

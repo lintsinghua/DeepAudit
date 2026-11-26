@@ -15,6 +15,8 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 from dataclasses import dataclass
 
+from app.utils.project_paths import resolve_project_path
+
 from .base import AgentTool, ToolResult
 
 
@@ -350,15 +352,8 @@ class PatternMatchTool(AgentTool):
                     error="无法扫描文件：未配置项目根目录"
                 )
             
-            full_path = os.path.normpath(os.path.join(self.project_root, scan_file))
-            
-            # 安全检查：防止路径遍历
-            if not full_path.startswith(os.path.normpath(self.project_root)):
-                return ToolResult(
-                    success=False,
-                    error="安全错误：不允许访问项目目录外的文件"
-                )
-            
+            full_path = resolve_project_path(self.project_root, scan_file)
+
             if not os.path.exists(full_path):
                 return ToolResult(
                     success=False,

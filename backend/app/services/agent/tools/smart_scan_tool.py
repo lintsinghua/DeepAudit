@@ -16,6 +16,8 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 from dataclasses import dataclass, field
 
+from app.utils.project_paths import resolve_project_path
+
 from .base import AgentTool, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -126,7 +128,7 @@ class SmartScanTool(AgentTool):
     
     def __init__(self, project_root: str):
         super().__init__()
-        self.project_root = project_root
+        self.project_root = os.path.realpath(project_root)
     
     @property
     def name(self) -> str:
@@ -207,12 +209,8 @@ class SmartScanTool(AgentTool):
         quick_mode: bool
     ) -> List[str]:
         """收集要扫描的文件"""
-        full_path = os.path.normpath(os.path.join(self.project_root, target))
-        
-        # 安全检查
-        if not full_path.startswith(os.path.normpath(self.project_root)):
-            return []
-        
+        full_path = resolve_project_path(self.project_root, target)
+
         files = []
         
         # 排除目录
@@ -275,9 +273,8 @@ class SmartScanTool(AgentTool):
         focus_vulnerabilities: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """扫描单个文件"""
-        full_path = os.path.join(self.project_root, file_path)
-        
         try:
+            full_path = resolve_project_path(self.project_root, file_path)
             with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
         except Exception as e:
@@ -450,7 +447,7 @@ class QuickAuditTool(AgentTool):
     
     def __init__(self, project_root: str):
         super().__init__()
-        self.project_root = project_root
+        self.project_root = os.path.realpath(project_root)
     
     @property
     def name(self) -> str:
@@ -487,12 +484,8 @@ class QuickAuditTool(AgentTool):
         **kwargs
     ) -> ToolResult:
         """执行快速审计"""
-        full_path = os.path.join(self.project_root, file_path)
-        
-        # 安全检查
-        if not os.path.normpath(full_path).startswith(os.path.normpath(self.project_root)):
-            return ToolResult(success=False, error="安全错误：路径越界")
-        
+        full_path = resolve_project_path(self.project_root, file_path)
+
         if not os.path.exists(full_path):
             return ToolResult(success=False, error=f"文件不存在: {file_path}")
         

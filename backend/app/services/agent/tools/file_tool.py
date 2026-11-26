@@ -10,6 +10,8 @@ import asyncio
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 
+from app.utils.project_paths import resolve_project_path
+
 from .base import AgentTool, ToolResult
 
 
@@ -42,7 +44,7 @@ class FileReadTool(AgentTool):
             target_files: 目标文件列表（如果指定，只允许读取这些文件）
         """
         super().__init__()
-        self.project_root = project_root
+        self.project_root = os.path.realpath(project_root)
         self.exclude_patterns = exclude_patterns or []
         self.target_files = set(target_files) if target_files else None
 
@@ -136,12 +138,7 @@ class FileReadTool(AgentTool):
             
             # 安全检查：防止路径遍历
             # Security Fix: 使用 realpath 解析软链接，防止绕过项目根目录检查
-            full_path = os.path.realpath(os.path.join(self.project_root, file_path))
-            if not full_path.startswith(os.path.realpath(self.project_root)):
-                return ToolResult(
-                    success=False,
-                    error="安全错误：不允许访问项目目录外的文件",
-                )
+            full_path = resolve_project_path(self.project_root, file_path)
             
             if not os.path.exists(full_path):
                 return ToolResult(
@@ -271,7 +268,7 @@ class FileSearchTool(AgentTool):
         target_files: Optional[List[str]] = None,
     ):
         super().__init__()
-        self.project_root = project_root
+        self.project_root = os.path.realpath(project_root)
         self.exclude_patterns = exclude_patterns or []
         self.target_files = set(target_files) if target_files else None
 
@@ -330,12 +327,7 @@ class FileSearchTool(AgentTool):
             # 确定搜索目录
             if directory:
                 # Security Fix: 使用 realpath 解析软链接，防止绕过项目根目录检查
-                search_dir = os.path.realpath(os.path.join(self.project_root, directory))
-                if not search_dir.startswith(os.path.realpath(self.project_root)):
-                    return ToolResult(
-                        success=False,
-                        error="安全错误：不允许搜索项目目录外的内容",
-                    )
+                search_dir = resolve_project_path(self.project_root, directory)
             else:
                 search_dir = self.project_root
             
@@ -384,7 +376,7 @@ class FileSearchTool(AgentTool):
                     try:
                         # 异步读取文件，避免阻塞事件循环
                         lines = await asyncio.to_thread(
-                            self._read_file_lines_sync, file_path
+                            self._read_file_lines_sync, resolve_project_path(self.project_root, relative_path)
                         )
 
                         files_searched += 1
@@ -480,7 +472,7 @@ class ListFilesTool(AgentTool):
         target_files: Optional[List[str]] = None,
     ):
         super().__init__()
-        self.project_root = project_root
+        self.project_root = os.path.realpath(project_root)
         self.exclude_patterns = exclude_patterns or []
         self.target_files = set(target_files) if target_files else None
         
@@ -530,12 +522,7 @@ class ListFilesTool(AgentTool):
             if "path" in kwargs and kwargs["path"]:
                 directory = kwargs["path"]
 
-            target_dir = os.path.normpath(os.path.join(self.project_root, directory))
-            if not target_dir.startswith(os.path.normpath(self.project_root)):
-                return ToolResult(
-                    success=False,
-                    error="安全错误：不允许访问项目目录外的目录",
-                )
+            target_dir = resolve_project_path(self.project_root, directory)
             
             if not os.path.exists(target_dir):
                 return ToolResult(
