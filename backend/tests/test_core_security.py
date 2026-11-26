@@ -3,10 +3,13 @@ Tests for app.core.security module.
 """
 
 from datetime import datetime, timedelta, timezone
+from secrets import token_hex
 
 import pytest
 from jose import jwt
+from pydantic import ValidationError
 
+from app.core.config import Settings
 from app.core.security import (
     ALGORITHM,
     create_access_token,
@@ -19,6 +22,32 @@ from app.core.security import (
 def use_test_settings(mock_settings):
     """Ensure security module uses test settings."""
     return mock_settings
+
+
+@pytest.mark.parametrize("key", [
+    None, "", " " * 32, "a" * 31,
+    "changethis_in_production_to_a_long_random_string",
+    "your-super-secret-key-change-this-in-production",
+    "your-random-secret-key-at-least-32-characters",
+])
+def test_unsafe_signing_key_prevents_startup(monkeypatch, key):
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    if key is not None:
+        monkeypatch.setenv("SECRET_KEY", key)
+    with pytest.raises(ValidationError, match="SECRET_KEY") as exc:
+        Settings(_env_file=None)
+    assert "input_value=" not in str(exc.value)
+
+
+def test_existing_deployment_key_is_preserved(monkeypatch, tmp_path):
+    key = token_hex(16)
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"SECRET_KEY={key}\n")
+    for _ in range(2):
+        settings = Settings(_env_file=env_file)
+        assert settings.SECRET_KEY == key
+        assert key not in repr(settings)
 
 
 class TestPasswordHashing:

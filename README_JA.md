@@ -6,7 +6,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-3.8.3-blue.svg)](https://github.com/lintsinghua/DeepAudit/releases)
+[![Version](https://img.shields.io/badge/version-3.8.4-blue.svg)](https://github.com/lintsinghua/DeepAudit/releases)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![React](https://img.shields.io/badge/React-18-61dafb.svg)](https://reactjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178c6.svg)](https://www.typescriptlang.org/)
@@ -247,6 +247,8 @@ DeepAudit/
 
 初回起動前に、Compose を実行するシェルで `BOOTSTRAP_ADMIN_EMAIL` と `BOOTSTRAP_ADMIN_PASSWORD` をエクスポートしてください。未登録のメールアドレスと、12 文字以上かつ UTF-8 で 72 バイト以内の専用パスワードを指定します。旧デモアカウントが唯一の管理者で、初期パスワードを使っている場合も、アップグレード前に設定してください。
 
+新規導入時は `openssl rand -hex 32` で `SECRET_KEY` を一度だけ生成して安全に保管し、起動のたびに同じ値を Compose に渡してください。アップグレード時は既存の強い鍵を引き継いでください。鍵を変更するとセッションが無効になり、旧鍵で暗号化された認証情報の再設定が必要です。
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/lintsinghua/DeepAudit/v3.0.0/docker-compose.prod.yml | docker compose -f - up -d
 ```
@@ -321,7 +323,7 @@ git clone https://github.com/lintsinghua/DeepAudit.git && cd DeepAudit
 
 # 2. 環境変数を設定
 cp backend/env.example backend/.env
-# backend/.env に管理者の初期設定と LLM API キーを入力
+# backend/.env に SECRET_KEY、管理者の初期設定、LLM API キーを入力
 
 # 3. ワンクリック起動
 docker compose up -d
@@ -354,7 +356,7 @@ docker compose up -d redis db adminer
 cd backend
 # 環境設定
 cp env.example .env
-# .env に管理者の初期設定を入力
+# .env に SECRET_KEY と管理者の初期設定を入力
 
 # uv で環境を管理（推奨）
 uv sync

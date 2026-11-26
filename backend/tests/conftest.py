@@ -2,12 +2,16 @@
 Shared test fixtures for all backend tests.
 """
 
+import os
+import secrets
 import pytest
 import tempfile
 import shutil
 from unittest.mock import patch, MagicMock
 
-from app.core.config import Settings
+# Settings is initialized during import, before pytest fixtures run.
+with patch.dict(os.environ, {"SECRET_KEY": secrets.token_hex(32)}):
+    from app.core.config import Settings
 
 
 @pytest.fixture(autouse=True)

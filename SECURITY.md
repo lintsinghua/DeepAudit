@@ -85,11 +85,7 @@
 
 ### 部署安全
 
-1. **修改默认密钥**
-   ```env
-   # 生产环境必须修改！
-   SECRET_KEY=your-random-secret-key-at-least-32-characters
-   ```
+1. **配置部署专用密钥**：首次部署用 `openssl rand -hex 32` 生成 `SECRET_KEY` 并安全保存。升级或轮换前请阅读[密钥配置说明](docs/DEPLOYMENT.md#配置签名密钥)。
 
 2. **配置 HTTPS**
    - 生产环境务必启用 HTTPS

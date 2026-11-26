@@ -49,7 +49,8 @@ POSTGRES_DB=deepaudit              # 数据库名称
 # DATABASE_URL=                    # 完整数据库连接字符串（可选，会覆盖上述配置）
 
 # ========== 安全配置 ==========
-SECRET_KEY=your-super-secret-key   # JWT 签名密钥（生产环境必须修改！）
+# 必填：用 openssl rand -hex 32 生成并保存部署专用密钥，重启时沿用
+SECRET_KEY=
 ALGORITHM=HS256                    # JWT 加密算法
 ACCESS_TOKEN_EXPIRE_MINUTES=11520  # Token 过期时间（分钟），默认 8 天
 
