@@ -5,6 +5,9 @@ LLM工厂类 - 统一创建和管理LLM适配器
 对于 API 格式特殊的提供商（百度、MiniMax、豆包），使用原生适配器。
 """
 
+import hashlib
+import json
+from dataclasses import asdict
 from typing import Dict, List
 from .types import LLMConfig, LLMProvider, DEFAULT_MODELS
 from .base_adapter import BaseLLMAdapter
@@ -82,8 +85,9 @@ class LLMFactory:
     @classmethod
     def _get_cache_key(cls, config: LLMConfig) -> str:
         """生成缓存键"""
-        api_key_prefix = config.api_key[:8] if config.api_key else "no-key"
-        return f"{config.provider.value}:{config.model}:{api_key_prefix}"
+        # Credentials, endpoint, timeouts and generation settings must all match.
+        serialized = json.dumps(asdict(config), sort_keys=True)
+        return hashlib.sha256(serialized.encode()).hexdigest()
 
     @classmethod
     def clear_cache(cls) -> None:

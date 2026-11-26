@@ -84,11 +84,11 @@ export function getTimeString(): string {
 /**
  * Create a log item
  */
-export function createLogItem(item: Omit<LogItem, 'id' | 'time'>): LogItem {
+export function createLogItem(item: Omit<LogItem, 'id' | 'time'> & { time?: string }): LogItem {
   return {
     ...item,
     id: generateLogId(),
-    time: getTimeString(),
+    time: item.time ?? getTimeString(),
   };
 }
 

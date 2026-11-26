@@ -21,7 +21,7 @@ export async function runRepositoryAudit(params: {
   const task = await api.createAuditTask({
     project_id: params.projectId,
     task_type: "repository",
-    branch_name: params.branch || "main",
+    branch_name: params.branch,
     exclude_patterns: params.exclude || [],
     scan_config: {
       file_paths: params.filePaths,
@@ -29,7 +29,7 @@ export async function runRepositoryAudit(params: {
       prompt_template_id: params.promptTemplateId,
     },
     created_by: params.createdBy || "unknown"
-  } as any);
+  });
 
   return task.id;
 }

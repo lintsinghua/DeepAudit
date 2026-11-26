@@ -2,7 +2,10 @@
 Git SSH服务 - 生成SSH密钥并使用SSH方式访问Git仓库
 """
 
+import asyncio
 import os
+import signal
+import time
 import sys
 import re
 import shlex
@@ -12,7 +15,7 @@ import subprocess
 import shutil
 import hashlib
 import base64
-from typing import Tuple, Optional, Dict, List
+from typing import Callable, Tuple, Optional, Dict, List
 from pathlib import Path
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519, rsa
@@ -324,6 +327,36 @@ class SSHKeyService:
         return private_pem, public_openssh
 
 
+def run_git_clone(args, *, env, timeout, cancel_check=None):
+    if cancel_check is None:
+        return subprocess.run(args, env=env, capture_output=True, text=True, timeout=timeout)
+
+    deadline = time.monotonic() + timeout
+    with subprocess.Popen(args, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          text=True, start_new_session=os.name == "posix") as process:
+        try:
+            while not cancel_check():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(args, timeout)
+                try:
+                    stdout, stderr = process.communicate(timeout=min(remaining, 0.25))
+                    return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
+                except subprocess.TimeoutExpired:
+                    continue
+            raise asyncio.CancelledError()
+        finally:
+            if process.returncode is None:
+                if os.name == "posix":
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                else:
+                    process.kill()
+                process.communicate()
+
+
 class GitSSHOperations:
     """Git SSH操作类 - 使用SSH密钥克隆和拉取仓库"""
 
@@ -341,7 +374,8 @@ class GitSSHOperations:
         return url.startswith('git@') or url.startswith('ssh://')
 
     @staticmethod
-    def clone_repo_with_ssh(repo_url: str, private_key: str, target_dir: str, branch: str = None) -> Dict[str, any]:
+    def clone_repo_with_ssh(repo_url: str, private_key: str, target_dir: str, branch: str = None,
+                            *, cancel_check: Optional[Callable[[], bool]] = None) -> Dict[str, any]:
         """
         使用SSH密钥克隆Git仓库
 
@@ -397,13 +431,8 @@ class GitSSHOperations:
                 cmd.extend(['--branch', branch])
             cmd.extend([repo_url, target_dir])
 
-            result = subprocess.run(
-                cmd,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=settings.SSH_CLONE_TIMEOUT
-            )
+            result = run_git_clone(cmd, env=env, timeout=settings.SSH_CLONE_TIMEOUT,
+                                   cancel_check=cancel_check)
 
             if result.returncode == 0:
                 return {
@@ -432,7 +461,7 @@ class GitSSHOperations:
 
     @staticmethod
     def get_repo_files_via_ssh(repo_url: str, private_key: str, branch: str = "main",
-                                exclude_patterns: List[str] = None) -> List[Dict[str, str]]:
+                                exclude_patterns: List[str] = None, *, cancel_check=None) -> List[Dict[str, str]]:
         """
         通过SSH克隆仓库并获取文件列表
 
@@ -452,7 +481,7 @@ class GitSSHOperations:
 
             # 克隆仓库
             clone_result = GitSSHOperations.clone_repo_with_ssh(
-                repo_url, private_key, temp_clone_dir, branch
+                repo_url, private_key, temp_clone_dir, branch, cancel_check=cancel_check
             )
 
             if not clone_result['success']:
@@ -468,7 +497,11 @@ class GitSSHOperations:
                     dirs.remove('.git')
 
                 for filename in filenames:
+                    if cancel_check and cancel_check():
+                        raise asyncio.CancelledError()
                     file_path = os.path.join(root, filename)
+                    if os.path.islink(file_path):
+                        continue
                     # 获取相对路径
                     rel_path = os.path.relpath(file_path, temp_clone_dir)
 

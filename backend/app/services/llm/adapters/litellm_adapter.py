@@ -25,6 +25,11 @@ from ..prompt_cache import prompt_cache_manager, estimate_tokens
 logger = logging.getLogger(__name__)
 
 
+async def _reject_redirect(response):
+    if response.has_redirect_location:
+        response.raise_for_status()
+
+
 class LiteLLMAdapter(BaseLLMAdapter):
     """
     LiteLLM 统一适配器
@@ -64,6 +69,7 @@ class LiteLLMAdapter(BaseLLMAdapter):
         super().__init__(config)
         self._litellm_model = self._get_litellm_model()
         self._api_base = self._get_api_base()
+        self._provider_client = None
 
     def _get_litellm_model(self) -> str:
         """获取 LiteLLM 格式的模型名称
@@ -76,38 +82,45 @@ class LiteLLMAdapter(BaseLLMAdapter):
         provider = self.config.provider
         model = self.config.model
 
-        # 检查模型名是否已经包含前缀
-        if "/" in model:
-            # 提取第一部分作为可能的 provider 前缀
-            prefix_part = model.split("/")[0].lower()
-            
-            # LiteLLM 认识的有效 provider 前缀列表
-            valid_litellm_prefixes = [
-                "openai", "anthropic", "gemini", "deepseek", "ollama",
-                "azure", "huggingface", "together", "groq", "mistral",
-                "anyscale", "replicate", "bedrock", "vertex_ai", "cohere",
-                "sagemaker", "palm", "ai21", "nlp_cloud", "aleph_alpha",
-                "petals", "baseten", "vllm", "cloudflare", "xinference"
-            ]
-            
-            # 如果前缀是 LiteLLM 认识的，直接返回
-            if prefix_part in valid_litellm_prefixes:
-                return model
-            
-            # 如果用户设置了自定义 base_url，将其视为 OpenAI 兼容 API
-            # 例如 SiliconFlow 使用模型名 "Qwen/Qwen3-8B"
-            if self.config.base_url:
-                logger.debug(f"使用自定义 base_url，将模型 {model} 视为 OpenAI 兼容格式")
-                return f"openai/{model}"
-            
-            # 对于没有自定义 base_url 的情况，尝试使用 provider 的前缀
-            prefix = self.PROVIDER_PREFIX_MAP.get(provider, "openai")
-            return f"{prefix}/{model}"
-
-        # 获取 provider 前缀
-        prefix = self.PROVIDER_PREFIX_MAP.get(provider, "openai")
-        
+        prefix = self.PROVIDER_PREFIX_MAP[provider]
+        if model.startswith(f"{prefix}/"):
+            return model
+        if "/" in model and self.config.base_url:
+            prefix = "openai"
         return f"{prefix}/{model}"
+
+    def _request_client(self):
+        """Use the provider's supported client type with redirects disabled."""
+        import litellm
+        from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
+        from litellm.secret_managers.main import get_secret_bool
+        from openai import AsyncOpenAI
+
+        # Deferred streams use LiteLLM's shared handler even when given a per-call client.
+        shared = litellm.module_level_aclient
+        shared.client.follow_redirects = False
+        hooks = shared.client.event_hooks["response"]
+        if _reject_redirect not in hooks:
+            hooks.append(_reject_redirect)
+            shared.event_hooks = shared.client.event_hooks
+
+        if self._provider_client is None or self._client is None:
+            if (self._litellm_model.startswith("openai/")
+                    and not get_secret_bool("EXPERIMENTAL_OPENAI_BASE_LLM_HTTP_HANDLER")):
+                self._provider_client = AsyncOpenAI(
+                    api_key=self.config.api_key,
+                    base_url=self._api_base or DEFAULT_BASE_URLS[LLMProvider.OPENAI],
+                    http_client=self.client,
+                    timeout=self.config.timeout,
+                )
+            else:
+                # LiteLLM passes the same event hooks to replacement connections on retry.
+                handler = AsyncHTTPHandler(timeout=self.config.timeout,
+                                           event_hooks={"response": [_reject_redirect]})
+                handler.client.follow_redirects = False
+                self._client = handler.client
+                self._provider_client = handler
+        return self._provider_client
 
     def _extract_api_response(self, error: Exception) -> Optional[str]:
         """从异常中提取 API 服务器返回的原始响应信息"""
@@ -240,7 +253,7 @@ class LiteLLMAdapter(BaseLLMAdapter):
 
         try:
             # 调用 LiteLLM
-            response = await litellm.acompletion(**kwargs)
+            response = await litellm.acompletion(client=self._request_client(), **kwargs)
         except litellm.exceptions.AuthenticationError as e:
             api_response = self._extract_api_response(e)
             raise LLMError(f"API Key 无效或已过期", self.config.provider, 401, api_response=api_response)
@@ -351,7 +364,7 @@ class LiteLLMAdapter(BaseLLMAdapter):
         chunk_count = 0  # 🔥 跟踪 chunk 数量
 
         try:
-            response = await litellm.acompletion(**kwargs)
+            response = await litellm.acompletion(client=self._request_client(), **kwargs)
 
             async for chunk in response:
                 chunk_count += 1
@@ -407,7 +420,7 @@ class LiteLLMAdapter(BaseLLMAdapter):
                         "usage": final_usage,
                         "finish_reason": finish_reason,
                     }
-                    break
+                    return
 
             # 🔥 ENHANCED: 如果循环结束但没有收到 finish_reason，也需要返回 done
             if accumulated_content:

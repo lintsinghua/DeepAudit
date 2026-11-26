@@ -533,7 +533,7 @@ export default function TaskDetail() {
     );
   }
 
-  const progressPercentage = calculateTaskProgress(task.scanned_files, task.total_files);
+  const progressPercentage = calculateTaskProgress(task.scanned_files, task.total_files, task.status);
 
   return (
     <div className="space-y-6 p-6 cyber-bg-elevated min-h-screen font-mono relative">

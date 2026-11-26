@@ -420,8 +420,9 @@ def get_tool_config(tool_name: str) -> ToolConfig:
         ),
     }
 
+    config_name = {"safety_scan": "safety_check", "osv_scan": "osv_scanner"}.get(tool_name, tool_name)
     return tool_configs.get(
-        tool_name,
+        config_name,
         ToolConfig(
             name=tool_name,
             timeout_seconds=config.tool_timeout_seconds,

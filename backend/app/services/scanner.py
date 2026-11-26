@@ -3,6 +3,9 @@
 """
 
 import asyncio
+import json
+import math
+from collections.abc import Awaitable, Callable
 import httpx
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
@@ -10,9 +13,10 @@ from urllib.parse import urlparse, quote
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.utils.repo_utils import parse_repository_url, trusted_repository_origin
-from app.models.audit import AuditTask, AuditIssue
+from app.utils.async_utils import prepare_in_thread
+from app.models.audit import AuditTask, AuditIssue, source_position
 from app.models.project import Project
-from app.services.llm.service import LLMService
+from app.services.llm.service import LLMService, OutputLimitError
 from app.core.config import settings
 
 
@@ -26,12 +30,12 @@ def get_analysis_config(user_config: Optional[Dict[str, Any]] = None) -> Dict[st
         - llm_concurrency: LLM 并发数
         - llm_gap_ms: LLM 请求间隔（毫秒）
     """
-    other_config = (user_config or {}).get('otherConfig', {})
+    other_config = {k: v for k, v in (user_config or {}).get('otherConfig', {}).items() if v is not None}
 
     return {
-        'max_analyze_files': other_config.get('maxAnalyzeFiles') or settings.MAX_ANALYZE_FILES,
+        'max_analyze_files': other_config.get('maxAnalyzeFiles', settings.MAX_ANALYZE_FILES),
         'llm_concurrency': other_config.get('llmConcurrency') or settings.LLM_CONCURRENCY,
-        'llm_gap_ms': other_config.get('llmGapMs') or settings.LLM_GAP_MS,
+        'llm_gap_ms': other_config.get('llmGapMs', settings.LLM_GAP_MS),
     }
 
 
@@ -83,6 +87,13 @@ class TaskControlManager:
     
     def __init__(self):
         self._cancelled_tasks: set = set()
+        self._active_tasks: set = set()
+
+    def start_task(self, task_id: str):
+        self._active_tasks.add(task_id)
+
+    def is_active(self, task_id: str) -> bool:
+        return task_id in self._active_tasks
     
     def cancel_task(self, task_id: str):
         """取消任务"""
@@ -96,6 +107,7 @@ class TaskControlManager:
     def cleanup_task(self, task_id: str):
         """清理已完成任务的控制状态"""
         self._cancelled_tasks.discard(task_id)
+        self._active_tasks.discard(task_id)
 
 
 # 全局任务控制器
@@ -113,6 +125,8 @@ async def github_api(url: str, token: str = None) -> Any:
         response = await client.get(url, headers=headers)
         if response.status_code == 403:
             raise Exception("GitHub API 403：请配置 GITHUB_TOKEN 或确认仓库权限/频率限制")
+        if response.status_code == 404:
+            raise FileNotFoundError("GitHub API 404")
         if response.status_code != 200:
             raise Exception(f"GitHub API {response.status_code}: {url}")
         return response.json()
@@ -133,6 +147,8 @@ async def gitea_api(url: str, token: str = None) -> Any:
             raise Exception("Gitea API 401：请配置 GITEA_TOKEN 或确认仓库权限")
         if response.status_code == 403:
             raise Exception("Gitea API 403：请确认仓库权限/频率限制")
+        if response.status_code == 404:
+            raise FileNotFoundError("Gitea API 404")
         if response.status_code != 200:
             raise Exception(f"Gitea API {response.status_code}: {url}")
         return response.json()
@@ -152,9 +168,60 @@ async def gitlab_api(url: str, token: str = None) -> Any:
             raise Exception("GitLab API 401：请配置 GITLAB_TOKEN 或确认仓库权限")
         if response.status_code == 403:
             raise Exception("GitLab API 403：请确认仓库权限/频率限制")
+        if response.status_code == 404:
+            raise FileNotFoundError("GitLab API 404")
         if response.status_code != 200:
             raise Exception(f"GitLab API {response.status_code}: {url}")
         return response.json()
+
+
+class ScanInputError(ValueError):
+    """Actionable scanner error suitable for the task owner."""
+
+
+class ListingTruncatedError(ScanInputError):
+    """列表超过页数上限、结果不完整。
+
+    单独的类型让扫描能区分它和"分支不存在"：后者可以降级到其他分支，
+    而前者说明分支存在只是太大，换分支会扫描错误的代码。
+    """
+
+
+async def fetch_all_pages(
+    api_func: Callable[..., Awaitable[Any]],
+    url: str,
+    token: str | None = None,
+    per_page_param: str = "per_page",
+    per_page: int = 100,
+    max_pages: int = 500,
+) -> list[Any]:
+    """逐页请求列表接口，直到返回空页（GitHub/GitLab/Gitea 列表接口每次只返回一页）
+
+    达到 max_pages 后仍有数据时抛出异常，而不是返回不完整的列表。
+    """
+    items: list[Any] = []
+    sep = "&" if "?" in url else "?"
+    previous = None
+
+    for page in range(1, max_pages + 2):
+        try:
+            data = await api_func(f"{url}{sep}{per_page_param}={per_page}&page={page}", token)
+        except FileNotFoundError as exc:
+            if page == 1:
+                raise
+            raise ListingTruncatedError("无法取得后续分页，列表不完整") from exc
+        if not isinstance(data, list) or data == previous:
+            raise ListingTruncatedError("分页响应无效，无法取得完整列表")
+        if not data:
+            return items
+        if page > max_pages:
+            break
+        items.extend(data)
+        previous = data
+
+    raise ListingTruncatedError(
+        f"列表超过 {max_pages} 页（每页 {per_page} 条），结果不完整"
+    )
 
 
 async def fetch_file_content(url: str, headers: Dict[str, str] = None) -> Optional[str]:
@@ -174,8 +241,8 @@ async def get_github_branches(repo_url: str, token: str = None) -> List[str]:
     repo_info = parse_repository_url(repo_url, "github")
     owner, repo = repo_info['owner'], repo_info['repo']
     
-    branches_url = f"https://api.github.com/repos/{owner}/{repo}/branches?per_page=100"
-    branches_data = await github_api(branches_url, token)
+    branches_url = f"https://api.github.com/repos/{owner}/{repo}/branches"
+    branches_data = await fetch_all_pages(github_api, branches_url, token)
     
     return [b["name"] for b in branches_data]
 
@@ -190,7 +257,7 @@ async def get_gitea_branches(repo_url: str, token: str = None) -> List[str]:
     owner, repo = repo_info['owner'], repo_info['repo']
     
     branches_url = f"{base_url}/repos/{owner}/{repo}/branches"
-    branches_data = await gitea_api(branches_url, token)
+    branches_data = await fetch_all_pages(gitea_api, branches_url, token, per_page_param="limit", per_page=50)
     
     return [b["name"] for b in branches_data]
 
@@ -210,8 +277,8 @@ async def get_gitlab_branches(repo_url: str, token: str = None) -> List[str]:
     base_url = repo_info['base_url']
     project_path = quote(repo_info['project_path'], safe='')
     
-    branches_url = f"{base_url}/projects/{project_path}/repository/branches?per_page=100"
-    branches_data = await gitlab_api(branches_url, extracted_token)
+    branches_url = f"{base_url}/projects/{project_path}/repository/branches"
+    branches_data = await fetch_all_pages(gitlab_api, branches_url, extracted_token)
     
     return [b["name"] for b in branches_data]
 
@@ -223,17 +290,36 @@ async def get_github_files(repo_url: str, branch: str, token: str = None, exclud
     owner, repo = repo_info['owner'], repo_info['repo']
     
     # 获取仓库文件树
-    tree_url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/{quote(branch)}?recursive=1"
-    tree_data = await github_api(tree_url, token)
+    tree_base = f"https://api.github.com/repos/{owner}/{repo}/git/trees"
+    tree_data = await github_api(f"{tree_base}/{quote(branch, safe='')}?recursive=1", token)
+    entries = tree_data["tree"]
+    if tree_data.get("truncated"):
+        entries = []
+        pending = [("", tree_data["sha"])]
+        while pending:
+            prefix, sha = pending.pop()
+            try:
+                subtree = await github_api(f"{tree_base}/{quote(sha, safe='')}", token)
+            except FileNotFoundError as exc:
+                raise ListingTruncatedError("无法取得完整的文件树") from exc
+            if subtree.get("truncated"):
+                raise ListingTruncatedError(f"GitHub 目录列表不完整: {prefix or '/'}")
+            for entry in subtree["tree"]:
+                path = prefix + entry["path"]
+                if entry["type"] == "tree":
+                    if not should_exclude(path + "/", exclude_patterns):
+                        pending.append((path + "/", entry["sha"]))
+                else:
+                    entries.append({**entry, "path": path})
     
     files = []
-    for item in tree_data.get("tree", []):
+    for item in entries:
         if item.get("type") == "blob" and is_text_file(item["path"]) and not should_exclude(item["path"], exclude_patterns):
             size = item.get("size", 0)
             if size <= settings.MAX_FILE_SIZE_BYTES:
                 files.append({
                     "path": item["path"],
-                    "url": f"https://raw.githubusercontent.com/{owner}/{repo}/{quote(branch)}/{item['path']}"
+                    "url": f"https://raw.githubusercontent.com/{owner}/{repo}/{quote(branch, safe='')}/{quote(item['path'])}"
                 })
     
     return files
@@ -257,8 +343,8 @@ async def get_gitlab_files(repo_url: str, branch: str, token: str = None, exclud
     project_path = quote(repo_info['project_path'], safe='')
     
     # 获取仓库文件树
-    tree_url = f"{base_url}/projects/{project_path}/repository/tree?ref={quote(branch)}&recursive=true&per_page=100"
-    tree_data = await gitlab_api(tree_url, extracted_token)
+    tree_url = f"{base_url}/projects/{project_path}/repository/tree?ref={quote(branch)}&recursive=true"
+    tree_data = await fetch_all_pages(gitlab_api, tree_url, extracted_token)
     
     files = []
     for item in tree_data:
@@ -281,11 +367,28 @@ async def get_gitea_files(repo_url: str, branch: str, token: str = None, exclude
     
     # Gitea tree API: GET /repos/{owner}/{repo}/git/trees/{sha}?recursive=1
     # 可以直接使用分支名作为sha
-    tree_url = f"{base_url}/repos/{owner}/{repo}/git/trees/{quote(branch)}?recursive=1"
-    tree_data = await gitea_api(tree_url, token)
+    tree_base = f"{base_url}/repos/{owner}/{repo}/git/trees"
+    tree_data = await gitea_api(f"{tree_base}/{quote(branch, safe='')}?recursive=1", token)
+    entries = list(tree_data["tree"] or [])
+    if tree_data.get("truncated"):
+        tree_url = f"{tree_base}/{quote(tree_data['sha'], safe='')}?recursive=1"
+        expected = tree_data["total_count"]
+        page = 1
+        while tree_data.get("truncated"):
+            page += 1
+            try:
+                tree_data = await gitea_api(f"{tree_url}&page={page}", token)
+            except FileNotFoundError as exc:
+                raise ListingTruncatedError("无法取得完整的文件树") from exc
+            batch = tree_data["tree"]
+            if not batch or tree_data.get("page") != page or len(entries) >= expected:
+                raise ListingTruncatedError("Gitea 文件树分页不完整")
+            entries.extend(batch)
+        if len(entries) != expected:
+            raise ListingTruncatedError("Gitea 文件树条目数量不一致")
     
     files = []
-    for item in tree_data.get("tree", []):
+    for item in entries:
          # Gitea API returns 'type': 'blob' for files
         if item.get("type") == "blob" and is_text_file(item["path"]) and not should_exclude(item["path"], exclude_patterns):
             # 使用API raw endpoint: GET /repos/{owner}/{repo}/raw/{filepath}?ref={branch}
@@ -296,6 +399,56 @@ async def get_gitea_files(repo_url: str, branch: str, token: str = None, exclude
             })
     
     return files
+def record_scan_failure(task, reason):
+    try:
+        config = json.loads(task.scan_config or "{}")
+    except (ValueError, TypeError):
+        config = {}
+    config = config if isinstance(config, dict) else {}
+    task.scan_config = json.dumps({**config, "failure": reason}, ensure_ascii=False)
+
+
+def scan_quality(result):
+    score = result.get("quality_score")
+    if score is None:
+        return None
+    score = float(score)
+    if not math.isfinite(score) or not 0 <= score <= 100:
+        raise ValueError("无效质量评分")
+    return score
+
+
+async def analyze_scan_file(service, content, language, scan_config, db):
+    async def analyze(text):
+        if scan_config.get("rule_set_id") or scan_config.get("prompt_template_id"):
+            return await service.analyze_code_with_rules(
+                text, language, rule_set_id=scan_config.get("rule_set_id"),
+                prompt_template_id=scan_config.get("prompt_template_id"), db_session=db,
+            )
+        return await service.analyze_code(text, language)
+
+    try:
+        return await analyze(content)
+    except OutputLimitError:
+        lines = content.split("\n")
+        midpoint = len(lines) // 2
+        if not midpoint:
+            raise
+        # Retry each half once within the user's existing token limit.
+        first = await analyze("\n".join(lines[:midpoint]))
+        second = await analyze("\n".join(lines[midpoint:]))
+        for issue in first["issues"]:
+            issue["line"] = source_position(issue.get("line"), midpoint)
+        for issue in second["issues"]:
+            line = source_position(issue.get("line"), len(lines) - midpoint)
+            issue["line"] = line + midpoint if line else None
+        scores = [score for part in (first, second) if (score := scan_quality(part)) is not None]
+        merged = {"issues": first["issues"] + second["issues"]}
+        if scores:
+            merged["quality_score"] = sum(scores) / len(scores)
+        return merged
+
+
 async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = None):
     """
     后台仓库扫描任务
@@ -306,10 +459,11 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
         user_config: 用户配置字典（包含llmConfig和otherConfig）
     """
     async with db_session_factory() as db:
-        task = await db.get(AuditTask, task_id)
-        if not task:
+        task = await db.get(AuditTask, task_id, with_for_update=True)
+        if not task or task.status != "pending":
             return
 
+        task_control.start_task(task_id)
         try:
             # 1. 更新状态为运行中
             task.status = "running"
@@ -365,7 +519,6 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
                 ssh_private_key = decrypt_sensitive_data(user_other_config['sshPrivateKey'])
 
             files: List[Dict[str, str]] = []
-            extracted_gitlab_token = None
 
             # 检查是否为SSH URL
             from app.services.git_ssh_service import GitSSHOperations
@@ -378,8 +531,9 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
 
                 print(f"🔐 使用SSH方式访问仓库: {repo_url}")
                 try:
-                    files_with_content = GitSSHOperations.get_repo_files_via_ssh(
-                        repo_url, ssh_private_key, branch, task_exclude_patterns
+                    files_with_content = await prepare_in_thread(
+                        GitSSHOperations.get_repo_files_via_ssh, repo_url, ssh_private_key, branch, task_exclude_patterns,
+                        cancel_check=lambda: task_control.is_cancelled(task_id),
                     )
                     # 转换为统一格式
                     files = [{'path': f['path'], 'content': f['content']} for f in files_with_content]
@@ -391,11 +545,11 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
                 # 使用API方式获取文件（原有逻辑）
                 # 构建分支尝试顺序（分支降级机制）
                 branches_to_try = [branch]
-                if project.default_branch and project.default_branch != branch:
-                    branches_to_try.append(project.default_branch)
-                for common_branch in ["main", "master"]:
-                    if common_branch not in branches_to_try:
-                        branches_to_try.append(common_branch)
+                requested_branch = json.loads(task.scan_config or "{}").get("branch_name")
+                if not requested_branch:
+                    for candidate in (project.default_branch, "main", "master"):
+                        if candidate and candidate not in branches_to_try:
+                            branches_to_try.append(candidate)
 
                 actual_branch = branch  # 实际使用的分支
                 last_error = None
@@ -407,23 +561,23 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
                             files = await get_github_files(repo_url, try_branch, github_token, task_exclude_patterns)
                         elif repo_type == "gitlab":
                             files = await get_gitlab_files(repo_url, try_branch, gitlab_token, task_exclude_patterns)
-                            # GitLab文件可能带有token
-                            if files and 'token' in files[0]:
-                                extracted_gitlab_token = files[0].get('token')
                         elif repo_type == "gitea":
                             files = await get_gitea_files(repo_url, try_branch, gitea_token, task_exclude_patterns)
                         else:
                             raise Exception("不支持的仓库类型，仅支持 GitHub, GitLab 和 Gitea 仓库")
 
-                        if files:
-                            actual_branch = try_branch
-                            if try_branch != branch:
-                                print(f"⚠️ 分支 {branch} 不存在或无法访问，已降级到分支 {try_branch}")
-                            break
+                        if not files:
+                            raise ScanInputError(f"分支 {try_branch} 中没有符合扫描条件的文件")
+                        actual_branch = try_branch
+                        break
+                    except ScanInputError:
+                        # 分支存在但文件列表不完整：不降级到其他分支，直接让扫描失败
+                        raise
                     except Exception as e:
                         last_error = str(e)
                         print(f"⚠️ 获取分支 {try_branch} 失败: {last_error[:100]}")
-                        continue
+                        if not isinstance(e, FileNotFoundError):
+                            break
 
                 if not files:
                     error_msg = f"无法获取仓库文件，所有分支尝试均失败"
@@ -434,8 +588,9 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
                             error_msg = "无访问权限，请检查 Token 配置"
                         else:
                             error_msg = f"获取文件失败: {last_error[:100]}"
-                    raise Exception(error_msg)
+                    raise ScanInputError(error_msg if "获取文件失败:" not in error_msg else "无法读取仓库，请检查仓库类型、受信任来源与访问权限")
 
+            task.branch_name = actual_branch
             print(f"✅ 成功获取分支 {actual_branch} 的文件列表")
 
             # 获取分析配置（优先使用用户配置）
@@ -449,6 +604,8 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
             if target_files:
                 print(f"🎯 指定分析 {len(target_files)} 个文件")
                 files = [f for f in files if f['path'] in target_files]
+                if not files:
+                    raise ScanInputError("分支中未找到选定的文件")
             elif max_analyze_files > 0:
                 files = files[:max_analyze_files]
 
@@ -463,24 +620,24 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
             quality_scores = []
             scanned_files = 0
             failed_files = 0
+            last_file_error = ""
             skipped_files = 0  # 跳过的文件（空文件、太大等）
             consecutive_failures = 0
             MAX_CONSECUTIVE_FAILURES = 5
 
             for file_info in files:
+                await db.refresh(task, attribute_names=["status"])
+                if task.status == "cancelled":
+                    return
                 # 检查是否取消
                 if task_control.is_cancelled(task_id):
                     print(f"🛑 任务 {task_id} 已被用户取消")
-                    task.status = "cancelled"
-                    task.completed_at = datetime.now(timezone.utc)
-                    await db.commit()
-                    task_control.cleanup_task(task_id)
                     return
 
                 # 检查连续失败次数
                 if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                     print(f"❌ 任务 {task_id}: 连续失败 {consecutive_failures} 次，停止分析")
-                    raise Exception(f"连续失败 {consecutive_failures} 次，可能是 LLM API 服务异常")
+                    raise ScanInputError(f"连续 {consecutive_failures} 个文件分析失败，最近一次错误为 {last_file_error}")
 
                 try:
                     # 获取文件内容
@@ -510,7 +667,9 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
                         print(f"📥 正在获取文件: {file_info['path']}")
                         content = await fetch_file_content(file_info["url"], headers)
 
-                    if not content or not content.strip():
+                    if content is None:
+                        raise ValueError("无法下载文件")
+                    if not content.strip():
                         print(f"⚠️ 文件内容为空，跳过: {file_info['path']}")
                         skipped_files += 1
                         continue
@@ -521,39 +680,27 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
                         continue
                     
                     file_lines = content.split('\n')
-                    total_lines = len(file_lines) + 1
+                    file_line_count = len(file_lines)
                     language = get_language_from_path(file_info["path"])
                     
                     print(f"🤖 正在调用 LLM 分析: {file_info['path']} ({language}, {len(content)} bytes)")
                     # LLM分析 - 支持规则集和提示词模板
                     scan_config = (user_config or {}).get('scan_config', {})
-                    rule_set_id = scan_config.get('rule_set_id')
-                    prompt_template_id = scan_config.get('prompt_template_id')
-                    
-                    if rule_set_id or prompt_template_id:
-                        analysis = await llm_service.analyze_code_with_rules(
-                            content, language,
-                            rule_set_id=rule_set_id,
-                            prompt_template_id=prompt_template_id,
-                            db_session=db
-                        )
-                    else:
-                        analysis = await llm_service.analyze_code(content, language)
+                    analysis = await analyze_scan_file(llm_service, content, language, scan_config, db)
                     print(f"✅ LLM 分析完成: {file_info['path']}")
                     
                     # 再次检查是否取消（LLM分析后）
                     if task_control.is_cancelled(task_id):
                         print(f"🛑 任务 {task_id} 在LLM分析后被取消")
-                        task.status = "cancelled"
-                        task.completed_at = datetime.now(timezone.utc)
-                        await db.commit()
-                        task_control.cleanup_task(task_id)
                         return
                     
+                    await db.refresh(task, attribute_names=["status"], with_for_update=True)
+                    if task.status == "cancelled":
+                        return
                     # 保存问题
                     issues = analysis.get("issues", [])
                     for issue in issues:
-                        line_num = issue.get("line", 1)
+                        line_num = source_position(issue.get("line"), file_line_count)
                         
                         # 健壮的代码片段提取逻辑
                         # 优先使用 LLM 返回的片段，如果为空则从源码提取
@@ -573,7 +720,7 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
                             task_id=task.id,
                             file_path=file_info["path"],
                             line_number=line_num,
-                            column_number=issue.get("column"),
+                            column_number=source_position(issue.get("column")),
                             issue_type=issue.get("type", "maintainability"),
                             severity=issue.get("severity", "low"),
                             title=issue.get("title", "Issue"),
@@ -584,19 +731,17 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
                             status="open"
                         )
                         db.add(audit_issue)
-                        total_issues += 1
-                    
-                    if "quality_score" in analysis:
-                        quality_scores.append(analysis["quality_score"])
-                    
-                    consecutive_failures = 0  # 成功后重置
-                    scanned_files += 1
-                    
-                    # 更新进度
-                    task.scanned_files = scanned_files
-                    task.total_lines = total_lines
-                    task.issues_count = total_issues
+                    score = scan_quality(analysis)
+                    task.scanned_files = scanned_files + 1
+                    task.total_lines = total_lines + file_line_count
+                    task.issues_count = total_issues + len(issues)
                     await db.commit()
+                    scanned_files += 1
+                    total_lines += file_line_count
+                    total_issues += len(issues)
+                    if score is not None:
+                        quality_scores.append(score)
+                    consecutive_failures = 0
                     
                     print(f"📈 任务 {task_id}: 进度 {scanned_files}/{len(files)} ({int(scanned_files/len(files)*100)}%)")
                     
@@ -604,8 +749,13 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
                     await asyncio.sleep(llm_gap_ms / 1000)
                     
                 except Exception as file_error:
+                    await db.rollback()
+                    await db.refresh(task)
+                    if task.status == "cancelled":
+                        return
                     failed_files += 1
-                    consecutive_failures += 1
+                    last_file_error = str(file_error) if isinstance(file_error, OutputLimitError) else type(file_error).__name__
+                    consecutive_failures = 0 if isinstance(file_error, OutputLimitError) else consecutive_failures + 1
                     # 打印详细错误信息
                     import traceback
                     print(f"❌ 分析文件失败 ({file_info['path']}): {file_error}")
@@ -614,6 +764,12 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
                     await asyncio.sleep(llm_gap_ms / 1000)
 
             # 5. 完成任务
+            await db.refresh(task, with_for_update=True)
+            if task.status == "cancelled" or task_control.is_cancelled(task_id):
+                task_control.cleanup_task(task_id)
+                return
+            if failed_files:
+                record_scan_failure(task, f"{failed_files} 个文件分析失败，最近一次错误为 {last_file_error}")
             avg_quality_score = sum(quality_scores) / len(quality_scores) if quality_scores else 100.0
             
             # 判断任务状态
@@ -638,7 +794,7 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
                 await db.commit()
                 print(f"❌ 任务 {task_id} 失败: {failed_files} 个文件分析失败，请检查 LLM API 配置")
             else:
-                task.status = "completed"
+                task.status = "failed" if failed_files else "completed"
                 task.completed_at = datetime.now(timezone.utc)
                 task.scanned_files = scanned_files
                 task.total_lines = total_lines
@@ -646,11 +802,19 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
                 task.quality_score = avg_quality_score
                 await db.commit()
                 print(f"✅ 任务 {task_id} 完成: 扫描 {scanned_files} 个文件, 发现 {total_issues} 个问题, 质量分 {avg_quality_score:.1f}")
-            task_control.cleanup_task(task_id)
 
+        except asyncio.CancelledError:
+            if not task_control.is_cancelled(task_id):
+                raise
         except Exception as e:
             print(f"❌ 扫描失败: {e}")
+            await db.rollback()
+            await db.refresh(task, with_for_update=True)
+            if task.status == "cancelled":
+                return
+            record_scan_failure(task, str(e) if isinstance(e, ScanInputError) else f"扫描中止（{type(e).__name__}）")
             task.status = "failed"
             task.completed_at = datetime.now(timezone.utc)
             await db.commit()
+        finally:
             task_control.cleanup_task(task_id)

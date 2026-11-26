@@ -19,6 +19,7 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
+  const [registrationEnabled, setRegistrationEnabled] = useState(false);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -27,11 +28,16 @@ export default function Login() {
   const from = location.state?.from?.pathname || "/";
 
   useEffect(() => {
+    const controller = new AbortController();
+    apiClient.get("/config/defaults", { signal: controller.signal })
+      .then(({ data }) => setRegistrationEnabled(data.publicRegistrationEnabled !== false))
+      .catch(() => {});
     const savedEmail = localStorage.getItem("remembered_email");
     if (savedEmail) {
       setEmail(savedEmail);
       setRememberMe(true);
     }
+    return () => controller.abort();
   }, []);
 
   useEffect(() => {
@@ -258,8 +264,7 @@ export default function Login() {
               </Button>
             </form>
 
-            {/* Footer */}
-            <div className="mt-6 pt-5 border-t border-border text-center">
+            {registrationEnabled && <div className="mt-6 pt-5 border-t border-border text-center">
               <p className="text-base font-mono text-muted-foreground">
                 还没有账号？{" "}
                 <span
@@ -269,14 +274,14 @@ export default function Login() {
                   立即注册
                 </span>
               </p>
-            </div>
+            </div>}
           </div>
         </div>
 
         {/* Version Info */}
         <div className="mt-6 text-center">
           <p className="font-mono text-sm text-muted-foreground uppercase">
-            Version {version} · Secure Connection
+            Version {version}
           </p>
         </div>
       </div>

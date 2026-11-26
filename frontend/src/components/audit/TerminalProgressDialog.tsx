@@ -9,7 +9,6 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Terminal, X as XIcon, Activity, Cpu, HardDrive, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { cn, calculateTaskProgress } from "@/shared/utils/utils";
 import * as VisuallyHidden from "@radix-ui/react-visually-hidden";
-import { taskControl } from "@/shared/services/taskControl";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
@@ -85,21 +84,15 @@ export default function TerminalProgressDialog({
             return;
         }
 
-        // 1. 标记任务为取消状态
-        taskControl.cancelTask(taskId);
-        setIsCancelled(true);
-        addLog("[ERR] 用户取消任务，正在停止...", "error");
-
-        // 2. 立即更新数据库状态
         try {
             const { api } = await import("@/shared/config/database");
-            // biome-ignore lint/suspicious/noExplicitAny: API type mismatch workaround
-            await api.updateAuditTask(taskId, { status: 'cancelled' } as any);
-            addLog("[WARN] 任务状态已更新为已取消", "warning");
+            await api.cancelAuditTask(taskId);
+            setIsCancelled(true);
+            addLog("[WARN] 用户已取消任务", "warning");
             toast.success("任务已取消");
         } catch (error) {
-            console.error('更新取消状态失败:', error);
-            toast.warning("任务已标记取消，后台正在停止...");
+            console.error("取消任务失败", error);
+            toast.error("取消失败，请刷新任务状态后重试");
         }
     };
 
@@ -232,7 +225,7 @@ export default function TerminalProgressDialog({
 
                     // 显示进度更新（仅在有变化时）
                     if (filesChanged && task.scanned_files > lastScannedFiles) {
-                        const progress = calculateTaskProgress(task.scanned_files, task.total_files);
+                        const progress = calculateTaskProgress(task.scanned_files, task.total_files, task.status);
                         const filesProcessed = task.scanned_files - lastScannedFiles;
                         addLog(
                             `[PROG] 扫描进度: ${task.scanned_files || 0}/${task.total_files || 0} 文件 (${progress}%) [+${filesProcessed}]`,
@@ -260,7 +253,7 @@ export default function TerminalProgressDialog({
                         addLog("", "info"); // 空行分隔
                         addLog("[DONE] 代码扫描完成", "success");
                         addLog("----------------------------------", "info");
-                        addLog(`[STAT] 总计扫描: ${task.total_files} 个文件`, "success");
+                        addLog(`[STAT] 已分析: ${task.scanned_files}/${task.total_files} 个文件`, "success");
                         addLog(`[STAT] 总计分析: ${task.total_lines.toLocaleString()} 行代码`, "success");
                         addLog(`[RSLT] 发现问题: ${task.issues_count} 个`, task.issues_count > 0 ? "warning" : "success");
 
@@ -337,54 +330,14 @@ export default function TerminalProgressDialog({
                         addLog("[FAIL] 审计任务执行失败", "error");
                         addLog("----------------------------------", "error");
 
-                        // 尝试从日志系统获取具体错误信息
+                        addLog(`[STAT] 已分析文件: ${task.scanned_files}/${task.total_files}`, "info");
                         try {
-                            const { logger } = await import("@/shared/utils/logger");
-                            const recentLogs = logger.getLogs({
-                                startTime: Date.now() - 60000, // 最近1分钟
-                            });
-
-                            // 查找与当前任务相关的错误
-                            const taskErrors = recentLogs
-                                .filter(log =>
-                                    log.level === 'ERROR' &&
-                                    (log.message.includes(taskId) ||
-                                        log.message.includes('审计') ||
-                                        log.message.includes('API'))
-                                )
-                                .slice(-3); // 最近3条错误
-
-                            if (taskErrors.length > 0) {
-                                addLog("具体错误信息:", "error");
-                                taskErrors.forEach(log => {
-                                    addLog(`  • ${log.message}`, "error");
-                                    if (log.data?.error) {
-                                        const errorMsg = typeof log.data.error === 'string'
-                                            ? log.data.error
-                                            : log.data.error.message || JSON.stringify(log.data.error);
-                                        addLog(`    ${errorMsg}`, "error");
-                                    }
-                                });
-                            } else {
-                                // 如果没有找到具体错误，显示常见原因
-                                addLog("可能的原因:", "error");
-                                addLog("  • 网络连接问题", "error");
-                                addLog("  • 仓库访问权限不足（私有仓库需配置 Token）", "error");
-                                addLog("  • GitHub/GitLab API 限流", "error");
-                                addLog("  • LLM API 配置错误或额度不足", "error");
-                            }
-                        } catch (_e) {
-                            // 如果获取日志失败，显示常见原因
-                            addLog("可能的原因:", "error");
-                            addLog("  • 网络连接问题", "error");
-                            addLog("  • 仓库访问权限不足（私有仓库需配置 Token）", "error");
-                            addLog("  • GitHub/GitLab API 限流", "error");
-                            addLog("  • LLM API 配置错误或额度不足", "error");
+                            const failure = JSON.parse(task.scan_config || "{}").failure;
+                            if (typeof failure === "string") addLog(failure, "error");
+                        } catch {
+                            // Older tasks may have no structured scan configuration.
                         }
-
-                        addLog("----------------------------------", "error");
-                        addLog("[HINT] 建议: 检查系统配置和网络连接后重试", "warning");
-                        addLog("[LOGS] 查看完整日志: 导航栏 -> 系统日志", "warning");
+                        addLog(`[LOGS] 可在后端容器日志中按任务 ID ${taskId} 查询`, "info");
 
                         setIsFailed(true);
                         if (pollIntervalRef.current) {
@@ -588,11 +541,11 @@ export default function TerminalProgressDialog({
                                         <Button
                                             size="sm"
                                             variant="outline"
-                                            onClick={() => window.open('/logs', '_blank')}
+                                            onClick={() => window.open(`/tasks/${taskId}`, '_blank', 'noopener')}
                                             className="h-8 bg-transparent border-slate-300 dark:border-[#6a7587]/40 text-slate-600 dark:text-[#a8b0c0] hover:bg-slate-100 dark:hover:bg-[#1a2030]/50 hover:border-slate-400 dark:hover:border-[#6a7587]/60 font-mono uppercase tracking-wider text-xs"
                                         >
                                             <Activity className="w-3 h-3 mr-1.5" />
-                                            查看日志
+                                            查看任务详情
                                         </Button>
                                     )}
 

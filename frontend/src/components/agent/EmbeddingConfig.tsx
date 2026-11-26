@@ -124,12 +124,6 @@ export default function EmbeddingConfigPanel() {
       return;
     }
 
-    const provider = providers.find((p) => p.id === selectedProvider);
-    if (provider?.requires_api_key && !apiKey) {
-      toast.error(`${provider.name} 需要 API Key`);
-      return;
-    }
-
     try {
       setSaving(true);
       await apiClient.put("/embedding/config", {
@@ -302,18 +296,14 @@ export default function EmbeddingConfigPanel() {
           <div className="space-y-2">
             <Label className="text-xs font-bold text-muted-foreground uppercase">
               API Key
-              <span className="text-rose-400 ml-1">*</span>
             </Label>
             <Input
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="输入 API Key"
+              placeholder="留空以使用部署者配置的 API Key"
               className="h-10 cyber-input"
             />
-            <p className="text-xs text-muted-foreground">
-              API Key 将安全存储，不会显示在页面上
-            </p>
           </div>
         )}
 

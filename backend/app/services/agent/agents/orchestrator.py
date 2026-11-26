@@ -231,7 +231,10 @@ class OrchestratorAgent(BaseAgent):
         await self.emit_thinking("🧠 Orchestrator Agent 启动，LLM 开始自主编排决策...")
         
         try:
-            for iteration in range(self.config.max_iterations):
+            from app.core.config import settings
+            iteration_limit = min(self.config.max_iterations, settings.AGENT_MAX_ITERATIONS,
+                                  config.get("max_iterations") or self.config.max_iterations)
+            for iteration in range(iteration_limit):
                 if self.is_cancelled:
                     break
                 
@@ -347,7 +350,7 @@ Action Input: {{"参数": "值"}}
                     self._format_retry_count = format_retry_count
                     if format_retry_count >= 3:
                         logger.error(f"[{self.name}] Too many format errors, stopping")
-                        error_message = "连续格式错误，停止编排"
+                        error_message = "模型连续 3 次未返回有效的任务指令，审计已停止"
                         await self.emit_event("error", error_message)
                         break
                     await self.emit_llm_decision("格式错误", "需要重新输出")
@@ -425,6 +428,9 @@ Action Input: {{"参数": "值"}}
                     "content": f"Observation:\n{step.observation}",
                 })
             
+            else:
+                error_message = "达到任务迭代上限，审计未完成"
+
             # 生成最终结果
             duration_ms = int((time.time() - start_time) * 1000)
             
@@ -714,7 +720,7 @@ Action Input: {{"参数": "值"}}
 
             # 🔥 执行子 Agent 前检查取消状态
             if self.is_cancelled:
-                return f"## {agent_name} Agent 执行取消\n\n任务已被用户取消"
+                raise
 
             # 🔥 执行子 Agent - 支持取消和超时
             # 使用用户配置的子Agent超时时间
@@ -775,7 +781,7 @@ Action Input: {{"参数": "值"}}
                 )
             except asyncio.TimeoutError:
                 logger.warning(f"[{self.name}] Sub-agent {agent_name} timed out after {timeout}s")
-                return f"## {agent_name} Agent 执行超时\n\n子 Agent 执行超过 {timeout} 秒，已强制终止。请尝试更具体的任务或使用其他 Agent。"
+                raise TimeoutError(f"{agent_name} 达到 {timeout} 秒时限，任务已终止")
             except asyncio.CancelledError:
                 logger.info(f"[{self.name}] Sub-agent {agent_name} was cancelled")
                 return f"## {agent_name} Agent 执行取消\n\n任务已被用户取消"
@@ -1071,11 +1077,11 @@ Action Input: {{"参数": "值"}}
                 
                 return observation
             else:
-                return f"## {agent_name} Agent 执行失败\n\n错误: {result.error}"
+                raise RuntimeError(f"{agent_name} 未完成任务：{result.error or '未返回有效结果'}")
                 
         except Exception as e:
             logger.error(f"Sub-agent dispatch failed: {e}", exc_info=True)
-            return f"## 调度失败\n\n错误: {str(e)}"
+            raise RuntimeError(f"{agent_name} 调度失败：{e}") from e
 
     def _validate_file_path(self, file_path: str) -> bool:
         """

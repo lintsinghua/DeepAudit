@@ -55,6 +55,8 @@ async def register(
     """
     Register a new user.
     """
+    if not settings.PUBLIC_REGISTRATION_ENABLED:
+        raise HTTPException(status_code=403, detail="公开注册已关闭，请联系管理员创建账户")
     # Check if user already exists
     result = await db.execute(select(User).where(User.email == user_in.email))
     existing_user = result.scalars().first()

@@ -19,7 +19,8 @@ from app.models.audit import AuditTask, AuditIssue
 from app.models.agent_task import AgentTask, AgentTaskStatus, AgentFinding
 from app.models.user_config import UserConfig
 import zipfile
-from app.services.scanner import scan_repo_task, get_github_files, get_gitlab_files, get_github_branches, get_gitlab_branches, get_gitea_branches, should_exclude, is_text_file
+from app.services.archive import MAX_ARCHIVE_BYTES
+from app.services.scanner import scan_repo_task, get_github_files, get_gitlab_files, get_gitea_files, get_github_branches, get_gitlab_branches, get_gitea_branches, should_exclude, is_text_file
 from app.services.zip_storage import (
     save_project_zip, load_project_zip, get_project_zip_meta,
     delete_project_zip, has_project_zip, is_valid_project_id
@@ -420,7 +421,7 @@ async def get_project_files(
         from app.core.config import settings
         from app.services.git_ssh_service import GitSSHOperations
 
-        SENSITIVE_OTHER_FIELDS = ['githubToken', 'gitlabToken', 'sshPrivateKey']
+        SENSITIVE_OTHER_FIELDS = ['githubToken', 'gitlabToken', 'giteaToken', 'sshPrivateKey']
 
         result = await db.execute(
             select(UserConfig).where(UserConfig.user_id == current_user.id)
@@ -429,6 +430,7 @@ async def get_project_files(
 
         github_token = settings.GITHUB_TOKEN
         gitlab_token = settings.GITLAB_TOKEN
+        gitea_token = settings.GITEA_TOKEN
         ssh_private_key = None
 
         if config and config.other_config:
@@ -440,6 +442,8 @@ async def get_project_files(
                         github_token = decrypted_val
                     elif field == 'gitlabToken':
                         gitlab_token = decrypted_val
+                    elif field == 'giteaToken':
+                        gitea_token = decrypted_val
                     elif field == 'sshPrivateKey':
                         ssh_private_key = decrypted_val
 
@@ -476,6 +480,9 @@ async def get_project_files(
                     # 传入用户自定义排除模式
                     repo_files = await get_gitlab_files(project.repository_url, target_branch, gitlab_token, parsed_exclude_patterns)
                     files = [{"path": f["path"], "size": 0} for f in repo_files]
+                elif repo_type == "gitea":
+                    repo_files = await get_gitea_files(project.repository_url, target_branch, gitea_token, parsed_exclude_patterns)
+                    files = [{"path": f["path"], "size": 0} for f in repo_files]
                 else:
                     raise HTTPException(status_code=400, detail="不支持的仓库类型")
         except HTTPException:
@@ -491,6 +498,8 @@ class ScanRequest(BaseModel):
     full_scan: bool = True
     exclude_patterns: Optional[List[str]] = None
     branch_name: Optional[str] = None
+    rule_set_id: Optional[str] = None
+    prompt_template_id: Optional[str] = None
 
 
 @router.post("/{id}/scan")
@@ -535,7 +544,7 @@ async def scan_project(
         'qwenApiKey', 'deepseekApiKey', 'zhipuApiKey', 'moonshotApiKey',
         'baiduApiKey', 'minimaxApiKey', 'doubaoApiKey'
     ]
-    SENSITIVE_OTHER_FIELDS = ['githubToken', 'gitlabToken']
+    SENSITIVE_OTHER_FIELDS = ['githubToken', 'gitlabToken', 'giteaToken']
 
     def decrypt_config(config_dict: dict, sensitive_fields: list) -> dict:
         """解密配置中的敏感字段"""
@@ -562,9 +571,13 @@ async def scan_project(
         }
 
     # 将扫描配置注入到 user_config 中，以便 scan_repo_task 使用
-    if scan_request and scan_request.file_paths:
-        user_config['scan_config'] = {'file_paths': scan_request.file_paths}
-
+    if scan_request:
+        user_config['scan_config'] = {
+            'file_paths': scan_request.file_paths or [],
+            'exclude_patterns': scan_request.exclude_patterns or [],
+            'rule_set_id': scan_request.rule_set_id,
+            'prompt_template_id': scan_request.prompt_template_id,
+        }
     # Trigger Background Task
     background_tasks.add_task(scan_repo_task, task.id, AsyncSessionLocal, user_config)
 
@@ -649,7 +662,7 @@ async def upload_project_zip(
         
         # 检查文件大小
         file_size = os.path.getsize(temp_file_path)
-        if file_size > 500 * 1024 * 1024:  # 500MB limit
+        if file_size > MAX_ARCHIVE_BYTES:
             raise HTTPException(status_code=400, detail="文件大小不能超过500MB")
         
         # 保存到持久化存储

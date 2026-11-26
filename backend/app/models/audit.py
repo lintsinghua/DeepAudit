@@ -5,6 +5,16 @@ from sqlalchemy.orm import relationship
 from app.db.base import Base
 
 
+def source_position(value, maximum=2**31 - 1):
+    """Normalize optional one-based coordinates before binding PostgreSQL integers."""
+    if isinstance(value, str):
+        value = value.strip()
+        if len(value) > 10 or not value.isascii() or not value.isdecimal():
+            return None
+        value = int(value)
+    return value if type(value) is int and 1 <= value <= maximum else None
+
+
 class AuditTask(Base):
     __tablename__ = "audit_tasks"
 

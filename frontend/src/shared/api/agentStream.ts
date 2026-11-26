@@ -98,7 +98,7 @@ export interface StreamOptions {
   onNodeEnd?: (nodeName: string, summary: Record<string, unknown>) => void;
   onFinding?: (finding: Record<string, unknown>, isVerified: boolean) => void;
   onProgress?: (current: number, total: number, message: string) => void;
-  onComplete?: (data: { findingsCount: number; securityScore: number }) => void;
+  onComplete?: (data: { findingsCount: number; securityScore?: number }) => void;
   onError?: (error: string) => void;
   onHeartbeat?: () => void;
   onEvent?: StreamEventCallback;  // 通用事件回调
@@ -431,8 +431,8 @@ export class AgentStreamHandler {
       case 'task_end':
         if (event.status !== 'cancelled' && event.status !== 'failed') {
           this.options.onComplete?.({
-            findingsCount: event.findings_count || event.metadata?.findings_count as number || 0,
-            securityScore: event.security_score || event.metadata?.security_score as number || 100,
+            findingsCount: event.findings_count ?? (event.metadata?.findings_count as number | undefined) ?? 0,
+            securityScore: event.security_score ?? (event.metadata?.security_score as number | undefined),
           });
         }
         this.disconnect();

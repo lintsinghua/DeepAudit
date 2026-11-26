@@ -36,23 +36,14 @@ class TestGetCacheKey:
     def setup(self):
         LLMFactory.clear_cache()
 
-    def test_returns_provider_model_key_prefix(self):
-        config = LLMConfig(
-            provider=LLMProvider.OPENAI,
-            api_key="sk-1234567890abcdef",
-            model="gpt-4o",
-        )
-        result = LLMFactory._get_cache_key(config)
-        assert result == "openai:gpt-4o:sk-12345"
-
-    def test_returns_no_key_when_empty(self):
-        config = LLMConfig(
-            provider=LLMProvider.OPENAI,
-            api_key="",
-            model="gpt-4o",
-        )
-        result = LLMFactory._get_cache_key(config)
-        assert result == "openai:gpt-4o:no-key"
+    @pytest.mark.parametrize("field,value", [
+        ("api_key", "sk-1234567890different"), ("timeout", 45),
+        ("base_url", "https://api.openai.com/v1"), ("max_tokens", 8192),
+    ])
+    def test_cache_separates_settings(self, field, value):
+        from dataclasses import replace
+        config = LLMConfig(provider=LLMProvider.OPENAI, api_key="sk-1234567890", model="gpt-4o")
+        assert LLMFactory._get_cache_key(config) != LLMFactory._get_cache_key(replace(config, **{field: value}))
 
 
 class TestClearCache:

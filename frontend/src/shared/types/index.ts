@@ -167,14 +167,14 @@ export interface CreateAuditTaskForm {
   task_type: 'repository' | 'instant';
   branch_name?: string;
   exclude_patterns: string[];
-  rule_set_id?: string;
-  prompt_template_id?: string;
   scan_config: {
     include_tests?: boolean;
     include_docs?: boolean;
     max_file_size?: number;
     analysis_depth?: 'basic' | 'standard' | 'deep';
     file_paths?: string[];
+    rule_set_id?: string;
+    prompt_template_id?: string;
   };
 }
 

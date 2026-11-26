@@ -272,6 +272,9 @@ class BaseAgent(ABC):
             parent_id: 父Agent ID（用于动态Agent树）
             knowledge_modules: 要加载的知识模块
         """
+        from ..config import get_agent_type_config
+        limits = get_agent_type_config(config.agent_type.value)
+        config.max_iterations = max(1, min(config.max_iterations, limits.max_iterations))
         self.config = config
         self.llm_service = llm_service
         self.tools = tools
@@ -1141,7 +1144,9 @@ class BaseAgent(ABC):
             }
             # 🔥 使用用户配置的默认工具超时时间
             default_tool_timeout = self._timeout_config.get('tool_timeout', 60)
-            timeout = tool_timeouts.get(tool_name, default_tool_timeout)
+            from app.services.agent.config import get_tool_config
+            timeout = min(default_tool_timeout, get_tool_config(tool_name).timeout_seconds,
+                          tool_timeouts.get(tool_name, default_tool_timeout))
 
             # 🔥 使用 asyncio.wait_for 添加超时控制，同时支持取消
             async def execute_with_cancel_check():
@@ -1173,6 +1178,7 @@ class BaseAgent(ABC):
                 except asyncio.CancelledError:
                     if not execute_task.done():
                         execute_task.cancel()
+                        await asyncio.gather(execute_task, return_exceptions=True)
                     raise
 
             try:
@@ -1187,7 +1193,7 @@ class BaseAgent(ABC):
             except asyncio.CancelledError:
                 duration_ms = int((time.time() - start) * 1000)
                 await self.emit_tool_result(tool_name, "已取消", duration_ms)
-                return "⚠️ 任务已取消"
+                raise
 
             duration_ms = int((time.time() - start) * 1000)
             # 🔥 修复：确保传递有意义的结果字符串，避免 "None"

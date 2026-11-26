@@ -173,6 +173,11 @@ describe("calculateQualityGrade", () => {
 });
 
 describe("calculateTaskProgress", () => {
+    it("separates completed work from successfully analyzed files", () => {
+        expect(calculateTaskProgress(349, 368, "completed")).toBe(100);
+        expect(calculateTaskProgress(349, 368, "failed")).toBe(95);
+    });
+
 	it("returns 0 for zero total files", () => {
 		expect(calculateTaskProgress(0, 0)).toBe(0);
 		expect(calculateTaskProgress(5, 0)).toBe(0);

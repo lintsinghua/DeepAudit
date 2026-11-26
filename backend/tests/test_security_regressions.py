@@ -4,7 +4,7 @@ import shutil
 from subprocess import CompletedProcess
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 from uuid import uuid4
 
 import httpx
@@ -91,13 +91,11 @@ async def test_branch_and_file_requests_require_the_configured_origin(monkeypatc
 async def test_trusted_gitlab_preserves_subgroups_and_scopes_token(monkeypatch):
     monkeypatch.setattr(repo_utils.settings, "GITLAB_ORIGIN", "https://git.example:8443")
     with patch.object(scanner, "gitlab_api", new_callable=AsyncMock) as api:
-        api.return_value = [{"name": "main"}]
+        api.side_effect = [[{"name": "main"}], []]
         result = await scanner.get_gitlab_branches("https://git.example:8443/team/sub/repo.git", "user-token")
     assert result == ["main"]
-    api.assert_awaited_once_with(
-        "https://git.example:8443/api/v4/projects/team%2Fsub%2Frepo/repository/branches?per_page=100",
-        "user-token",
-    )
+    base = "https://git.example:8443/api/v4/projects/team%2Fsub%2Frepo/repository/branches"
+    assert api.await_args_list == [call(f"{base}?per_page=100&page={page}", "user-token") for page in (1, 2)]
 
 
 async def test_agent_rejects_an_untrusted_origin_before_download_or_clone(monkeypatch):
@@ -140,7 +138,8 @@ async def test_agent_redirect_falls_back_to_origin_scoped_git_auth(monkeypatch):
     transport = httpx.MockTransport(redirect)
     try:
         with patch("httpx.AsyncClient", side_effect=lambda **kw: client(transport=transport, **kw)), \
-                patch("subprocess.run", side_effect=run_git):
+                patch("subprocess.run", side_effect=run_git), \
+                patch.object(agent_tasks, "run_git_clone", side_effect=run_git):
             await agent_tasks._get_project_root(project, task_id, gitlab_token="operator-value")
         assert requests
         assert all(req.url.host == "git.example" and req.headers["PRIVATE-TOKEN"] == "operator-value"

@@ -636,6 +636,7 @@ class VerificationAgent(BaseAgent):
         
         self._steps = []
         final_result = None
+        previous_output = None
         
         await self.emit_thinking("🔐 Verification Agent 启动，LLM 开始自主验证漏洞...")
         
@@ -662,6 +663,11 @@ class VerificationAgent(BaseAgent):
                     break
                 
                 self._total_tokens += tokens_this_round
+
+                normalized_output = (llm_output or "").strip()
+                if normalized_output == previous_output:
+                    raise ValueError("验证连续返回相同结果，已停止以避免重复执行")
+                previous_output = normalized_output
 
                 # 🔥 Handle empty LLM response to prevent loops
                 if not llm_output or not llm_output.strip():
