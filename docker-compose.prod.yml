@@ -1,5 +1,5 @@
 # =============================================
-# DeepAudit v3.8.4 生产环境一键部署配置
+# DeepAudit v3.8.5 生产环境一键部署配置
 # =============================================
 # 使用预构建的 GHCR 镜像，无需本地构建
 # 部署命令: curl -fsSL https://raw.githubusercontent.com/lintsinghua/DeepAudit/main/docker-compose.prod.yml | docker compose -f - up -d
