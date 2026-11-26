@@ -46,7 +46,7 @@ interface EmbeddingProvider {
 interface EmbeddingConfig {
   provider: string;
   model: string;
-  api_key: string | null;
+  has_api_key: boolean;
   base_url: string | null;
   dimensions: number;
   batch_size: number;
@@ -72,6 +72,7 @@ export default function EmbeddingConfigPanel() {
   const [selectedProvider, setSelectedProvider] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [clearSavedKey, setClearSavedKey] = useState(false);
   const [baseUrl, setBaseUrl] = useState("");
   const [customDimension, setCustomDimension] = useState<number | null>(null);
   const [batchSize, setBatchSize] = useState(100);
@@ -84,6 +85,8 @@ export default function EmbeddingConfigPanel() {
   // 用户手动切换 provider 时更新为默认模型
   const handleProviderChange = (newProvider: string) => {
     setSelectedProvider(newProvider);
+    setApiKey("");
+    setClearSavedKey(false);
     // 切换 provider 时重置为该 provider 的默认模型
     const provider = providers.find((p) => p.id === newProvider);
     if (provider) {
@@ -106,7 +109,8 @@ export default function EmbeddingConfigPanel() {
       if (configRes.data) {
         setSelectedProvider(configRes.data.provider);
         setSelectedModel(configRes.data.model);
-        setApiKey(configRes.data.api_key || "");
+        setApiKey("");
+        setClearSavedKey(false);
         setBaseUrl(configRes.data.base_url || "");
         setCustomDimension(configRes.data.dimensions || null);
         setBatchSize(configRes.data.batch_size);
@@ -117,6 +121,10 @@ export default function EmbeddingConfigPanel() {
       setLoading(false);
     }
   };
+
+  const hasSavedKey = currentConfig?.has_api_key && currentConfig.provider === selectedProvider
+    && (currentConfig.base_url || "") === baseUrl;
+  const requestKey = apiKey || (clearSavedKey ? null : undefined);
 
   const handleSave = async () => {
     if (!selectedProvider || !selectedModel) {
@@ -129,7 +137,7 @@ export default function EmbeddingConfigPanel() {
       await apiClient.put("/embedding/config", {
         provider: selectedProvider,
         model: selectedModel,
-        api_key: apiKey || undefined,
+        api_key: requestKey,
         base_url: baseUrl || undefined,
         dimensions: customDimension || undefined,
         batch_size: batchSize,
@@ -157,7 +165,7 @@ export default function EmbeddingConfigPanel() {
       const response = await apiClient.post("/embedding/test", {
         provider: selectedProvider,
         model: selectedModel,
-        api_key: apiKey || undefined,
+        api_key: requestKey,
         base_url: baseUrl || undefined,
         dimension: customDimension || undefined,
       });
@@ -301,9 +309,14 @@ export default function EmbeddingConfigPanel() {
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="留空以使用部署者配置的 API Key"
+              placeholder={hasSavedKey && !clearSavedKey ? "已保存，输入新密钥可替换" : "留空以使用部署者配置的 API Key"}
               className="h-10 cyber-input"
             />
+            {hasSavedKey && !apiKey && (
+              <Button type="button" variant="ghost" onClick={() => setClearSavedKey(!clearSavedKey)}>
+                {clearSavedKey ? "保留已保存的密钥" : "改用部署者密钥"}
+              </Button>
+            )}
           </div>
         )}
 

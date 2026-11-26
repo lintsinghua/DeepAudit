@@ -6,6 +6,7 @@ interface User {
   email: string;
   full_name: string;
   role: string;
+  is_superuser: boolean;
   avatar_url?: string;
 }
 

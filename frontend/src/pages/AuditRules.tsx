@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { useAuth } from '@/shared/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -81,6 +82,7 @@ const RULE_TYPES = [
 ];
 
 export default function AuditRules() {
+  const { user } = useAuth();
   const [ruleSets, setRuleSets] = useState<AuditRuleSet[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedSets, setExpandedSets] = useState<Set<string>>(new Set());
@@ -412,7 +414,7 @@ export default function AuditRules() {
                                 </div>
                               </div>
                               <div className="flex items-center gap-2">
-                                <Switch checked={rule.enabled} onCheckedChange={() => handleToggleRule(ruleSet.id, rule.id)} />
+                                <Switch disabled={ruleSet.is_system && !user?.is_superuser} checked={rule.enabled} onCheckedChange={() => handleToggleRule(ruleSet.id, rule.id)} />
                                 {!ruleSet.is_system && (
                                   <>
                                     <Button variant="ghost" size="icon" onClick={() => openEditRuleDialog(ruleSet, rule)} className="cyber-btn-ghost h-8 w-8"><Edit className="w-4 h-4" /></Button>

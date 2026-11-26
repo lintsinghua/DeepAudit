@@ -13,6 +13,8 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 from dataclasses import dataclass
 
+from app.utils.project_paths import resolve_project_path
+
 from .base import AgentTool, ToolResult
 from app.core.config import settings
 
@@ -921,7 +923,7 @@ class PhpTestTool(AgentTool):
         if file_path:
             # 从文件读取
             import os
-            full_path = os.path.join(self.project_root, file_path)
+            full_path = resolve_project_path(self.project_root, file_path)
             if not os.path.exists(full_path):
                 return ToolResult(
                     success=False,
@@ -1106,7 +1108,7 @@ class CommandInjectionTestTool(AgentTool):
             )
 
         import os
-        full_path = os.path.join(self.project_root, target_file)
+        full_path = resolve_project_path(self.project_root, target_file)
 
         if not os.path.exists(full_path):
             return ToolResult(

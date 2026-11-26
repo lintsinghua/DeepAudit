@@ -8,10 +8,13 @@ import json
 import logging
 import os
 import tempfile
+import shlex
 import shutil
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 from dataclasses import dataclass
+
+from app.utils.project_paths import resolve_project_path
 
 from .base import AgentTool, ToolResult
 from .sandbox_tool import SandboxManager
@@ -54,9 +57,9 @@ def _smart_resolve_target_path(
         host_check_path = project_root
     else:
         # 相对路径，需要验证是否存在
-        safe_target_path = target_path.lstrip("/") if target_path.startswith("/") else target_path
-        host_check_path = os.path.join(project_root, safe_target_path)
-        
+        host_check_path = resolve_project_path(project_root, target_path)
+        safe_target_path = "./" + os.path.relpath(host_check_path, os.path.realpath(project_root))
+
         # 🔥 智能回退：如果路径不存在，尝试扫描整个项目
         if not os.path.exists(host_check_path):
             logger.warning(
@@ -204,7 +207,7 @@ Semgrep 是业界领先的静态分析工具，支持 30+ 种编程语言。
         # 在容器内，路径相对于 /workspace
         cmd.append(safe_target_path)
         
-        cmd_str = " ".join(cmd)
+        cmd_str = shlex.join(cmd)
         
         try:
             result = await self.sandbox_manager.execute_tool_command(
@@ -396,7 +399,7 @@ Bandit 是 Python 专用的安全分析工具。
             safe_target_path
         ]
         
-        cmd_str = " ".join(cmd)
+        cmd_str = shlex.join(cmd)
         
         try:
             result = await self.sandbox_manager.execute_tool_command(
@@ -540,7 +543,7 @@ Gitleaks 是专业的密钥检测工具，支持 150+ 种密钥类型。
             cmd.append("--no-git")
 
         # 执行 gitleaks 并读取报告文件
-        cmd_str = " ".join(cmd) + " && cat /tmp/gitleaks-report.json"
+        cmd_str = shlex.join(cmd) + " && cat /tmp/gitleaks-report.json"
 
         try:
             result = await self.sandbox_manager.execute_tool_command(
@@ -669,16 +672,9 @@ class NpmAuditTool(AgentTool):
             error_msg = f"npm audit unavailable: {self.sandbox_manager.get_diagnosis()}"
             return ToolResult(success=False, data=error_msg, error=error_msg)
 
-        # 这里的 target_path 是相对于 project_root 的
-        # 防止空路径
-        safe_target_path = target_path if not target_path.startswith("/") else target_path.lstrip("/")
-        if not safe_target_path:
-            safe_target_path = "."
-            
-        full_path = os.path.normpath(os.path.join(self.project_root, target_path))
-        
-        # 宿主机预检查
-        package_json = os.path.join(full_path, "package.json")
+        full_path = resolve_project_path(self.project_root, target_path or ".")
+        safe_target_path = "./" + os.path.relpath(full_path, os.path.realpath(self.project_root))
+        package_json = resolve_project_path(self.project_root, os.path.join(full_path, "package.json"))
         if not os.path.exists(package_json):
             error_msg = f"未找到 package.json: {target_path}"
             return ToolResult(
@@ -692,7 +688,7 @@ class NpmAuditTool(AgentTool):
             cmd.append("--production")
         
         # 组合命令: cd 到目标目录然后执行
-        cmd_str = f"cd {safe_target_path} && {' '.join(cmd)}"
+        cmd_str = f"cd {shlex.quote(safe_target_path)} && {shlex.join(cmd)}"
         
         try:
             # 清除代理设置，避免容器内网络问题
@@ -816,19 +812,14 @@ class SafetyTool(AgentTool):
             error_msg = f"Safety unavailable: {self.sandbox_manager.get_diagnosis()}"
             return ToolResult(success=False, data=error_msg, error=error_msg)
 
-        full_path = os.path.join(self.project_root, requirements_file)
+        full_path = resolve_project_path(self.project_root, requirements_file)
         if not os.path.exists(full_path):
             error_msg = f"未找到依赖文件: {requirements_file}"
             return ToolResult(success=False, data=error_msg, error=error_msg)
             
-        # commands
-        # requirements_file relative path inside container is just requirements_file (assuming it's relative to root)
-        # If requirements_file is absolute, we need to make it relative.
-        # But for security, `requirements_file` should be relative to project_root.
-        safe_req_file = requirements_file if not requirements_file.startswith("/") else requirements_file.lstrip("/")
-
+        safe_req_file = "./" + os.path.relpath(full_path, os.path.realpath(self.project_root))
         cmd = ["safety", "check", "-r", safe_req_file, "--json"]
-        cmd_str = " ".join(cmd)
+        cmd_str = shlex.join(cmd)
         
         try:
             result = await self.sandbox_manager.execute_tool_command(
@@ -962,7 +953,7 @@ class TruffleHogTool(AgentTool):
         if only_verified:
             cmd.append("--only-verified")
         
-        cmd_str = " ".join(cmd)
+        cmd_str = shlex.join(cmd)
         
         try:
             result = await self.sandbox_manager.execute_tool_command(
@@ -1084,7 +1075,7 @@ Google 开源的漏洞扫描工具。
 
         # OSV-Scanner
         cmd = ["osv-scanner", "--json", "-r", safe_target_path]
-        cmd_str = " ".join(cmd)
+        cmd_str = shlex.join(cmd)
         
         try:
             result = await self.sandbox_manager.execute_tool_command(

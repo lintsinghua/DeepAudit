@@ -20,6 +20,7 @@ from app.api import deps
 from app.models.user import User
 from app.models.user_config import UserConfig
 from app.core.config import settings
+from app.core.encryption import decrypt_sensitive_data, encrypt_sensitive_data
 
 router = APIRouter()
 
@@ -54,7 +55,8 @@ class EmbeddingConfigResponse(BaseModel):
     """配置响应"""
     provider: str
     model: str
-    api_key: Optional[str] = None  # 返回 API Key
+    api_key: None = None
+    has_api_key: bool
     base_url: Optional[str]
     dimensions: int
     batch_size: int
@@ -198,7 +200,7 @@ async def get_embedding_config_from_db(db: AsyncSession, user_id: str) -> Stored
                 config = StoredEmbeddingConfig(
                     provider=embedding_data.get("provider", settings.EMBEDDING_PROVIDER),
                     model=embedding_data.get("model", settings.EMBEDDING_MODEL),
-                    api_key=embedding_data.get("api_key"),
+                    api_key=decrypt_sensitive_data(embedding_data.get("api_key") or "") or None,
                     base_url=embedding_data.get("base_url"),
                     dimensions=embedding_data.get("dimensions"),
                     batch_size=embedding_data.get("batch_size", 100),
@@ -218,6 +220,15 @@ async def get_embedding_config_from_db(db: AsyncSession, user_id: str) -> Stored
     )
 
 
+async def resolve_embedding_key(request: EmbeddingConfig | TestEmbeddingRequest, db: AsyncSession, user_id: str) -> Optional[str]:
+    if "api_key" in request.model_fields_set:
+        return request.api_key or None
+    saved = await get_embedding_config_from_db(db, user_id)
+    if saved.provider == request.provider and (saved.base_url or "") == (request.base_url or ""):
+        return saved.api_key
+    return None
+
+
 async def save_embedding_config_to_db(db: AsyncSession, user_id: str, config: EmbeddingConfig) -> None:
     """保存嵌入配置到数据库（异步）"""
     result = await db.execute(
@@ -229,7 +240,7 @@ async def save_embedding_config_to_db(db: AsyncSession, user_id: str, config: Em
     embedding_data = {
         "provider": config.provider,
         "model": config.model,
-        "api_key": config.api_key,
+        "api_key": encrypt_sensitive_data(config.api_key) if config.api_key else None,
         "base_url": config.base_url,
         "dimensions": config.dimensions,
         "batch_size": config.batch_size,
@@ -288,7 +299,7 @@ async def get_current_config(
     return EmbeddingConfigResponse(
         provider=config.provider,
         model=config.model,
-        api_key=config.api_key,
+        has_api_key=bool(config.api_key),
         base_url=config.base_url,
         dimensions=dimensions,
         batch_size=config.batch_size,
@@ -313,6 +324,9 @@ async def update_config(
     provider = next((p for p in EMBEDDING_PROVIDERS if p.id == config.provider), None)
     # 注意：不再强制验证模型名称，允许用户输入自定义模型
 
+    # Serialize key replacement and preservation, including the first save.
+    await db.execute(select(User.id).where(User.id == current_user.id).with_for_update())
+    config.api_key = await resolve_embedding_key(config, db, current_user.id)
     # 检查 API Key
     if provider and provider.requires_api_key and not (config.api_key or settings.EMBEDDING_API_KEY or settings.LLM_API_KEY):
         raise HTTPException(status_code=400, detail=f"{config.provider} 需要 API Key")
@@ -326,6 +340,7 @@ async def update_config(
 @router.post("/test", response_model=TestEmbeddingResponse)
 async def test_embedding(
     request: TestEmbeddingRequest,
+    db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """
@@ -337,10 +352,11 @@ async def test_embedding(
     try:
         from app.services.rag.embeddings import EmbeddingService
 
+        key = await resolve_embedding_key(request, db, current_user.id)
         service = EmbeddingService(
             provider=request.provider,
             model=request.model,
-            api_key=request.api_key or settings.EMBEDDING_API_KEY or settings.LLM_API_KEY,
+            api_key=key or settings.EMBEDDING_API_KEY or settings.LLM_API_KEY,
             base_url=request.base_url or settings.EMBEDDING_BASE_URL,
             dimension=request.dimension,
             cache_enabled=False,

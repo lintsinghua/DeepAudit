@@ -9,9 +9,10 @@ import os
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Union
-from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from app.utils.project_paths import resolve_project_path
 
 from .errors import (
     InputValidationError,
@@ -82,29 +83,13 @@ def validate_path(
         if re.search(pattern, path):
             raise PathTraversalError(f"Dangerous path pattern detected: {path}")
 
-    # Normalize project root
-    project_root = os.path.abspath(os.path.normpath(project_root))
-
-    # Handle absolute vs relative paths
-    if os.path.isabs(path):
-        if not allow_absolute:
-            raise PathTraversalError(f"Absolute paths not allowed: {path}")
-        abs_path = os.path.normpath(path)
-    else:
-        abs_path = os.path.normpath(os.path.join(project_root, path))
-
-    # Ensure path is within project root
+    if os.path.isabs(path) and not allow_absolute:
+        raise PathTraversalError(f"Absolute paths not allowed: {path}")
     try:
-        # Use resolve to handle symlinks
-        resolved_path = str(Path(abs_path).resolve())
-        resolved_root = str(Path(project_root).resolve())
+        return resolve_project_path(project_root, path)
+    except ValueError as exc:
+        raise PathTraversalError(f"Invalid project path: {path}") from exc
 
-        if not resolved_path.startswith(resolved_root + os.sep) and resolved_path != resolved_root:
-            raise PathTraversalError(f"Path escapes project root: {path}")
-    except (OSError, ValueError) as e:
-        raise InputValidationError(f"Invalid path: {path} - {e}")
-
-    return abs_path
 
 
 def validate_file_extension(

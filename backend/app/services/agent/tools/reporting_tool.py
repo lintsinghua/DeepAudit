@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 
+from app.utils.project_paths import resolve_project_path
+
 from .base import AgentTool, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -134,17 +136,9 @@ class CreateVulnerabilityReportTool(AgentTool):
         if self.project_root:
             # 清理路径（移除可能的行号，如 "app.py:36"）
             clean_path = file_path.split(":")[0].strip() if ":" in file_path else file_path.strip()
-            full_path = os.path.join(self.project_root, clean_path)
-
+            full_path = resolve_project_path(self.project_root, clean_path)
             if not os.path.isfile(full_path):
-                # 尝试作为绝对路径
-                if not (os.path.isabs(clean_path) and os.path.isfile(clean_path)):
-                    logger.warning(f"[ReportTool] 🚫 拒绝报告: 文件不存在 '{file_path}'")
-                    return ToolResult(
-                        success=False,
-                        error=f"无法创建报告：文件 '{file_path}' 在项目中不存在。"
-                              f"请先使用 read_file 工具验证文件存在，然后再报告漏洞。"
-                    )
+                return ToolResult(success=False, error=f"文件 '{file_path}' 在项目中不存在")
 
         # 验证严重程度
         valid_severities = ["critical", "high", "medium", "low", "info"]

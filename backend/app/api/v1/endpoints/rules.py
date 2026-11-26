@@ -300,6 +300,8 @@ async def update_rule_set(
         raise HTTPException(status_code=404, detail="规则集不存在")
     
     if rule_set.is_system:
+        if not current_user.is_superuser:
+            raise HTTPException(status_code=403, detail="仅管理员可修改系统规则集")
         # 系统规则集只能修改启用状态
         if rule_set_in.is_active is not None:
             rule_set.is_active = rule_set_in.is_active
@@ -711,7 +713,8 @@ async def toggle_rule(
     if not rule_set:
         raise HTTPException(status_code=404, detail="规则集不存在")
     
-    # 系统规则集也允许切换单个规则的启用状态
+    if rule_set.is_system and not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="仅管理员可修改系统规则集")
     if not rule_set.is_system and rule_set.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="无权修改此规则集")
     

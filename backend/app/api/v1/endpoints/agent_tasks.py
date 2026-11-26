@@ -797,7 +797,7 @@ async def _initialize_tools(
         # API Key 优先级：用户嵌入配置 > 环境变量 EMBEDDING_API_KEY > 用户 LLM 配置 > 环境变量 LLM_API_KEY
         # 注意：API Key 可以共享，因为很多用户使用同一个 OpenAI Key 做 LLM 和 Embedding
         embedding_api_key = (
-            user_embedding_config.get('api_key') or
+            decrypt_sensitive_data(user_embedding_config.get('api_key') or '') or
             getattr(settings, 'EMBEDDING_API_KEY', None) or
             user_llm_config.get('llmApiKey') or
             getattr(settings, 'LLM_API_KEY', '') or
@@ -2736,7 +2736,7 @@ async def _get_project_root(
     
     if ".git" not in items and len(real_items) == 1:
         single_item_path = os.path.join(base_path, real_items[0])
-        if os.path.isdir(single_item_path):
+        if not os.path.islink(single_item_path) and os.path.isdir(single_item_path):
             logger.info(f"🔍 检测到单层嵌套目录，自动调整项目根目录: {base_path} -> {single_item_path}")
             await emit(f"🔍 检测到嵌套目录，自动调整为: {real_items[0]}")
             base_path = single_item_path

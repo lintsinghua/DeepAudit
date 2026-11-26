@@ -159,7 +159,7 @@ class TestToolInputValidator:
             f.write("print('hello')")
 
         result = validator.validate_file_path("test.py")
-        assert result == os.path.join(temp_dir, "test.py")
+        assert result == os.path.realpath(os.path.join(temp_dir, "test.py"))
 
     def test_validate_file_for_read(self, temp_dir):
         validator = ToolInputValidator(temp_dir)

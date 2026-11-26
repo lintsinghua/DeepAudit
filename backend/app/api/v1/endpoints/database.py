@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 from app.api import deps
 from app.db.session import get_db
+from app.core.encryption import protect_embedding_key, without_embedding_key
 from app.models.user import User
 from app.models.project import Project, ProjectMember
 from app.models.audit import AuditTask, AuditIssue
@@ -169,7 +170,7 @@ async def export_database(
             ],
             "user_config": {
                 "llm_config": json.loads(config.llm_config) if config and config.llm_config else {},
-                "other_config": json.loads(config.other_config) if config and config.other_config else {},
+                "other_config": without_embedding_key(json.loads(config.other_config)) if config and config.other_config else {},
             } if config else {},
             "project_members": [
                 {
@@ -253,7 +254,7 @@ async def import_database(
                     db.add(project)
                     imported_count["projects"] += 1
         
-        await db.commit()
+        await db.flush()
         
         # 2. 导入任务（需要先有项目）
         if "tasks" in data:
@@ -262,6 +263,8 @@ async def import_database(
                 if not existing:
                     # 检查项目是否存在
                     project = await db.get(Project, t_data.get("project_id"))
+                    if project and project.owner_id != current_user.id:
+                        raise HTTPException(status_code=403, detail="无权向此项目导入任务")
                     if project:
                         task = AuditTask(
                             id=t_data.get("id"),
@@ -281,7 +284,7 @@ async def import_database(
                         db.add(task)
                         imported_count["tasks"] += 1
         
-        await db.commit()
+        await db.flush()
         
         # 3. 导入问题（需要先有任务）
         if "issues" in data:
@@ -291,6 +294,9 @@ async def import_database(
                     # 检查任务是否存在
                     task = await db.get(AuditTask, i_data.get("task_id"))
                     if task:
+                        project = await db.get(Project, task.project_id)
+                        if task.created_by != current_user.id or not project or project.owner_id != current_user.id:
+                            raise HTTPException(status_code=403, detail="无权向此任务导入问题")
                         issue = AuditIssue(
                             id=i_data.get("id"),
                             task_id=i_data.get("task_id"),
@@ -310,7 +316,7 @@ async def import_database(
                         db.add(issue)
                         imported_count["issues"] += 1
         
-        await db.commit()
+        await db.flush()
         
         # 4. 导入即时分析
         if "instant_analyses" in data:
@@ -330,7 +336,7 @@ async def import_database(
                     db.add(analysis)
                     imported_count["analyses"] += 1
         
-        await db.commit()
+        await db.flush()
         
         # 5. 导入用户配置（合并）
         if "user_config" in data and data["user_config"]:
@@ -340,11 +346,12 @@ async def import_database(
             )
             config = config_result.scalar_one_or_none()
             
+            incoming_other = protect_embedding_key(data["user_config"].get("other_config", {}))
             if not config:
                 config = UserConfig(
                     user_id=current_user.id,
                     llm_config=json.dumps(data["user_config"].get("llm_config", {})),
-                    other_config=json.dumps(data["user_config"].get("other_config", {})),
+                    other_config=json.dumps(incoming_other),
                 )
                 db.add(config)
             else:
@@ -352,7 +359,13 @@ async def import_database(
                 existing_llm = json.loads(config.llm_config) if config.llm_config else {}
                 existing_other = json.loads(config.other_config) if config.other_config else {}
                 existing_llm.update(data["user_config"].get("llm_config", {}))
-                existing_other.update(data["user_config"].get("other_config", {}))
+                saved = existing_other.get("embedding_config") or {}
+                incoming = incoming_other.get("embedding_config")
+                if (isinstance(incoming, dict) and "api_key" not in incoming
+                        and incoming.get("provider") == saved.get("provider")
+                        and incoming.get("base_url") == saved.get("base_url") and saved.get("api_key")):
+                    incoming["api_key"] = saved["api_key"]
+                existing_other.update(incoming_other)
                 config.llm_config = json.dumps(existing_llm)
                 config.other_config = json.dumps(existing_other)
             
@@ -366,14 +379,14 @@ async def import_database(
         }
         
     except json.JSONDecodeError:
+        await db.rollback()
         raise HTTPException(status_code=400, detail="无效的 JSON 文件格式")
     except HTTPException:
         await db.rollback()
         raise
-    except Exception as e:
-        print(f"导入数据失败: {e}")
+    except Exception:
         await db.rollback()
-        raise HTTPException(status_code=500, detail=f"导入数据失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="导入数据失败") from None
 
 
 @router.delete("/clear")

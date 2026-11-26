@@ -99,3 +99,19 @@ def encrypt_sensitive_data(data: str) -> str:
 def decrypt_sensitive_data(data: str) -> str:
     """解密敏感数据的便捷函数"""
     return encryption_service.decrypt(data)
+
+
+def protect_embedding_key(other_config: dict) -> dict:
+    """Encrypt the embedding credential in a saved configuration or legacy backup."""
+    embedding = other_config.get("embedding_config")
+    key = embedding.get("api_key") if isinstance(embedding, dict) else None
+    if not key or encryption_service.is_encrypted(key):
+        return other_config
+    return {**other_config, "embedding_config": {**embedding, "api_key": encrypt_sensitive_data(key)}}
+
+
+def without_embedding_key(other_config: dict) -> dict:
+    embedding = other_config.get("embedding_config")
+    if not isinstance(embedding, dict) or "api_key" not in embedding:
+        return other_config
+    return {**other_config, "embedding_config": {k: v for k, v in embedding.items() if k != "api_key"}}

@@ -144,6 +144,8 @@ async def read_user(
     """
     获取指定用户信息
     """
+    if user_id != current_user.id and not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="无权查看其他用户资料")
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalars().first()
     if not user:

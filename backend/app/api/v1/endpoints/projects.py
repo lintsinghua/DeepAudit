@@ -517,6 +517,9 @@ async def scan_project(
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
 
+    if project.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权扫描此项目")
+
     # 获取分支和排除模式
     branch_name = scan_request.branch_name if scan_request else None
     exclude_patterns = scan_request.exclude_patterns if scan_request else None
