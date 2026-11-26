@@ -51,6 +51,10 @@ EXCLUDE_FILES = {
 }
 
 
+class IndexLimitError(ValueError):
+    """Selected source files exceed the deployment's indexing limits."""
+
+
 class IndexUpdateMode(Enum):
     """索引更新模式"""
     FULL = "full"           # 全量重建：删除旧索引，完全重新索引
@@ -872,11 +876,11 @@ class CodeIndexer:
         Yields:
             索引进度
         """
-        # 初始化并检查是否需要重建
+        # Check the selected files before initialize() is allowed to rebuild a collection.
+        files = await asyncio.to_thread(self._collect_files, directory, exclude_patterns or [], include_patterns)
         needs_rebuild, rebuild_reason = await self.initialize()
 
         progress = IndexingProgress()
-        exclude_patterns = exclude_patterns or []
 
         # 确定实际的更新模式
         if update_mode == IndexUpdateMode.SMART:
@@ -893,18 +897,17 @@ class CodeIndexer:
 
         if actual_mode == IndexUpdateMode.FULL:
             # 全量重建
-            async for p in self._full_index(directory, exclude_patterns, include_patterns, progress, progress_callback, embedding_progress_callback, cancel_check):
+            async for p in self._full_index(directory, files, progress, progress_callback, embedding_progress_callback, cancel_check):
                 yield p
         else:
             # 增量更新
-            async for p in self._incremental_index(directory, exclude_patterns, include_patterns, progress, progress_callback, embedding_progress_callback, cancel_check):
+            async for p in self._incremental_index(directory, files, progress, progress_callback, embedding_progress_callback, cancel_check):
                 yield p
 
     async def _full_index(
         self,
         directory: str,
-        exclude_patterns: List[str],
-        include_patterns: Optional[List[str]],
+        files: List[str],
         progress: IndexingProgress,
         progress_callback: Optional[Callable[[IndexingProgress], None]],
         embedding_progress_callback: Optional[Callable[[int, int], None]] = None,
@@ -913,8 +916,6 @@ class CodeIndexer:
         """全量索引"""
         logger.info("🔄 开始全量索引...")
 
-        # 收集文件
-        files = self._collect_files(directory, exclude_patterns, include_patterns)
         progress.total_files = len(files)
 
         logger.info(f"📁 发现 {len(files)} 个文件待索引")
@@ -994,8 +995,7 @@ class CodeIndexer:
     async def _incremental_index(
         self,
         directory: str,
-        exclude_patterns: List[str],
-        include_patterns: Optional[List[str]],
+        files: List[str],
         progress: IndexingProgress,
         progress_callback: Optional[Callable[[IndexingProgress], None]],
         embedding_progress_callback: Optional[Callable[[int, int], None]] = None,
@@ -1011,10 +1011,9 @@ class CodeIndexer:
         logger.debug(f"📂 已索引文件数: {len(indexed_files)}, file_hashes: {list(indexed_file_hashes.keys())[:5]}...")
 
         # 收集当前文件
-        current_files = self._collect_files(directory, exclude_patterns, include_patterns)
         current_file_map: Dict[str, str] = {}  # relative_path -> absolute_path
 
-        for file_path in current_files:
+        for file_path in files:
             relative_path = os.path.relpath(file_path, directory)
             current_file_map[relative_path] = file_path
 
@@ -1328,7 +1327,9 @@ class CodeIndexer:
     ) -> List[str]:
         """收集需要索引的文件"""
         import fnmatch
+        from app.services.agent.config import get_agent_config
 
+        limits = get_agent_config()
         files = []
 
         for root, dirs, filenames in os.walk(directory):
@@ -1368,6 +1369,12 @@ class CodeIndexer:
                     if not included:
                         continue
 
+                if os.path.islink(file_path) or not os.path.isfile(file_path):
+                    continue
+                if os.path.getsize(file_path) > limits.max_file_size_bytes:
+                    raise IndexLimitError(f"文件 {relative_path} 超过索引大小上限 {limits.max_file_size_bytes} 字节")
+                if len(files) >= limits.max_files_per_scan:
+                    raise IndexLimitError(f"待索引文件超过 {limits.max_files_per_scan} 个，请缩小扫描范围")
                 files.append(file_path)
 
         return files

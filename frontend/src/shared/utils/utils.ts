@@ -172,7 +172,8 @@ export function copyToClipboard(text: string): Promise<void> {
  * @param totalFiles 总文件数
  * @returns 进度百分比（0-100），安全处理NaN情况
  */
-export function calculateTaskProgress(scannedFiles?: number, totalFiles?: number): number {
+export function calculateTaskProgress(scannedFiles?: number, totalFiles?: number, status?: string): number {
+  if (status === "completed") return 100;
   // 处理未定义或无效值
   const scanned = scannedFiles || 0;
   const total = totalFiles || 0;

@@ -132,7 +132,13 @@ class AgentRegistry:
         """注销Agent"""
         with self._lock:
             if agent_id in self._agent_graph["nodes"]:
-                del self._agent_graph["nodes"][agent_id]
+                node = self._agent_graph["nodes"].pop(agent_id)
+                parent = self._agent_graph["nodes"].get(node.get("parent_id"))
+                if parent and agent_id in parent["children"]:
+                    parent["children"].remove(agent_id)
+                if self._root_agent_id == agent_id:
+                    self._root_agent_id = next((aid for aid, n in self._agent_graph["nodes"].items()
+                                                if n["parent_id"] is None), None)
             
             self._agent_instances.pop(agent_id, None)
             self._agent_states.pop(agent_id, None)

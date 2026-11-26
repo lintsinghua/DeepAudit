@@ -1,6 +1,6 @@
 [project]
 name = "deepaudit-backend"
-version = "3.8.2"
+version = "3.8.3"
 description = "DeepAudit Backend API - AI-Powered Code Security Audit Platform"
 requires-python = ">=3.11"
 readme = "README.md"
@@ -43,7 +43,7 @@ dependencies = [
 
     # ============ Report Generation ============
     "reportlab>=4.0.0",
-    "weasyprint>=60.0",
+    "weasyprint>=70.0",
     "jinja2>=3.1.6",
 
     # ============ Utilities ============

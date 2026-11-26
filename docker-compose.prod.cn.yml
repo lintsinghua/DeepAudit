@@ -1,5 +1,5 @@
 # =============================================
-# DeepAudit v3.8.2 生产环境一键部署配置（国内加速版）
+# DeepAudit v3.8.3 生产环境一键部署配置（国内加速版）
 # =============================================
 # 使用南京大学镜像站加速拉取 GHCR 镜像
 # 部署命令: curl -fsSL https://raw.githubusercontent.com/lintsinghua/DeepAudit/main/docker-compose.prod.cn.yml | docker compose -f - up -d
@@ -27,11 +27,14 @@ services:
 
   redis:
     image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-}"]
+    environment:
+      REDISCLI_AUTH: "${REDIS_PASSWORD:-}"
     restart: unless-stopped
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", 'if [ -z "$$REDISCLI_AUTH" ]; then unset REDISCLI_AUTH; fi; redis-cli --raw ping | grep -qx PONG']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -49,11 +52,19 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/deepaudit
       - REDIS_URL=redis://redis:6379/0
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - AGENT_ENABLED=true
       - SANDBOX_ENABLED=true
       - SANDBOX_IMAGE=ghcr.nju.edu.cn/lintsinghua/deepaudit-sandbox:latest
       - BOOTSTRAP_ADMIN_EMAIL
       - BOOTSTRAP_ADMIN_PASSWORD
+      - PUBLIC_REGISTRATION_ENABLED
+      - MODEL_ALLOWED_ENDPOINTS
+      - EMBEDDING_BASE_URL
+      - OPENAI_BASE_URL
+      - OLLAMA_BASE_URL
+      - GITLAB_ORIGIN
+      - GITEA_ORIGIN
       # LLM 配置 - 请根据需要修改
       - LLM_PROVIDER=${LLM_PROVIDER:-openai}
       - LLM_MODEL=${LLM_MODEL:-gpt-4o}

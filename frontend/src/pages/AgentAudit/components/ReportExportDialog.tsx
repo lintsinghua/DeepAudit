@@ -216,7 +216,7 @@ const EnhancedStatsPanel = memo(function EnhancedStatsPanel({
   const totalFindings = task.findings_count || 0;
   const criticalAndHigh = (task.critical_count || 0) + (task.high_count || 0);
   const verified = task.verified_count || 0;
-  const score = task.security_score || 0;
+  const score = task.security_score;
 
   const stats = [
     {
@@ -249,7 +249,7 @@ const EnhancedStatsPanel = memo(function EnhancedStatsPanel({
     <div className="flex items-stretch gap-4">
       {/* 环形安全评分 */}
       <div className="flex items-center justify-center p-3 rounded-xl bg-gradient-to-br from-muted to-background border border-border backdrop-blur-sm">
-        <CircularProgress value={score} size={72} strokeWidth={5} />
+        {score == null ? "未评分" : <CircularProgress value={score} size={72} strokeWidth={5} />}
       </div>
 
       {/* 统计数字网格 */}
@@ -839,8 +839,8 @@ export const ReportExportDialog = memo(function ReportExportDialog({
   // Generate HTML report from markdown
   const generateHtmlReport = async (markdown: string, task: AgentTask): Promise<string> => {
     const contentHtml = await marked.parse(markdown);
-    const score = task.security_score || 0;
-    const scoreDisplay = score.toFixed(0);
+    const score = task.security_score;
+    const scoreDisplay = score?.toFixed(0) ?? "—";
     const totalFindings = task.findings_count || 0;
     const criticalCount = task.critical_count || 0;
     const highCount = task.high_count || 0;
@@ -864,11 +864,11 @@ export const ReportExportDialog = memo(function ReportExportDialog({
       if (s >= 60) return { grade: 'D', color: '#f97316', bg: 'rgba(249, 115, 22, 0.1)' };
       return { grade: 'F', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.1)' };
     };
-    const scoreInfo = getScoreGrade(score);
+    const scoreInfo = score == null ? { grade: "未评分", color: "#64748b", bg: "transparent" } : getScoreGrade(score);
 
     // SVG 圆环进度条
     const circumference = 2 * Math.PI * 40; // r=40 (smaller)
-    const strokeDashoffset = circumference - (score / 100) * circumference;
+    const strokeDashoffset = circumference - ((score ?? 0) / 100) * circumference;
 
     return `<!DOCTYPE html>
 <html lang="zh-CN">

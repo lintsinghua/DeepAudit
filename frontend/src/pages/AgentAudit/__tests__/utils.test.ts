@@ -193,6 +193,11 @@ describe("getTimeString", () => {
 // ============ createLogItem ============
 
 describe("createLogItem", () => {
+	it("preserves the recorded time when replaying a task", () => {
+		const log = createLogItem({ type: "info", title: "Completed", time: "09:12:03" });
+		expect(log.time).toBe("09:12:03");
+	});
+
 	it("creates a log item with id and time", () => {
 		const item = createLogItem({
 			type: "info",

@@ -97,7 +97,7 @@ function AgentAuditPageContent() {
     if (!taskId) return;
     try {
       const data = await getAgentTask(taskId);
-      setTask(data);
+      if (previousTaskIdRef.current === taskId) setTask(data);
     } catch {
       toast.error("Failed to load task");
     }
@@ -107,7 +107,7 @@ function AgentAuditPageContent() {
     if (!taskId) return;
     try {
       const data = await getAgentFindings(taskId);
-      setFindings(data);
+      if (previousTaskIdRef.current === taskId) setFindings(data);
     } catch (err) {
       console.error(err);
     }
@@ -117,7 +117,7 @@ function AgentAuditPageContent() {
     if (!taskId) return;
     try {
       const data = await getAgentTree(taskId);
-      setAgentTree(data);
+      if (previousTaskIdRef.current === taskId) setAgentTree(data);
     } catch (err) {
       console.error(err);
     }
@@ -158,7 +158,17 @@ function AgentAuditPageContent() {
 
     try {
       console.log(`[AgentAudit] Fetching historical events for task ${taskId}...`);
-      const events = await getAgentEvents(taskId, { limit: 500 });
+      const events: AgentEvent[] = [];
+      let cursor = 0;
+      while (true) {
+        const page = await getAgentEvents(taskId, { limit: 500, after_sequence: cursor });
+        if (previousTaskIdRef.current !== taskId) return 0;
+        events.push(...page);
+        if (page.length < 500) break;
+        const next = page[page.length - 1].sequence;
+        if (next <= cursor) throw new Error("Event pagination did not advance");
+        cursor = next;
+      }
       console.log(`[AgentAudit] Received ${events.length} events from API`);
 
       if (events.length === 0) {
@@ -176,6 +186,8 @@ function AgentAuditPageContent() {
         if (event.sequence > lastEventSequenceRef.current) {
           lastEventSequenceRef.current = event.sequence;
         }
+
+        const time = new Date(event.timestamp).toLocaleTimeString("en-US", { hour12: false });
 
         // 提取 agent_name
         const agentName = (event.metadata?.agent_name as string) ||
@@ -195,6 +207,7 @@ function AgentAuditPageContent() {
             dispatch({
               type: 'ADD_LOG',
               payload: {
+                time,
                 type: 'thinking',
                 title: event.message?.slice(0, 100) + (event.message && event.message.length > 100 ? '...' : '') || 'Thinking...',
                 content: event.message || (event.metadata?.thought as string) || '',
@@ -209,12 +222,13 @@ function AgentAuditPageContent() {
             dispatch({
               type: 'ADD_LOG',
               payload: {
+                time,
                 type: 'tool',
                 title: `Tool: ${event.tool_name || 'unknown'}`,
                 content: event.tool_input ? `Input:\n${JSON.stringify(event.tool_input, null, 2)}` : '',
                 tool: {
                   name: event.tool_name || 'unknown',
-                  status: 'running' as const,
+                  // 历史调用是时间点记录，实时状态由 SSE 提供。
                 },
                 agentName,
               }
@@ -226,6 +240,7 @@ function AgentAuditPageContent() {
             dispatch({
               type: 'ADD_LOG',
               payload: {
+                time,
                 type: 'tool',
                 title: `Completed: ${event.tool_name || 'unknown'}`,
                 content: event.tool_output
@@ -249,6 +264,7 @@ function AgentAuditPageContent() {
             dispatch({
               type: 'ADD_LOG',
               payload: {
+                time,
                 type: 'finding',
                 title: event.message || (event.metadata?.title as string) || 'Vulnerability found',
                 severity: (event.metadata?.severity as string) || 'medium',
@@ -268,6 +284,7 @@ function AgentAuditPageContent() {
             dispatch({
               type: 'ADD_LOG',
               payload: {
+                time,
                 type: 'dispatch',
                 title: event.message || `Event: ${event.event_type}`,
                 agentName,
@@ -281,6 +298,7 @@ function AgentAuditPageContent() {
             dispatch({
               type: 'ADD_LOG',
               payload: {
+                time,
                 type: 'info',
                 title: event.message || 'Task completed',
                 agentName,
@@ -294,6 +312,7 @@ function AgentAuditPageContent() {
             dispatch({
               type: 'ADD_LOG',
               payload: {
+                time,
                 type: 'error',
                 title: event.message || 'Task error',
                 agentName,
@@ -307,6 +326,7 @@ function AgentAuditPageContent() {
             dispatch({
               type: 'ADD_LOG',
               payload: {
+                time,
                 type: 'info',
                 title: event.message || 'Task cancelled',
                 agentName,
@@ -333,6 +353,7 @@ function AgentAuditPageContent() {
                 dispatch({
                   type: 'UPDATE_OR_ADD_PROGRESS_LOG',
                   payload: {
+                    time,
                     progressKey: matchedProgress.key,
                     title: event.message,
                     agentName,
@@ -342,6 +363,7 @@ function AgentAuditPageContent() {
                 dispatch({
                   type: 'ADD_LOG',
                   payload: {
+                    time,
                     type: 'info',
                     title: event.message,
                     agentName,
@@ -373,6 +395,7 @@ function AgentAuditPageContent() {
               dispatch({
                 type: 'UPDATE_OR_ADD_PROGRESS_LOG',
                 payload: {
+                  time,
                   progressKey: matchedProgress.key,
                   title: message,
                   agentName,
@@ -382,6 +405,7 @@ function AgentAuditPageContent() {
               dispatch({
                 type: 'ADD_LOG',
                 payload: {
+                  time,
                   type: event.event_type === 'error' ? 'error' : 'info',
                   title: message,
                   agentName,
@@ -405,6 +429,7 @@ function AgentAuditPageContent() {
               dispatch({
                 type: 'ADD_LOG',
                 payload: {
+                  time,
                   type: 'info',
                   title: event.message,
                   agentName,
@@ -650,7 +675,9 @@ function AgentAuditPageContent() {
         await Promise.all([loadTask(), loadFindings(), loadAgentTree()]);
 
         // 🔥 加载历史事件 - 无论任务是否运行都需要加载
+        if (previousTaskIdRef.current !== taskId) return;
         const eventsLoaded = await loadHistoricalEvents();
+        if (previousTaskIdRef.current !== taskId) return;
         console.log(`[AgentAudit] Loaded ${eventsLoaded} historical events for task ${taskId}`);
 
         // 标记历史事件已加载完成 (setAfterSequence 已在 loadHistoricalEvents 中调用)
@@ -659,7 +686,7 @@ function AgentAuditPageContent() {
         console.error('[AgentAudit] Failed to load data:', error);
         setHistoricalEventsLoaded(true); // 即使出错也标记为完成，避免无限等待
       } finally {
-        setLoading(false);
+        if (previousTaskIdRef.current === taskId) setLoading(false);
       }
     };
 
@@ -897,6 +924,7 @@ function AgentAuditPageContent() {
                   <span className="flex items-center gap-2 text-muted-foreground font-mono">
                     <span className={`w-2 h-2 rounded-full ${task.status === 'completed' ? 'bg-emerald-500' : task.status === 'failed' ? 'bg-rose-500' : 'bg-amber-500'}`} />
                     AUDIT {task.status?.toUpperCase()}
+                    {task.status === "failed" && task.error_message && <span>{task.error_message}</span>}
                   </span>
                 ) : (
                   <span className="text-muted-foreground font-mono">READY</span>

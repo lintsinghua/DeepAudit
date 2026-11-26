@@ -13,6 +13,7 @@ from dataclasses import dataclass
 import httpx
 
 from app.core.config import settings
+from app.services.llm.types import EMBEDDING_BASE_URLS, trusted_model_endpoint, validate_model_name
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ class OpenAIEmbedding(EmbeddingProvider):
         model: str = "text-embedding-3-small",
     ):
         self.api_key = api_key or settings.LLM_API_KEY
-        self.base_url = base_url or "https://api.openai.com/v1"
+        self.base_url = base_url or EMBEDDING_BASE_URLS["openai"]
         self.model = model
         self._dimension = self.MODELS.get(model, 1536)
     
@@ -132,7 +133,9 @@ class AzureOpenAIEmbedding(EmbeddingProvider):
         model: str = "text-embedding-3-small",
     ):
         self.api_key = api_key
-        self.base_url = base_url or "https://your-resource.openai.azure.com"
+        if not base_url:
+            raise ValueError("Azure 嵌入服务需要部署者配置的资源地址")
+        self.base_url = base_url
         self.model = model
         self._dimension = self.MODELS.get(model, 1536)
     
@@ -207,7 +210,7 @@ class OllamaEmbedding(EmbeddingProvider):
         model: str = "nomic-embed-text",
         dimension: Optional[int] = None,
     ):
-        self.base_url = base_url or "http://localhost:11434"
+        self.base_url = base_url or EMBEDDING_BASE_URLS["ollama"]
         self.model = model
         # 用户指定的维度优先，否则使用默认映射
         self._dimension = dimension if dimension else self.MODELS.get(model, 768)
@@ -277,7 +280,7 @@ class CohereEmbedding(EmbeddingProvider):
     ):
         self.api_key = api_key
         # 新的 v2 API 端点
-        self.base_url = base_url or "https://api.cohere.com/v2"
+        self.base_url = base_url or EMBEDDING_BASE_URLS["cohere"]
         self.model = model
         self._dimension = self.MODELS.get(model, 1024)
     
@@ -353,7 +356,7 @@ class HuggingFaceEmbedding(EmbeddingProvider):
     ):
         self.api_key = api_key
         # 新的 Router 端点
-        self.base_url = base_url or "https://router.huggingface.co"
+        self.base_url = base_url or EMBEDDING_BASE_URLS["huggingface"]
         self.model = model
         self._dimension = self.MODELS.get(model, 1024)
     
@@ -425,7 +428,7 @@ class JinaEmbedding(EmbeddingProvider):
         model: str = "jina-embeddings-v2-base-code",
     ):
         self.api_key = api_key
-        self.base_url = base_url or "https://api.jina.ai/v1"
+        self.base_url = base_url or EMBEDDING_BASE_URLS["jina"]
         self.model = model
         self._dimension = self.MODELS.get(model, 768)
     
@@ -499,7 +502,7 @@ class QwenEmbedding(EmbeddingProvider):
                 "Set EMBEDDING_API_KEY, QWEN_API_KEY or LLM_API_KEY environment variable."
             )
         # DashScope 兼容 OpenAI 的 embeddings 端点
-        self.base_url = base_url or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        self.base_url = base_url or EMBEDDING_BASE_URLS["qwen"]
         self.model = model
         self._dimension = self.MODELS.get(model, 1024)
     
@@ -602,7 +605,8 @@ class EmbeddingService:
         self.provider = provider or getattr(settings, 'EMBEDDING_PROVIDER', 'openai')
         self.model = model or getattr(settings, 'EMBEDDING_MODEL', 'text-embedding-3-small')
         self.api_key = api_key
-        self.base_url = base_url
+        self.base_url = trusted_model_endpoint(base_url)
+        validate_model_name(self.model)
         self.custom_dimension = dimension
 
         # 创建提供商实例
@@ -610,7 +614,7 @@ class EmbeddingService:
             provider=self.provider,
             model=self.model,
             api_key=api_key,
-            base_url=base_url,
+            base_url=self.base_url,
             dimension=dimension,
         )
 

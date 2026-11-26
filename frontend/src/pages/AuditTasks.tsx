@@ -858,12 +858,12 @@ export default function AuditTasks() {
                       </span>
                     </div>
                     <Progress
-                      value={calculateTaskProgress(task.scanned_files, task.total_files)}
+                      value={calculateTaskProgress(task.scanned_files, task.total_files, task.status)}
                       className="h-2 bg-muted [&>div]:bg-primary"
                     />
                     <div className="text-right mt-1">
                       <span className="text-xs text-muted-foreground">
-                        {calculateTaskProgress(task.scanned_files, task.total_files)}% 完成
+                        {calculateTaskProgress(task.scanned_files, task.total_files, task.status)}% 完成
                       </span>
                     </div>
                   </div>

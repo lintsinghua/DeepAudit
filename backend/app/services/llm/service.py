@@ -21,6 +21,10 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+class OutputLimitError(ValueError):
+    """The provider exhausted its output budget before finishing the report."""
+
+
 class LLMService:
     """LLM服务类"""
 
@@ -41,14 +45,19 @@ class LLMService:
         Returns:
             包含各种超时配置的字典
         """
+        from app.services.agent.config import get_agent_config
+        limits = get_agent_config()
         user_llm_config = self._user_config.get('llmConfig', {})
 
         return {
             'llm_first_token_timeout': user_llm_config.get('llmFirstTokenTimeout') or getattr(settings, 'LLM_FIRST_TOKEN_TIMEOUT', 30),
             'llm_stream_timeout': user_llm_config.get('llmStreamTimeout') or getattr(settings, 'LLM_STREAM_TIMEOUT', 60),
-            'agent_timeout': user_llm_config.get('agentTimeout') or getattr(settings, 'AGENT_TIMEOUT_SECONDS', 1800),
-            'sub_agent_timeout': user_llm_config.get('subAgentTimeout') or getattr(settings, 'SUB_AGENT_TIMEOUT_SECONDS', 600),
-            'tool_timeout': user_llm_config.get('toolTimeout') or getattr(settings, 'TOOL_TIMEOUT_SECONDS', 60),
+            'agent_timeout': min(user_llm_config.get('agentTimeout') or settings.AGENT_TIMEOUT_SECONDS,
+                                 limits.orchestrator_timeout_seconds),
+            'sub_agent_timeout': min(user_llm_config.get('subAgentTimeout') or settings.SUB_AGENT_TIMEOUT_SECONDS,
+                                     limits.sub_agent_timeout_seconds),
+            'tool_timeout': min(user_llm_config.get('toolTimeout') or settings.TOOL_TIMEOUT_SECONDS,
+                                limits.tool_timeout_seconds),
         }
     
     @property
@@ -95,7 +104,7 @@ class LLMService:
             timeout_ms = user_llm_config.get('llmTimeout')
             if timeout_ms:
                 # 用户配置是毫秒，转换为秒
-                timeout = int(timeout_ms / 1000) if timeout_ms > 1000 else int(timeout_ms)
+                timeout = max(1, int(timeout_ms / 1000))
             else:
                 # 环境变量是秒
                 timeout = int(getattr(settings, 'LLM_TIMEOUT', 150))
@@ -387,6 +396,8 @@ Please analyze the following code:
             )
             
             response = await adapter.complete(request)
+            if response.finish_reason == "length":
+                raise OutputLimitError(f"模型达到输出上限 ({request.max_tokens} tokens)，未完成分析")
             content = response.content
             
             # 记录 LLM 原始响应（用于调试）
@@ -406,12 +417,6 @@ Please analyze the following code:
             # 记录解析后的问题数量
             issues_count = len(result.get("issues", []))
             logger.info(f"📊 LLM 分析结果: 发现 {issues_count} 个问题, 质量评分: {result.get('quality_score', 'N/A')}")
-            
-            # 检查解析结果是否有效（不是默认响应）
-            if result == self._get_default_response():
-                error_msg = f"无法解析LLM响应为有效的分析结果 - Provider: {self.config.provider.value}"
-                logger.error(error_msg)
-                raise Exception(error_msg)
             
             return result
             
@@ -684,7 +689,7 @@ Please analyze the following code:
         for i, attempt in enumerate(attempts):
             try:
                 result = attempt()
-                if result and isinstance(result, dict):
+                if isinstance(result, dict) and isinstance(result.get("issues"), list):
                     if i > 0:
                         logger.info(f"✅ JSON解析成功（方法 {i + 1}/{len(attempts)}）")
                     return result
@@ -820,26 +825,6 @@ Please analyze the following code:
         
         raise ValueError(f"json-repair returned unexpected type: {type(repaired)}")
     
-    def _get_default_response(self) -> Dict[str, Any]:
-        """返回默认响应"""
-        return {
-            "issues": [],
-            "quality_score": 80,
-            "summary": {
-                "total_issues": 0,
-                "critical_issues": 0,
-                "high_issues": 0,
-                "medium_issues": 0,
-                "low_issues": 0
-            },
-            "metrics": {
-                "complexity": 80,
-                "maintainability": 80,
-                "security": 80,
-                "performance": 80
-            }
-        }
-
     async def analyze_code_with_custom_prompt(
         self, 
         code: str, 
@@ -1002,6 +987,8 @@ Please analyze the following code:
             )
 
             response = await adapter.complete(request)
+            if response.finish_reason == "length":
+                raise OutputLimitError(f"模型达到输出上限 ({request.max_tokens} tokens)，未完成分析")
             content = response.content
             
             if not content or not content.strip():
@@ -1090,6 +1077,8 @@ Please analyze the following code:
                     ]
         
         # 如果有自定义提示词，使用自定义分析
+        if rules and not custom_prompt:
+            custom_prompt = self._build_system_prompt(self._get_output_language() == 'zh-CN')
         if custom_prompt:
             return await self.analyze_code_with_custom_prompt(code, language, custom_prompt, rules)
         

@@ -273,8 +273,8 @@ export function useResilientStream(
       case 'task_end':
         if (event.status !== 'cancelled' && event.status !== 'failed') {
           opts.onComplete?.({
-            findingsCount: event.findings_count || event.metadata?.findings_count as number || 0,
-            securityScore: event.security_score || event.metadata?.security_score as number || 100,
+            findingsCount: event.findings_count ?? (event.metadata?.findings_count as number | undefined) ?? 0,
+            securityScore: event.security_score ?? (event.metadata?.security_score as number | undefined),
           });
         }
         disconnectInternal();

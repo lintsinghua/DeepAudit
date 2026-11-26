@@ -11,16 +11,19 @@ import json
 from pathlib import Path
 import zipfile
 import asyncio
+import tempfile
+from app.services.archive import ArchiveError, MAX_ARCHIVE_BYTES, extract_zip
 
 from app.api import deps
 from app.db.session import get_db, AsyncSessionLocal
-from app.models.audit import AuditTask, AuditIssue
+from app.utils.async_utils import prepare_in_thread
+from app.models.audit import AuditTask, AuditIssue, source_position
 from app.models.user import User
 from app.models.project import Project
 from app.models.analysis import InstantAnalysis
 from app.models.user_config import UserConfig
-from app.services.llm.service import LLMService
-from app.services.scanner import task_control, is_text_file, should_exclude, get_language_from_path, get_analysis_config
+from app.services.llm.service import LLMService, OutputLimitError
+from app.services.scanner import task_control, is_text_file, should_exclude, get_language_from_path, get_analysis_config, analyze_scan_file, scan_quality, record_scan_failure, ScanInputError
 from app.services.zip_storage import is_valid_project_id, load_project_zip, save_project_zip, has_project_zip
 from app.core.config import settings
 
@@ -47,10 +50,12 @@ TEXT_EXTENSIONS = [
 async def process_zip_task(task_id: str, file_path: str, db_session_factory, user_config: dict = None):
     """后台ZIP文件处理任务"""
     async with db_session_factory() as db:
-        task = await db.get(AuditTask, task_id)
-        if not task:
+        task = await db.get(AuditTask, task_id, with_for_update=True)
+        if not task or task.status != "pending":
             return
 
+        task_control.start_task(task_id)
+        extract_dir = None
         try:
             task.status = "running"
             task.started_at = datetime.now(timezone.utc)
@@ -60,11 +65,11 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
             llm_service = LLMService(user_config=user_config or {})
 
             # Extract ZIP
-            extract_dir = Path(f"/tmp/{task_id}")
-            extract_dir.mkdir(parents=True, exist_ok=True)
+            extract_dir = Path(tempfile.mkdtemp(prefix="deepaudit-zip-"))
             
             with zipfile.ZipFile(file_path, 'r') as zip_ref:
-                zip_ref.extractall(extract_dir)
+                await prepare_in_thread(extract_zip, zip_ref, str(extract_dir),
+                                        cancel_check=lambda: task_control.is_cancelled(task_id))
 
             # 获取用户自定义排除模式
             scan_config = (user_config or {}).get('scan_config', {})
@@ -84,11 +89,10 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
                     # 检查文件类型和排除规则（包含用户自定义排除模式）
                     if is_text_file(rel_path) and not should_exclude(rel_path, custom_exclude_patterns):
                         try:
-                            content = full_path.read_text(errors='ignore')
-                            if len(content) <= settings.MAX_FILE_SIZE_BYTES:
+                            if full_path.stat().st_size <= settings.MAX_FILE_SIZE_BYTES:
                                 files_to_scan.append({
                                     "path": rel_path,
-                                    "content": content
+                                    "source": full_path
                                 })
                         except:
                             pass
@@ -109,6 +113,8 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
             elif max_analyze_files > 0:
                 files_to_scan = files_to_scan[:max_analyze_files]
 
+            if not files_to_scan:
+                raise ScanInputError("压缩包中没有符合扫描条件的文件")
             task.total_files = len(files_to_scan)
             await db.commit()
 
@@ -119,45 +125,35 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
             quality_scores = []
             scanned_files = 0
             failed_files = 0
+            last_file_error = ""
 
             for file_info in files_to_scan:
+                await db.refresh(task, attribute_names=["status"])
+                if task.status == "cancelled":
+                    return
                 # 检查是否取消
                 if task_control.is_cancelled(task_id):
                     print(f"🛑 ZIP任务 {task_id} 已被取消")
-                    task.status = "cancelled"
-                    task.completed_at = datetime.now(timezone.utc)
-                    await db.commit()
-                    task_control.cleanup_task(task_id)
                     return
 
                 try:
-                    content = file_info['content']
-                    total_lines += content.count('\n') + 1
+                    content = file_info['source'].read_text(errors='replace')
+                    file_line_count = content.count('\n') + 1
                     language = get_language_from_path(file_info['path'])
                     
-                    # 获取规则集和提示词模板ID
-                    scan_config = (user_config or {}).get('scan_config', {})
-                    rule_set_id = scan_config.get('rule_set_id')
-                    prompt_template_id = scan_config.get('prompt_template_id')
-                    
-                    # 使用规则集和提示词模板进行分析
-                    if rule_set_id or prompt_template_id:
-                        result = await llm_service.analyze_code_with_rules(
-                            content, language, 
-                            rule_set_id=rule_set_id,
-                            prompt_template_id=prompt_template_id,
-                            db_session=db
-                        )
-                    else:
-                        result = await llm_service.analyze_code(content, language)
-                    
+                    result = await analyze_scan_file(llm_service, content, language, scan_config, db)
+                    if task_control.is_cancelled(task_id):
+                        return
+                    await db.refresh(task, attribute_names=["status"], with_for_update=True)
+                    if task.status == "cancelled":
+                        return
                     issues = result.get("issues", [])
                     for i in issues:
                         issue = AuditIssue(
                             task_id=task.id,
                             file_path=file_info['path'],
-                            line_number=i.get('line', 1),
-                            column_number=i.get('column'),
+                            line_number=source_position(i.get('line'), file_line_count),
+                            column_number=source_position(i.get('column')),
                             issue_type=i.get('type', 'maintainability'),
                             severity=i.get('severity', 'low'),
                             title=i.get('title', 'Issue'),
@@ -169,16 +165,16 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
                             status="open"
                         )
                         db.add(issue)
-                        total_issues += 1
-                    
-                    if "quality_score" in result:
-                        quality_scores.append(result["quality_score"])
-                    
-                    scanned_files += 1
-                    task.scanned_files = scanned_files
-                    task.total_lines = total_lines
-                    task.issues_count = total_issues
+                    score = scan_quality(result)
+                    task.scanned_files = scanned_files + 1
+                    task.total_lines = total_lines + file_line_count
+                    task.issues_count = total_issues + len(issues)
                     await db.commit()
+                    scanned_files += 1
+                    total_lines += file_line_count
+                    total_issues += len(issues)
+                    if score is not None:
+                        quality_scores.append(score)
                     
                     print(f"📈 ZIP任务 {task_id}: 进度 {scanned_files}/{len(files_to_scan)}")
                     
@@ -186,11 +182,22 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
                     await asyncio.sleep(llm_gap_ms / 1000)
 
                 except Exception as file_error:
+                    await db.rollback()
+                    await db.refresh(task)
+                    if task.status == "cancelled":
+                        return
                     failed_files += 1
+                    last_file_error = str(file_error) if isinstance(file_error, OutputLimitError) else type(file_error).__name__
                     print(f"❌ ZIP任务分析文件失败 ({file_info['path']}): {file_error}")
                     await asyncio.sleep(llm_gap_ms / 1000)
 
             # 完成任务
+            await db.refresh(task, with_for_update=True)
+            if task.status == "cancelled" or task_control.is_cancelled(task_id):
+                task_control.cleanup_task(task_id)
+                return
+            if failed_files:
+                record_scan_failure(task, f"{failed_files} 个文件分析失败，最近一次错误为 {last_file_error}")
             avg_quality_score = sum(quality_scores) / len(quality_scores) if quality_scores else 100.0
             
             # 如果有文件需要分析但全部失败，标记为失败
@@ -204,7 +211,7 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
                 await db.commit()
                 print(f"❌ ZIP任务 {task_id} 失败: 所有 {len(files_to_scan)} 个文件分析均失败，请检查 LLM API 配置")
             else:
-                task.status = "completed"
+                task.status = "failed" if failed_files else "completed"
                 task.completed_at = datetime.now(timezone.utc)
                 task.scanned_files = scanned_files
                 task.total_lines = total_lines
@@ -214,15 +221,24 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
                 print(f"✅ ZIP任务 {task_id} 完成: 扫描 {scanned_files} 个文件, 发现 {total_issues} 个问题")
             task_control.cleanup_task(task_id)
             
+        except asyncio.CancelledError:
+            if not task_control.is_cancelled(task_id):
+                raise
         except Exception as e:
             print(f"❌ ZIP扫描失败: {e}")
+            await db.rollback()
+            await db.refresh(task, with_for_update=True)
+            if task.status == "cancelled":
+                return
+            record_scan_failure(task, str(e) if isinstance(e, (ArchiveError, ScanInputError)) else f"ZIP 扫描中止（{type(e).__name__}）")
             task.status = "failed"
             task.completed_at = datetime.now(timezone.utc)
             await db.commit()
             task_control.cleanup_task(task_id)
         finally:
+            task_control.cleanup_task(task_id)
             # Cleanup - 只清理解压目录，不删除源ZIP文件（已持久化存储）
-            if extract_dir.exists():
+            if extract_dir is not None and extract_dir.exists():
                 shutil.rmtree(extract_dir)
 
 
@@ -262,7 +278,7 @@ async def scan_zip(
     
     # Check file size
     file_size = os.path.getsize(file_path)
-    if file_size > 500 * 1024 * 1024:  # 500MB limit
+    if file_size > MAX_ARCHIVE_BYTES:
         os.remove(file_path)
         raise HTTPException(status_code=400, detail="文件大小不能超过500MB")
     

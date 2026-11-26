@@ -2,9 +2,13 @@
 LLM服务类型定义
 """
 
+import re
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional, Dict, Any, List
-from dataclasses import dataclass, field
+from urllib.parse import urlsplit
+
+from app.core.config import settings
 
 
 class LLMProvider(str, Enum):
@@ -36,6 +40,11 @@ class LLMConfig:
     frequency_penalty: float = 0
     presence_penalty: float = 0
     custom_headers: Dict[str, str] = field(default_factory=dict)
+
+    def __post_init__(self):
+        self.base_url = trusted_model_endpoint(self.base_url)
+        if self.model:
+            validate_model_name(self.model)
 
 
 @dataclass
@@ -121,7 +130,35 @@ DEFAULT_BASE_URLS: Dict[LLMProvider, str] = {
 }
 
 
+EMBEDDING_BASE_URLS = {
+    "openai": DEFAULT_BASE_URLS[LLMProvider.OPENAI],
+    "ollama": "http://localhost:11434",
+    "cohere": "https://api.cohere.com/v2",
+    "huggingface": "https://router.huggingface.co",
+    "jina": "https://api.jina.ai/v1",
+    "qwen": DEFAULT_BASE_URLS[LLMProvider.QWEN],
+}
 
 
+def validate_model_name(model: str) -> str:
+    if any(not re.fullmatch(r"[A-Za-z0-9_:.@+-]+", part) or part in (".", "..")
+           for part in model.split("/")):
+        raise ValueError("模型名称格式无效")
+    return model
 
 
+def trusted_model_endpoint(value: Optional[str]) -> Optional[str]:
+    """Require an exact built-in or operator-configured service base, including its path."""
+    if not value:
+        return value
+    allowed = (*DEFAULT_BASE_URLS.values(), *EMBEDDING_BASE_URLS.values(),
+               settings.LLM_BASE_URL, settings.OPENAI_BASE_URL, settings.OLLAMA_BASE_URL,
+               settings.EMBEDDING_BASE_URL, *settings.MODEL_ALLOWED_ENDPOINTS.split(","))
+    candidate = value.rstrip("/")
+    if candidate in {item.strip().rstrip("/") for item in allowed if item}:
+        url = urlsplit(candidate)
+        if (url.scheme in {"http", "https"} and url.hostname and url.username is None
+                and not url.query and not url.fragment and "\\" not in candidate
+                and not any(ord(c) <= 32 or ord(c) == 127 for c in candidate)):
+            return candidate
+    raise ValueError("模型服务地址未获部署者授权，请检查地址或联系管理员")

@@ -6,7 +6,8 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from pydantic import BaseModel
+from app.services.llm.types import trusted_model_endpoint
+from pydantic import field_validator, BaseModel
 import json
 
 from app.api import deps
@@ -24,7 +25,7 @@ SENSITIVE_LLM_FIELDS = [
     'qwenApiKey', 'deepseekApiKey', 'zhipuApiKey', 'moonshotApiKey',
     'baiduApiKey', 'minimaxApiKey', 'doubaoApiKey'
 ]
-SENSITIVE_OTHER_FIELDS = ['githubToken', 'gitlabToken']
+SENSITIVE_OTHER_FIELDS = ['githubToken', 'gitlabToken', 'giteaToken']
 
 
 def encrypt_config(config: dict, sensitive_fields: list) -> dict:
@@ -76,11 +77,14 @@ class LLMConfigSchema(BaseModel):
     doubaoApiKey: Optional[str] = None
     ollamaBaseUrl: Optional[str] = None
 
+    _check_endpoint = field_validator("llmBaseUrl", "ollamaBaseUrl")(trusted_model_endpoint)
+
 
 class OtherConfigSchema(BaseModel):
     """其他配置Schema"""
     githubToken: Optional[str] = None
     gitlabToken: Optional[str] = None
+    giteaToken: Optional[str] = None
     maxAnalyzeFiles: Optional[int] = None
     llmConcurrency: Optional[int] = None
     llmGapMs: Optional[int] = None
@@ -140,7 +144,7 @@ def get_default_config() -> dict:
 @router.get("/defaults")
 async def get_default_config_endpoint() -> Any:
     """获取系统默认配置（无需认证）"""
-    return get_default_config()
+    return {**get_default_config(), "publicRegistrationEnabled": settings.PUBLIC_REGISTRATION_ENABLED}
 
 
 @router.get("/me", response_model=UserConfigResponse)
@@ -287,6 +291,8 @@ class LLMTestRequest(BaseModel):
     apiKey: str
     model: Optional[str] = None
     baseUrl: Optional[str] = None
+
+    _check_endpoint = field_validator("baseUrl")(trusted_model_endpoint)
 
 
 class LLMTestResponse(BaseModel):
@@ -442,12 +448,19 @@ async def test_llm_connection(
         )
 
         print(f"[LLM Test] 发送测试请求...")
-        response = await adapter.complete(test_request)
+        try:
+            response = await adapter.complete(test_request)
+        finally:
+            await adapter.close()
 
         elapsed_time = time.time() - start_time
         debug_info["elapsed_time_ms"] = round(elapsed_time * 1000, 2)
 
         # 验证响应内容
+        if response and response.finish_reason == "length":
+            debug_info["finish_reason"] = "length"
+            return LLMTestResponse(success=True, model=model, debug=debug_info,
+                                   message=f"连接成功，模型达到 {test_max_tokens} tokens 输出上限")
         if not response or not response.content:
             debug_info["error_type"] = "empty_response"
             debug_info["raw_response"] = str(response) if response else None

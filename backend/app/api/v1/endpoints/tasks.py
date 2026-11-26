@@ -144,7 +144,7 @@ async def cancel_task(
     """
     Cancel a running task.
     """
-    result = await db.execute(select(AuditTask).where(AuditTask.id == id))
+    result = await db.execute(select(AuditTask).where(AuditTask.id == id).with_for_update())
     task = result.scalars().first()
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
@@ -156,14 +156,13 @@ async def cancel_task(
     if task.status not in ["pending", "running"]:
         raise HTTPException(status_code=400, detail="只能取消待处理或运行中的任务")
     
-    # 标记任务为取消
-    task_control.cancel_task(id)
-    
     # 更新数据库状态
     task.status = "cancelled"
     task.completed_at = datetime.now(timezone.utc)
     await db.commit()
     
+    if task_control.is_active(id):
+        task_control.cancel_task(id)
     return {"message": "任务已取消", "task_id": id}
 
 

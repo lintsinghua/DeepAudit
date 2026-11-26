@@ -103,7 +103,7 @@ export function SystemConfig() {
           giteaToken: otherConfig.giteaToken || '',
           maxAnalyzeFiles: otherConfig.maxAnalyzeFiles ?? 0,
           llmConcurrency: otherConfig.llmConcurrency || 3,
-          llmGapMs: otherConfig.llmGapMs || 2000,
+          llmGapMs: otherConfig.llmGapMs ?? 2000,
           outputLanguage: otherConfig.outputLanguage || 'zh-CN',
         };
 
@@ -279,7 +279,7 @@ export function SystemConfig() {
           giteaToken: otherConfig.giteaToken || '',
           maxAnalyzeFiles: otherConfig.maxAnalyzeFiles ?? 0,
           llmConcurrency: otherConfig.llmConcurrency || 3,
-          llmGapMs: otherConfig.llmGapMs || 2000,
+          llmGapMs: otherConfig.llmGapMs ?? 2000,
           outputLanguage: otherConfig.outputLanguage || 'zh-CN',
         });
       }
@@ -735,7 +735,7 @@ export function SystemConfig() {
                   onChange={(e) => updateConfig('maxAnalyzeFiles', Number(e.target.value))}
                   className="h-10 cyber-input"
                 />
-                <p className="text-xs text-muted-foreground">单次任务最多处理的文件数量</p>
+                <p className="text-xs text-muted-foreground">单次任务最多处理的文件数量，0 表示不限制</p>
               </div>
               <div className="space-y-2">
                 <Label className="text-xs font-bold text-muted-foreground uppercase">LLM 并发数</Label>

@@ -34,9 +34,15 @@ docker compose up -d
 # 后端 API: http://localhost:8000/docs
 ```
 
+模型连接测试和扫描仅接受内置服务和部署者配置的模型基础 URL。可通过 `MODEL_ALLOWED_ENDPOINTS` 添加多个自建服务的完整基础 URL，以逗号分隔，包含端口与路径。升级前请将成员正在使用的自定义模型端点加入此配置。
+
+自建 GitLab 或 Gitea 部署请将 `GITLAB_ORIGIN` 或 `GITEA_ORIGIN` 设置为仓库的协议、主机和端口，并在项目中选择对应平台。
+
+预构建 Compose 仅在容器网络内提供 Redis，开发 Compose 的 Redis 端口绑定在 `127.0.0.1`。如需密码认证，在运行 Compose 的 shell 或项目根目录的 `.env` 中设置 `REDIS_PASSWORD`，然后重新创建 Redis 和后端容器。
+
 ### 初始化管理员
 
-首次启动前，在 `backend/.env` 中设置 `BOOTSTRAP_ADMIN_EMAIL` 和 `BOOTSTRAP_ADMIN_PASSWORD`。使用未注册的邮箱和专用密码，密码至少 12 个字符，最多 72 个 UTF-8 字节。使用预构建镜像时，在运行 Compose 的 shell 中导出这两个变量，或使用 Compose 的 `--env-file` 传入。启动后用这组凭据登录。公开注册的账户均为普通成员。
+首次启动前，在 `backend/.env` 中设置 `BOOTSTRAP_ADMIN_EMAIL` 和 `BOOTSTRAP_ADMIN_PASSWORD`。使用未注册的邮箱和专用密码，密码至少 12 个字符，最多 72 个 UTF-8 字节。使用预构建镜像时，在运行 Compose 的 shell 中导出这两个变量，或使用 Compose 的 `--env-file` 传入。启动后用这组凭据登录。公开注册的账户均为普通成员。设置 `PUBLIC_REGISTRATION_ENABLED=false` 并重建后端容器可关闭公开注册。管理员仍可在用户管理中创建账户。
 
 升级会停用仍使用旧默认密码的演示账户，保留其项目和审计记录。旧账户已签发的令牌也会因停用而失效。如果这是唯一管理员，请在升级前配置一个新邮箱及密码。已有可用管理员时，启动会保留其密码并跳过创建。
 

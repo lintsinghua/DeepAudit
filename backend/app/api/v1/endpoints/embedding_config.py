@@ -10,7 +10,8 @@ import time
 import uuid
 from typing import Any, Optional, List
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from app.services.llm.types import trusted_model_endpoint
+from pydantic import field_validator, BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -35,7 +36,7 @@ class EmbeddingProvider(BaseModel):
     default_model: str
 
 
-class EmbeddingConfig(BaseModel):
+class StoredEmbeddingConfig(BaseModel):
     """嵌入模型配置"""
     provider: str = Field(description="提供商: openai, ollama, azure, cohere, huggingface, jina, qwen")
     model: str = Field(description="模型名称")
@@ -43,6 +44,10 @@ class EmbeddingConfig(BaseModel):
     base_url: Optional[str] = Field(default=None, description="自定义 API 端点")
     dimensions: Optional[int] = Field(default=None, description="向量维度 (某些模型支持)")
     batch_size: int = Field(default=100, description="批处理大小")
+
+
+class EmbeddingConfig(StoredEmbeddingConfig):
+    _check_endpoint = field_validator("base_url")(trusted_model_endpoint)
 
 
 class EmbeddingConfigResponse(BaseModel):
@@ -63,6 +68,8 @@ class TestEmbeddingRequest(BaseModel):
     base_url: Optional[str] = None
     dimension: Optional[int] = None  # 自定义维度（Ollama等场景）
     test_text: str = "这是一段测试文本，用于验证嵌入模型是否正常工作。"
+
+    _check_endpoint = field_validator("base_url")(trusted_model_endpoint)
 
 
 class TestEmbeddingResponse(BaseModel):
@@ -175,7 +182,7 @@ EMBEDDING_PROVIDERS: List[EmbeddingProvider] = [
 EMBEDDING_CONFIG_KEY = "embedding_config"
 
 
-async def get_embedding_config_from_db(db: AsyncSession, user_id: str) -> EmbeddingConfig:
+async def get_embedding_config_from_db(db: AsyncSession, user_id: str) -> StoredEmbeddingConfig:
     """从数据库获取嵌入配置（异步）"""
     result = await db.execute(
         select(UserConfig).where(UserConfig.user_id == user_id)
@@ -188,7 +195,7 @@ async def get_embedding_config_from_db(db: AsyncSession, user_id: str) -> Embedd
             embedding_data = other_config.get(EMBEDDING_CONFIG_KEY)
 
             if embedding_data:
-                config = EmbeddingConfig(
+                config = StoredEmbeddingConfig(
                     provider=embedding_data.get("provider", settings.EMBEDDING_PROVIDER),
                     model=embedding_data.get("model", settings.EMBEDDING_MODEL),
                     api_key=embedding_data.get("api_key"),
@@ -206,8 +213,7 @@ async def get_embedding_config_from_db(db: AsyncSession, user_id: str) -> Embedd
     return EmbeddingConfig(
         provider=settings.EMBEDDING_PROVIDER,
         model=settings.EMBEDDING_MODEL,
-        api_key=settings.LLM_API_KEY,
-        base_url=settings.LLM_BASE_URL,
+        base_url=settings.EMBEDDING_BASE_URL,
         batch_size=100,
     )
 
@@ -308,7 +314,7 @@ async def update_config(
     # 注意：不再强制验证模型名称，允许用户输入自定义模型
 
     # 检查 API Key
-    if provider and provider.requires_api_key and not config.api_key:
+    if provider and provider.requires_api_key and not (config.api_key or settings.EMBEDDING_API_KEY or settings.LLM_API_KEY):
         raise HTTPException(status_code=400, detail=f"{config.provider} 需要 API Key")
 
     # 保存到数据库
@@ -334,8 +340,8 @@ async def test_embedding(
         service = EmbeddingService(
             provider=request.provider,
             model=request.model,
-            api_key=request.api_key,
-            base_url=request.base_url,
+            api_key=request.api_key or settings.EMBEDDING_API_KEY or settings.LLM_API_KEY,
+            base_url=request.base_url or settings.EMBEDDING_BASE_URL,
             dimension=request.dimension,
             cache_enabled=False,
         )

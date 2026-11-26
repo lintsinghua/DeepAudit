@@ -38,7 +38,7 @@ async def check_agent_services():
         import redis
         import os
         redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-        r = redis.from_url(redis_url)
+        r = redis.from_url(redis_url, password=os.environ.get("REDIS_PASSWORD") or None)
         r.ping()
         logger.info("  - Redis 服务可用")
     except ImportError:

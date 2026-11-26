@@ -226,6 +226,7 @@ class AgentEventEmitter:
         findings_count: int,
         duration_ms: int,
         message: Optional[str] = None,
+        security_score: Optional[float] = None,
     ):
         """发射任务完成事件"""
         await self.emit(AgentEventData(
@@ -234,6 +235,7 @@ class AgentEventEmitter:
             metadata={
                 "findings_count": findings_count,
                 "duration_ms": duration_ms,
+                "security_score": security_score,
             },
         ))
     

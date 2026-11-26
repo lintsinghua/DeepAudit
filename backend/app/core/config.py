@@ -1,5 +1,5 @@
 from typing import List, Union, Optional
-from pydantic import AnyHttpUrl, EmailStr, SecretStr, validator
+from pydantic import AnyHttpUrl, EmailStr, Field, SecretStr, validator
 from pydantic_settings import BaseSettings
 
 
@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
     
+    PUBLIC_REGISTRATION_ENABLED: bool = True
     BOOTSTRAP_ADMIN_EMAIL: EmailStr | None = None
     BOOTSTRAP_ADMIN_PASSWORD: SecretStr | None = None
 
@@ -43,6 +44,7 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = "openai"  # gemini, openai, claude, qwen, deepseek, zhipu, moonshot, baidu, minimax, doubao, ollama
     LLM_API_KEY: Optional[str] = None
     LLM_MODEL: Optional[str] = None  # 不指定时使用provider的默认模型
+    MODEL_ALLOWED_ENDPOINTS: str = ""
     LLM_BASE_URL: Optional[str] = None  # 自定义API端点（如中转站）
     LLM_TIMEOUT: int = 150  # 超时时间（秒）
     LLM_TEMPERATURE: float = 0.1
@@ -86,6 +88,10 @@ class Settings(BaseSettings):
     LLM_GAP_MS: int = 2000  # LLM请求间隔（毫秒）
     
     # ZIP文件存储配置
+    ZIP_MAX_EXTRACTED_BYTES: int = Field(default=2 * 1024 * 1024 * 1024, gt=0)
+    ZIP_MAX_FILE_BYTES: int = Field(default=50 * 1024 * 1024, gt=0)
+    ZIP_MAX_ENTRIES: int = Field(default=50000, gt=0)
+    ZIP_MAX_COMPRESSION_RATIO: int = Field(default=200, gt=0)
     ZIP_STORAGE_PATH: str = "./uploads/zip_files"  # ZIP文件存储目录
     
     # 输出语言配置 - 支持 zh-CN（中文）和 en-US（英文）
