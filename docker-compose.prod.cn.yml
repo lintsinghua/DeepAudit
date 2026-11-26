@@ -1,5 +1,5 @@
 # =============================================
-# DeepAudit v3.8.3 生产环境一键部署配置（国内加速版）
+# DeepAudit v3.8.4 生产环境一键部署配置（国内加速版）
 # =============================================
 # 使用南京大学镜像站加速拉取 GHCR 镜像
 # 部署命令: curl -fsSL https://raw.githubusercontent.com/lintsinghua/DeepAudit/main/docker-compose.prod.cn.yml | docker compose -f - up -d
@@ -56,6 +56,7 @@ services:
       - AGENT_ENABLED=true
       - SANDBOX_ENABLED=true
       - SANDBOX_IMAGE=ghcr.nju.edu.cn/lintsinghua/deepaudit-sandbox:latest
+      - SECRET_KEY=${SECRET_KEY:?Set a persistent SECRET_KEY for this deployment}
       - BOOTSTRAP_ADMIN_EMAIL
       - BOOTSTRAP_ADMIN_PASSWORD
       - PUBLIC_REGISTRATION_ENABLED
@@ -89,6 +90,7 @@ services:
     image: ghcr.nju.edu.cn/lintsinghua/deepaudit-backend:latest
     restart: "no"
     environment:
+      - SECRET_KEY=${SECRET_KEY:?Set a persistent SECRET_KEY for this deployment}
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/deepaudit
     command: [".venv/bin/alembic", "upgrade", "head"]
     depends_on:

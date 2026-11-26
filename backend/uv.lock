@@ -989,7 +989,7 @@ wheels = [
 
 [[package]]
 name = "deepaudit-backend"
-version = "3.8.3"
+version = "3.8.4"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },

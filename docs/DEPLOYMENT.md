@@ -24,7 +24,7 @@ cd DeepAudit
 
 # 2. 配置后端环境变量
 cp backend/env.example backend/.env
-# 编辑 backend/.env，设置 BOOTSTRAP_ADMIN_EMAIL、BOOTSTRAP_ADMIN_PASSWORD 和 LLM API Key
+# 编辑 backend/.env，设置 SECRET_KEY、BOOTSTRAP_ADMIN_EMAIL、BOOTSTRAP_ADMIN_PASSWORD 和 LLM API Key
 
 # 3. 启动所有服务
 docker compose up -d
@@ -39,6 +39,12 @@ docker compose up -d
 自建 GitLab 或 Gitea 部署请将 `GITLAB_ORIGIN` 或 `GITEA_ORIGIN` 设置为仓库的协议、主机和端口，并在项目中选择对应平台。
 
 预构建 Compose 仅在容器网络内提供 Redis，开发 Compose 的 Redis 端口绑定在 `127.0.0.1`。如需密码认证，在运行 Compose 的 shell 或项目根目录的 `.env` 中设置 `REDIS_PASSWORD`，然后重新创建 Redis 和后端容器。
+
+### 配置签名密钥
+
+首次部署时运行 `openssl rand -hex 32`，将输出作为 `SECRET_KEY` 保存在受保护的配置中。源码部署和本地构建使用 `backend/.env`；预构建镜像使用 Compose 的 `--env-file` 或导出的环境变量。所有后端副本、迁移任务和后续重启共用同一值。未配置、长度不足 32 字节或仍使用旧示例值时，后端会拒绝启动。
+
+升级前请核对旧后端**实际使用**的密钥。旧版预构建 Compose 默认不会转发宿主机上的 `SECRET_KEY`。已有合规密钥请原样保留。必须换钥时，先安排维护窗口、备份并确保可以重新配置已保存的凭据，再同时更新各副本。换钥会使旧登录会话失效，旧密钥加密的模型、Git 和 SSH 凭据也需要重新配置。使用过公开密钥的部署应撤销并替换可能暴露的凭据。
 
 ### 初始化管理员
 
@@ -83,8 +89,8 @@ POSTGRES_USER=postgres
 POSTGRES_PASSWORD=postgres
 POSTGRES_DB=deepaudit
 
-# 安全配置（生产环境请修改）
-SECRET_KEY=your-super-secret-key-change-this-in-production
+# 必填：填入部署专用的随机密钥（见上文“配置签名密钥”）
+SECRET_KEY=
 
 # LLM 配置（必填）
 LLM_PROVIDER=openai
@@ -230,7 +236,7 @@ Docker Compose 默认配置已适用于生产环境：
 
 ### 生产环境安全建议
 
-1. **修改默认密钥**：务必修改 `SECRET_KEY` 为随机字符串
+1. **保护部署密钥**：安全保存并备份 `SECRET_KEY`，确保重启和多副本使用同一值
 2. **配置 HTTPS**：使用 Nginx 反向代理并配置 SSL 证书
 3. **限制 CORS**：在生产环境配置具体的前端域名
 4. **数据库安全**：修改默认数据库密码，限制访问 IP
@@ -329,7 +335,7 @@ uv sync
 
 # 4. 配置环境变量
 cp env.example .env
-# 编辑 .env，配置数据库、LLM 和首次启动所需的管理员邮箱及密码
+# 编辑 .env，配置 SECRET_KEY、数据库、LLM 和首次启动所需的管理员邮箱及密码
 
 # 5. 初始化数据库
 uv run alembic upgrade head
