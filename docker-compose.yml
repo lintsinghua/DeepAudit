@@ -1,5 +1,5 @@
 # =============================================
-# DeepAudit v3.8.4 Docker Compose 配置
+# DeepAudit v3.8.5 Docker Compose 配置
 # =============================================
 # 部署: docker compose up -d
 # 查看日志: docker compose logs -f
