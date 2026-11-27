@@ -23,6 +23,7 @@ router = APIRouter()
 SENSITIVE_LLM_FIELDS = [
     'llmApiKey', 'geminiApiKey', 'openaiApiKey', 'claudeApiKey',
     'qwenApiKey', 'deepseekApiKey', 'zhipuApiKey', 'moonshotApiKey',
+    'atlascloudApiKey',
     'baiduApiKey', 'minimaxApiKey', 'doubaoApiKey'
 ]
 SENSITIVE_OTHER_FIELDS = ['githubToken', 'gitlabToken', 'giteaToken']
@@ -72,6 +73,7 @@ class LLMConfigSchema(BaseModel):
     deepseekApiKey: Optional[str] = None
     zhipuApiKey: Optional[str] = None
     moonshotApiKey: Optional[str] = None
+    atlascloudApiKey: Optional[str] = None
     baiduApiKey: Optional[str] = None
     minimaxApiKey: Optional[str] = None
     doubaoApiKey: Optional[str] = None
@@ -378,6 +380,7 @@ async def test_llm_connection(
             'deepseek': LLMProvider.DEEPSEEK,
             'zhipu': LLMProvider.ZHIPU,
             'moonshot': LLMProvider.MOONSHOT,
+            'atlascloud': LLMProvider.ATLASCLOUD,
             'baidu': LLMProvider.BAIDU,
             'minimax': LLMProvider.MINIMAX,
             'doubao': LLMProvider.DOUBAO,
